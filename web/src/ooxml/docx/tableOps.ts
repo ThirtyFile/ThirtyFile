@@ -9,6 +9,11 @@
  *   spans the place of the new column spans it too.
  * - Deleting a column narrows the cells partly in it; deleting the first row of a vertically merged cell hands the
  *   merge to the row below. Deleting the last row or column deletes the table.
+ * - Merging cells grows the range until no merged cell crosses its edge, and moves the text of every cell into the
+ *   first one (empty cells add nothing).
+ * - Splitting a cell into columns gives the table's grid the new column edges, so the other rows keep lining up, their
+ *   cells spanning the new columns. Splitting into rows regroups a cell merged across rows, or adds rows below a single
+ *   cell, in which the row's other cells stay one (merged down). The text stays in the first cell.
  *
  * Rows and cells are found by their place in the table's grid (gridBefore, gridSpan). A table this can't follow (rows or
  * cells inside content controls, say) isn't changed at all.
@@ -16,7 +21,17 @@
 
 import { attr, kid } from "../core/package";
 
-export type TableOp = "rowAbove" | "rowBelow" | "colLeft" | "colRight" | "deleteRow" | "deleteCol";
+export type TableOp = "rowAbove" | "rowBelow" | "colLeft" | "colRight" | "deleteRow" | "deleteCol" | "merge" | "split";
+
+/** What merging and splitting need: the other corner of the cells to merge, and how many columns and rows to split into */
+export interface TableOpOptions {
+  other?: Element;
+  cols?: number;
+  rows?: number;
+}
+
+/** Most columns and rows a cell is split into */
+export const MAX_SPLIT = { cols: 20, rows: 50 };
 
 const W14 = "http://schemas.microsoft.com/office/word/2010/wordml";
 /** Row content that isn't a cell but may sit in a row; anything else makes the table one this doesn't change */
@@ -218,7 +233,7 @@ function changeWidth(t: Tables, tbl: Element, by: number) {
  * Changes the table of cell `tc` as `op` says. Returns the cell to put the cursor in afterwards (null when the table
  * went), or undefined when the table can't be changed this way (it is then left as it was).
  */
-export function changeTable(tc: Element, op: TableOp): Element | null | undefined {
+export function changeTable(tc: Element, op: TableOp, opts: TableOpOptions = {}): Element | null | undefined {
   const tr = tc.parentElement;
   const tbl = tr?.parentElement;
   if (!tr || tr.localName !== "tr" || !tbl || tbl.localName !== "tbl" || !tc.ownerDocument) return undefined;
@@ -239,7 +254,269 @@ export function changeTable(tc: Element, op: TableOp): Element | null | undefine
       return insertColumn(t, tbl, rows, r, cur, op === "colRight");
     case "deleteCol":
       return deleteColumn(t, tbl, rows, r, cur);
+    case "merge":
+      return opts.other ? mergeCells(t, rows, tc, opts.other) : undefined;
+    case "split":
+      return splitCell(t, tbl, rows, r, cur, opts.cols ?? 1, opts.rows ?? 1);
   }
+}
+
+// ───────────── Ranges of cells ─────────────
+
+interface Range {
+  r1: number;
+  r2: number;
+  /** Grid columns, both included */
+  c1: number;
+  c2: number;
+}
+
+/** The rows a cell is merged across: from the row starting the merge to the last one continuing it */
+function rowsOf(rows: Row[], r: number, cell: GridCell): [number, number] {
+  let top = r;
+  if (vMergeOf(cell.tc) === "continue") {
+    while (top > 0) {
+      const up = cellAt(rows[top - 1], cell.start);
+      if (!up || !vMergeOf(up.tc)) break;
+      top--;
+      if (vMergeOf(up.tc) === "restart") break;
+    }
+  }
+  let bottom = r;
+  if (vMergeOf(cell.tc)) {
+    while (bottom + 1 < rows.length) {
+      const down = cellAt(rows[bottom + 1], cell.start);
+      if (!down || vMergeOf(down.tc) !== "continue") break;
+      bottom++;
+    }
+  }
+  return [top, bottom];
+}
+
+const rowOf = (rows: Row[], tc: Element) => rows.findIndex((x) => x.cells.some((c) => c.tc === tc));
+
+/** A range grown until no merged cell crosses its edge; undefined when a row has no cell somewhere in it */
+function grow(rows: Row[], range: Range): Range | undefined {
+  let { r1, r2, c1, c2 } = range;
+  for (let changed = true; changed;) {
+    changed = false;
+    for (let r = r1; r <= r2; r++) {
+      for (const cell of rows[r].cells) {
+        const end = cell.start + cell.span - 1;
+        if (end < c1 || cell.start > c2) continue;
+        const [v1, v2] = rowsOf(rows, r, cell);
+        if (cell.start < c1 || end > c2 || v1 < r1 || v2 > r2) changed = true;
+        c1 = Math.min(c1, cell.start);
+        c2 = Math.max(c2, end);
+        r1 = Math.min(r1, v1);
+        r2 = Math.max(r2, v2);
+      }
+    }
+  }
+  // Every row of the range has cells over all of its columns
+  for (let r = r1; r <= r2; r++) {
+    const inside = rows[r].cells.filter((c) => c.start + c.span - 1 >= c1 && c.start <= c2);
+    if (!inside.length || inside[0].start !== c1 || inside.reduce((n, c) => n + c.span, 0) !== c2 - c1 + 1) return undefined;
+  }
+  return { r1, r2, c1, c2 };
+}
+
+/** The range of cells from one corner to the other, grown as merging would; undefined when they aren't in the same table */
+function rangeBetween(rows: Row[], a: Element, b: Element): Range | undefined {
+  const ra = rowOf(rows, a);
+  const rb = rowOf(rows, b);
+  if (ra < 0 || rb < 0) return undefined;
+  const ca = rows[ra].cells.find((c) => c.tc === a)!;
+  const cb = rows[rb].cells.find((c) => c.tc === b)!;
+  return grow(rows, {
+    r1: Math.min(ra, rb),
+    r2: Math.max(ra, rb),
+    c1: Math.min(ca.start, cb.start),
+    c2: Math.max(ca.start + ca.span, cb.start + cb.span) - 1,
+  });
+}
+
+/** The cells from one corner to the other, grown as merging would (cells merged into others included) */
+export function cellRange(a: Element, b: Element): Element[] | undefined {
+  const tbl = a.parentElement?.parentElement;
+  if (!tbl || tbl.localName !== "tbl" || b.parentElement?.parentElement !== tbl) return undefined;
+  const rows = readTable(tbl);
+  const range = rows && rangeBetween(rows, a, b);
+  if (!rows || !range) return undefined;
+  const out: Element[] = [];
+  for (let r = range.r1; r <= range.r2; r++) for (const c of rows[r].cells) if (c.start >= range.c1 && c.start <= range.c2) out.push(c.tc);
+  return out;
+}
+
+/** Whether a cell holds nothing: paragraphs without text, pictures or tables */
+const isEmpty = (tc: Element) =>
+  !Array.from(tc.querySelectorAll("*")).some((e) => ["t", "drawing", "pict", "object", "tbl", "sym", "oMath"].includes(e.localName) && (e.localName !== "t" || !!e.textContent));
+const blocksOf = (tc: Element) => Array.from(tc.children).filter((c) => c.localName !== "tcPr");
+
+/** The width (twips) of grid columns c1..c2 */
+function widthOf(tbl: Element, c1: number, c2: number) {
+  return gridCols(tbl)
+    .slice(c1, c2 + 1)
+    .reduce((n, g) => n + (num(g, "w") ?? 0), 0);
+}
+
+/** A cell's span, width and vertical merge set */
+function shape(t: Tables, tc: Element, span: number, width: number, vMerge: "restart" | "continue" | null) {
+  const tcPr = t.tcPr(tc);
+  if (span > 1) t.set(t.cellProp(tc, "gridSpan"), "val", String(span));
+  else kid(tcPr, "gridSpan")?.remove();
+  if (width > 0) {
+    const tcW = t.cellProp(tc, "tcW");
+    t.set(tcW, "w", String(Math.round(width)));
+    t.set(tcW, "type", "dxa");
+  }
+  kid(tcPr, "vMerge")?.remove();
+  kid(tcPr, "hMerge")?.remove();
+  if (vMerge) {
+    const v = placeIn(tcPr, t.el("vMerge"), TCPR);
+    if (vMerge === "restart") t.set(v, "val", "restart");
+  }
+}
+
+/** A cell's content replaced by one empty paragraph (like its first one) */
+function clearCell(t: Tables, tc: Element) {
+  const p = t.el("p");
+  const pPr = copyProps(kid(kid(tc, "p"), "pPr"), ["sectPr"]);
+  if (pPr) p.append(pPr);
+  for (const b of blocksOf(tc)) b.remove();
+  tc.append(p);
+}
+
+function mergeCells(t: Tables, rows: Row[], a: Element, b: Element): Element | undefined {
+  const range = rangeBetween(rows, a, b);
+  if (!range) return undefined;
+  const { r1, r2, c1, c2 } = range;
+  const tbl = rows[r1].tr.parentElement!;
+  const width = widthOf(tbl, c1, c2);
+  const inRange = (r: number) => rows[r].cells.filter((c) => c.start >= c1 && c.start <= c2);
+  const target = inRange(r1)[0].tc;
+  // The text of every cell, in reading order, goes into the first one (cells merged into others hold none of their own)
+  const moved: Element[] = [];
+  for (let r = r1; r <= r2; r++) for (const c of inRange(r)) if (c.tc !== target && vMergeOf(c.tc) !== "continue" && !isEmpty(c.tc)) moved.push(...blocksOf(c.tc));
+  if (moved.length) {
+    if (isEmpty(target)) for (const blk of blocksOf(target)) blk.remove();
+    target.append(...moved);
+  }
+  for (let r = r1; r <= r2; r++) {
+    const [first, ...rest] = inRange(r);
+    for (const c of rest) c.tc.remove();
+    if (r === r1) shape(t, target, c2 - c1 + 1, width, r2 > r1 ? "restart" : null);
+    else {
+      clearCell(t, first.tc);
+      shape(t, first.tc, c2 - c1 + 1, width, "continue");
+    }
+  }
+  return target;
+}
+
+/** Twips from the table's left edge to each grid column edge (the first is 0) */
+function edges(tbl: Element): number[] | undefined {
+  const cols = gridCols(tbl);
+  const out = [0];
+  for (const c of cols) {
+    const w = num(c, "w");
+    if (w === null || w < 0) return undefined;
+    out.push(out[out.length - 1] + w);
+  }
+  return out;
+}
+
+function splitCell(t: Tables, tbl: Element, rows: Row[], r: number, cur: GridCell, cols: number, splitRows: number): Element | undefined {
+  if (!(cols >= 1 && cols <= MAX_SPLIT.cols && splitRows >= 1 && splitRows <= MAX_SPLIT.rows) || (cols === 1 && splitRows === 1)) return undefined;
+  // The rows the cell is merged across: splitting into rows regroups them, and must share them out evenly
+  const [g1, g2] = rowsOf(rows, r, cur);
+  const merged = g2 - g1 + 1;
+  if (merged > 1 && merged % splitRows !== 0) return undefined;
+  const group = () => Array.from({ length: g2 - g1 + 1 }, (_, i) => cellAt(rows[g1 + i], cur.start)!);
+  if (group().some((c) => !c || c.span !== cur.span)) return undefined;
+  let parts: Element[][] = group().map((c) => [c.tc]);
+
+  if (cols > 1) {
+    const old = edges(tbl);
+    const width = Math.max(...rows.map((x) => x.before + x.cells.reduce((n, c) => n + c.span, 0) + x.after));
+    if (!old || old.length - 1 < width) return undefined;
+    // The new grid: the old column edges, and those of the new columns
+    const x1 = old[cur.start];
+    const x2 = old[cur.start + cur.span];
+    const cuts = Array.from({ length: cols - 1 }, (_, i) => Math.round(x1 + ((x2 - x1) * (i + 1)) / cols));
+    // A cell too narrow for that many columns isn't split (nothing has changed yet)
+    if ([x1, ...cuts, x2].some((x, i, all) => i > 0 && x <= all[i - 1])) return undefined;
+    const grid = [...new Set([...old, ...cuts])].sort((a, b) => a - b);
+    const at = (x: number) => grid.indexOf(x);
+    // Every cell, and every row's empty columns, span the new grid columns between their edges
+    for (const row of rows) {
+      for (const c of row.cells) {
+        const span = at(old[c.start + c.span]) - at(old[c.start]);
+        if (span > 1) t.set(t.cellProp(c.tc, "gridSpan"), "val", String(span));
+        else kid(kid(c.tc, "tcPr"), "gridSpan")?.remove();
+      }
+      if (row.before) t.set(t.rowProp(row.tr, "gridBefore"), "val", String(at(old[row.before])));
+      if (row.after) t.set(t.rowProp(row.tr, "gridAfter"), "val", String(grid.length - 1 - at(old[old.length - 1 - row.after])));
+    }
+    // The cell becomes `cols` cells, in each row it is merged across
+    const bounds = [x1, ...cuts, x2];
+    parts = group().map((c, i) => {
+      const out = [c.tc];
+      for (let k = 1; k < cols; k++) {
+        const tc = emptyCell(t, c.tc, null, ["gridSpan", "tcW"]);
+        out[out.length - 1].after(tc);
+        out.push(tc);
+      }
+      out.forEach((tc, k) => shape(t, tc, at(bounds[k + 1]) - at(bounds[k]), bounds[k + 1] - bounds[k], merged > 1 ? (i === 0 ? "restart" : "continue") : null));
+      return out;
+    });
+    const tblGrid = kid(tbl, "tblGrid")!;
+    for (const g of gridCols(tbl)) g.remove();
+    for (let i = 1; i < grid.length; i++) {
+      const g = t.el("gridCol");
+      t.set(g, "w", String(grid[i] - grid[i - 1]));
+      tblGrid.append(g);
+    }
+  }
+
+  if (splitRows > 1) {
+    if (merged > 1) {
+      // Merged across rows: regrouped, each group starting a merge of its own (or not merged, one row each)
+      const each = merged / splitRows;
+      parts.forEach((row, i) => {
+        for (const tc of row) {
+          const v = kid(kid(tc, "tcPr"), "vMerge");
+          if (each === 1) v?.remove();
+          else if (i % each === 0) {
+            const made = v ?? placeIn(t.tcPr(tc), t.el("vMerge"), TCPR);
+            t.set(made, "val", "restart");
+            if (i > 0) clearCell(t, tc);
+          }
+        }
+      });
+    } else {
+      // A single row: new rows below it, in which the split cell's parts are cells of their own and the row's other
+      // cells stay one with the row's (merged down)
+      const row = rows[r];
+      const mine = new Set(parts[0]);
+      const all = Array.from(row.tr.children).filter((c) => c.localName === "tc");
+      for (const tc of all) {
+        if (mine.has(tc) || vMergeOf(tc)) continue;
+        const v = placeIn(t.tcPr(tc), t.el("vMerge"), TCPR);
+        t.set(v, "val", "restart");
+      }
+      let last = row.tr;
+      for (let k = 1; k < splitRows; k++) {
+        const tr = row.tr.cloneNode(false) as Element;
+        dropIds(tr);
+        for (const c of Array.from(row.tr.children)) if (c.localName === "tblPrEx" || c.localName === "trPr") tr.append(copyProps(c)!);
+        for (const tc of all) tr.append(emptyCell(t, tc, mine.has(tc) ? null : "continue"));
+        last.after(tr);
+        last = tr;
+      }
+    }
+  }
+  return parts[0][0];
 }
 
 function insertRow(t: Tables, rows: Row[], r: number, cur: GridCell, below: boolean): Element {

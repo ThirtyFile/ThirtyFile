@@ -2,7 +2,7 @@
 // next to it, merged cells kept merged, the grid and a fixed width kept in step, and nothing changed half-way
 import { describe, expect, test } from "vitest";
 import { attr } from "@/ooxml/core/package";
-import { changeTable } from "@/ooxml/docx/tableOps";
+import { cellRange, changeTable } from "@/ooxml/docx/tableOps";
 
 const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 const W14 = "http://schemas.microsoft.com/office/word/2010/wordml";
@@ -125,4 +125,101 @@ test("a table whose cells are inside content controls isn't changed at all", () 
   const before = new XMLSerializer().serializeToString(t.tbl);
   for (const op of ["rowBelow", "colRight", "deleteRow", "deleteCol"] as const) expect(changeTable(t.at(0, 0), op)).toBeUndefined();
   expect(new XMLSerializer().serializeToString(t.tbl)).toBe(before);
+});
+
+const spans = (tbl: Element) => kids(tbl, "tr").map((tr) => kids(tr, "tc").map((tc) => Number(attr(find(tc, "gridSpan")[0], "val") ?? 1)));
+const merges = (tbl: Element) => kids(tbl, "tr").map((tr) => kids(tr, "tc").map((tc) => (find(tc, "vMerge")[0] ? (attr(find(tc, "vMerge")[0], "val") ?? "continue") : "-")));
+
+describe("merging", () => {
+  test("cells merged across a row and down hold the text of all of them, and the range grows over merged cells", () => {
+    const t = table(row(cell("A") + cell("B") + cell("C")) + row(cell("D") + cell("E", '<w:gridSpan w:val="2"/>')) + row(cell("") + cell("H") + cell("I")), 3);
+    // From B to D: grown to E's span, so columns 0–2 of the first two rows
+    expect(cellRange(t.at(0, 1), t.at(1, 0))?.length).toBe(5);
+    const merged = changeTable(t.at(0, 1), "merge", { other: t.at(1, 0) });
+    expect(merged).toBe(t.at(0, 0));
+    expect(find(merged!, "p").map(text)).toEqual(["A", "B", "C", "D", "E"]);
+    expect(spans(t.tbl)).toEqual([[3], [3], [1, 1, 1]]);
+    expect(merges(t.tbl)).toEqual([["restart"], ["continue"], ["-", "-", "-"]]);
+    expect(attr(find(merged!, "tcW")[0], "w")).toBe("6000");
+    expect(Array.from(find(merged!, "tcPr")[0].children).map((c) => c.localName)).toEqual(["tcW", "gridSpan", "vMerge"]);
+    expect(text(t.at(1, 0))).toBe("");
+  });
+
+  test("merging empty cells into one with text keeps just its text", () => {
+    const t = table(row(cell("A") + cell("")));
+    const merged = changeTable(t.at(0, 0), "merge", { other: t.at(0, 1) });
+    expect(find(merged!, "p").map(text)).toEqual(["A"]);
+    expect(spans(t.tbl)).toEqual([[2]]);
+  });
+});
+
+describe("splitting", () => {
+  test("a cell split into columns gives the grid new edges, and the other rows span them", () => {
+    const t = table(row(cell("A") + cell("B")) + row(cell("C") + cell("D")));
+    const first = changeTable(t.at(0, 1), "split", { cols: 2 });
+    expect(texts(t.tbl)).toEqual([
+      ["A", "B", ""],
+      ["C", "D"],
+    ]);
+    expect(spans(t.tbl)).toEqual([
+      [1, 1, 1],
+      [1, 2],
+    ]);
+    expect(t.grid()).toEqual(["2000", "1000", "1000"]);
+    expect(first).toBe(t.at(0, 1));
+    expect(attr(find(t.at(0, 2), "tcW")[0], "w")).toBe("1000");
+  });
+
+  test("a cell split into rows gets new rows below, in which the row's other cells stay merged down", () => {
+    const t = table(row(cell("A") + cell("B")));
+    changeTable(t.at(0, 1), "split", { rows: 3 });
+    expect(texts(t.tbl)).toEqual([
+      ["A", "B"],
+      ["", ""],
+      ["", ""],
+    ]);
+    expect(merges(t.tbl)).toEqual([
+      ["restart", "-"],
+      ["continue", "-"],
+      ["continue", "-"],
+    ]);
+  });
+
+  test("a cell merged across rows splits back into groups of them, and the split can be undone into one row each", () => {
+    const four = () => table([0, 1, 2, 3].map((i) => row(cell(i ? "" : "M", `<w:vMerge${i ? "" : ' w:val="restart"'}/>`) + cell(String(i)))).join(""));
+    const t = four();
+    changeTable(t.at(2, 0), "split", { rows: 2 });
+    expect(merges(t.tbl).map((r) => r[0])).toEqual(["restart", "continue", "restart", "continue"]);
+    const u = four();
+    changeTable(u.at(0, 0), "split", { rows: 4 });
+    expect(merges(u.tbl).map((r) => r[0])).toEqual(["-", "-", "-", "-"]);
+    // Three rows can't share four out evenly
+    const v = four();
+    expect(changeTable(v.at(0, 0), "split", { rows: 3 })).toBeUndefined();
+  });
+
+  test("a merged cell split into columns splits in every row it is merged across", () => {
+    const t = table(row(cell("M", '<w:gridSpan w:val="2"/><w:vMerge w:val="restart"/>')) + row(cell("", '<w:gridSpan w:val="2"/><w:vMerge/>')));
+    changeTable(t.at(0, 0), "split", { cols: 2 });
+    expect(spans(t.tbl)).toEqual([
+      [1, 1],
+      [1, 1],
+    ]);
+    expect(merges(t.tbl)).toEqual([
+      ["restart", "restart"],
+      ["continue", "continue"],
+    ]);
+    expect(texts(t.tbl)).toEqual([
+      ["M", ""],
+      ["", ""],
+    ]);
+  });
+
+  test("a split that can't be made changes nothing", () => {
+    const t = table(row(cell("A") + cell("B")));
+    const before = new XMLSerializer().serializeToString(t.tbl);
+    expect(changeTable(t.at(0, 0), "split", { cols: 1, rows: 1 })).toBeUndefined();
+    expect(changeTable(t.at(0, 0), "split", { cols: 99 })).toBeUndefined();
+    expect(new XMLSerializer().serializeToString(t.tbl)).toBe(before);
+  });
 });

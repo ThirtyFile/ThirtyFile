@@ -14,12 +14,17 @@ import {
   Loader2Icon,
   Rows3Icon,
   SaveIcon,
+  TableCellsMergeIcon,
+  TableCellsSplitIcon,
   XIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ApiError, type FileSource, type Node } from "@/api";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/dialogs";
 import { frameDocument, loadFrameScript } from "@/components/officeFrame";
 import { getDraft, setDraft } from "@/lib/drafts";
@@ -28,7 +33,7 @@ import { shortcut } from "@/lib/keys";
 import { cancellable } from "@/lib/cancellable";
 import { officeErrorMessage } from "@/lib/officeErrors";
 import type { Caret } from "@/ooxml/docx/editor";
-import type { TableOp } from "@/ooxml/docx/tableOps";
+import { MAX_SPLIT, type TableOp } from "@/ooxml/docx/tableOps";
 import { TOO_LARGE } from "@/ooxml/core/package";
 import { dropSession, isDirty, keepSession, openSession, releaseIfClean, reusableSession, saveSession, type DocxSession } from "./session";
 
@@ -128,6 +133,9 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
   const [confirmExit, setConfirmExit] = useState(false);
   /** Whether the caret is in a table cell: the Insert and Delete menus change its table */
   const [inCell, setInCell] = useState(false);
+  /** How many cells are selected together (dragging across them, or Shift+click): two or more can be merged */
+  const [picked, setPicked] = useState(0);
+  const [splitting, setSplitting] = useState(false);
   const waiting = useRef(new Map<number, { resolve(c: Collected): void; reject(e: Error): void }>());
   const nextId = useRef(0);
 
@@ -182,8 +190,8 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
   };
 
   /** A row or column of the caret's table added or deleted, in the frame; the caret stays there */
-  const table = (op: TableOp) => {
-    frame.current?.contentWindow?.postMessage({ type: "table", op }, "*");
+  const table = (op: TableOp, split?: { cols: number; rows: number }) => {
+    frame.current?.contentWindow?.postMessage({ type: "table", op, ...split }, "*");
     frame.current?.focus();
   };
   const tableOff = !inCell || loading || !!error;
@@ -212,11 +220,14 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
       case "save":
         void save();
         break;
-      case "place":
-        setInCell(!!(msg as { cell?: unknown }).cell);
+      case "place": {
+        const place = msg as { cell?: unknown; cells?: unknown };
+        setInCell(!!place.cell);
+        setPicked(Number(place.cells) || 0);
         break;
+      }
       case "table-refused":
-        toast.error(t("This table's rows and columns can't be changed here."));
+        toast.error(t("This table can't be changed that way here."));
         break;
       case "collected":
       case "collect-error": {
@@ -366,6 +377,32 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title={tableOff ? t("Put the cursor in a table to change its rows and columns") : t("Cells")}
+                  disabled={tableOff}
+                  className="gap-1"
+                  onMouseDown={(e) => e.preventDefault()}
+                />
+              }
+            >
+              <TableCellsMergeIcon /> {t("Cells")}
+              <ChevronDownIcon className="size-3 opacity-60" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-auto">
+              <DropdownMenuItem disabled={picked < 2} onClick={() => table("merge")}>
+                <TableCellsMergeIcon /> {t("Merge cells")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setSplitting(true)}>
+                <TableCellsSplitIcon /> {t("Split cell…")}
+              </DropdownMenuItem>
+              {picked < 2 && <p className="max-w-64 px-2 py-1.5 text-xs text-muted-foreground">{t("To merge cells, drag across them or Shift+click another cell first.")}</p>}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button size="sm" disabled={!dirty || saving || loading || !!error} onClick={() => void save()}>
             {saving ? <Loader2Icon className="animate-spin" /> : <SaveIcon />}
             {t("Save")}
@@ -399,6 +436,15 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
           </div>
         )}
       </div>
+      {splitting && (
+        <SplitDialog
+          onClose={() => setSplitting(false)}
+          onSplit={(split) => {
+            setSplitting(false);
+            table("split", split);
+          }}
+        />
+      )}
       {confirmExit && (
         <ConfirmDialog
           title={t("Discard unsaved changes?")}
@@ -414,5 +460,48 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
         />
       )}
     </div>
+  );
+}
+
+/** Splitting a cell: into how many columns and rows */
+function SplitDialog({ onClose, onSplit }: { onClose(): void; onSplit(split: { cols: number; rows: number }): void }) {
+  const [cols, setCols] = useState("2");
+  const [rows, setRows] = useState("1");
+  const valid = (v: string, max: number) => /^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= max;
+  const ok = valid(cols, MAX_SPLIT.cols) && valid(rows, MAX_SPLIT.rows) && (cols !== "1" || rows !== "1");
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-xs">
+        <form
+          className="grid gap-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (ok) onSplit({ cols: Number(cols), rows: Number(rows) });
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>{t("Split cell")}</DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-1.5">
+              <Label htmlFor="split-cols">{t("Number of columns")}</Label>
+              <Input id="split-cols" type="number" min={1} max={MAX_SPLIT.cols} value={cols} onChange={(e) => setCols(e.target.value)} autoFocus />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="split-rows">{t("Number of rows")}</Label>
+              <Input id="split-rows" type="number" min={1} max={MAX_SPLIT.rows} value={rows} onChange={(e) => setRows(e.target.value)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>
+              {t("Cancel")}
+            </Button>
+            <Button type="submit" disabled={!ok}>
+              {t("Split")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
