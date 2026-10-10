@@ -20,7 +20,17 @@ export interface SheetDraft {
   base: number;
 }
 
-export type Draft = TextDraft | SheetDraft;
+/**
+ * Marker for a Word document with unsaved edits: the edits stay in the document's editing session
+ * (`components/docx/session.ts`); the marker only flags the tab and warns before closing
+ */
+export interface DocxDraft {
+  kind: "docx";
+  /** Version (updated_at) the session was loaded from */
+  base: number;
+}
+
+export type Draft = TextDraft | SheetDraft | DocxDraft;
 
 const drafts = new Map<string, Draft>();
 const discardListeners = new Set<(nodeId: string) => void>();

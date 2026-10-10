@@ -6,12 +6,12 @@
  * - On completion only the "version at start" is marked saved; edits made meanwhile stay unsaved and are written next time
  * - The file is generated on a copy of the zip (sharing the unchanged entries, still compressed); if the upload fails (e.g. version conflict) the original zip is unaffected and inserts/deletes aren't replayed twice
  */
-import JSZip from "jszip";
 import { api, type Node } from "@/api";
 import { Calculator, isErr, toScalar } from "@/ooxml/xlsx/formula";
 import { colOf, rowOf, type Workbook } from "@/ooxml/xlsx/model";
 import { applyStructOp, cloneState } from "@/ooxml/xlsx/ops";
 import { buildXlsx, type Snapshot } from "@/ooxml/xlsx/workbook";
+import { cloneZip } from "@/ooxml/core/package";
 import type { Session } from "./session";
 
 export async function saveSession(session: Session, nodeId: string): Promise<{ node: Node; cells: number }> {
@@ -56,15 +56,4 @@ export async function saveSession(session: Session, nodeId: string): Promise<{ n
   session.base = node.updated_at;
   session.saved = version;
   return { node, cells };
-}
-
-/**
- * A copy of the archive to change without touching the original. Entries are never changed in place (writing a file
- * replaces its entry, removing one drops it from the list), so the copy can share them: nothing is unzipped or compressed,
- * and entries left unchanged are written into the saved file as they are.
- */
-function cloneZip(zip: JSZip): JSZip {
-  const copy = new JSZip();
-  Object.assign(copy.files, zip.files);
-  return copy;
 }

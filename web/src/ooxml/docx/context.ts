@@ -135,6 +135,11 @@ export interface Flow {
   color?: string;
   /** Number to show for footnoteRef inside footnote content */
   noteMark?: string;
+  /**
+   * Editing (editor.ts): the id of a run whose text can be edited. Its text is marked with the id (`data-r`), never
+   * joined with another run's, and its tabs are tab characters rather than laid-out gaps
+   */
+  edit?: { runId(r: Element): number | undefined };
 }
 
 export function childFlow(f: Flow, patch: Partial<Flow>): Flow {
