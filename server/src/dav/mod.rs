@@ -192,6 +192,11 @@ async fn trash(st: &AppState, user: &User, id: &str) -> AppResult<()> {
     nodes::trash(State(st.clone()), user.clone(), json_req(json!({ "ids": [id] }))?).await.map(|_| ())
 }
 
+/// Takes an item back out of the trash, where it was
+async fn restore(st: &AppState, user: &User, id: &str) -> AppResult<()> {
+    nodes::restore(State(st.clone()), user.clone(), json_req(json!({ "ids": [id] }))?).await.map(|_| ())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -609,6 +614,38 @@ mod tests {
         let h = [("destination", "/dav/My%20files/Photos")];
         assert_eq!(dav.send("MOVE", "/dav/Server/Photos", &h, "").await.status, StatusCode::CREATED);
         assert!(env.node_at(&space.drive, "Photos").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn an_overwriting_copy_or_move_that_fails_leaves_the_destination_as_it_was() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let dav = Client::new(&env, &admin, "write").await;
+        assert_eq!(dav.send("PUT", "/dav/My%20files/big.bin", &[], &"x".repeat(1000)).await.status, StatusCode::CREATED);
+        assert_eq!(dav.send("PUT", "/dav/My%20files/report.docx", &[], "old").await.status, StatusCode::CREATED);
+        // No room for another copy of big.bin: the copy fails, and the report it would have replaced is still there
+        sqlx::query("UPDATE users SET quota_bytes = (SELECT used_bytes FROM drives WHERE root_id = ?1) + 100 WHERE id = ?2")
+            .bind(admin.root())
+            .bind(admin.id)
+            .execute(&env.st.db)
+            .await
+            .unwrap();
+        let h = [("destination", "/dav/My%20files/report.docx")];
+        assert!(!dav.send("COPY", "/dav/My%20files/big.bin", &h, "").await.status.is_success());
+        assert_eq!(dav.send("GET", "/dav/My%20files/report.docx", &[], "").await.body, "old");
+        let (trashed,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE trashed_at IS NOT NULL").fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(trashed, 0, "nothing is left in the trash");
+
+        // A move that renames and then moves, the move refused: the item keeps its name where it was
+        let space = env.folder_space("Server").await;
+        sqlx::query("UPDATE users SET quota_bytes = 0").execute(&env.st.db).await.unwrap();
+        assert_eq!(dav.send("MKCOL", "/dav/Server/Docs", &[], "").await.status, StatusCode::CREATED);
+        assert_eq!(dav.send("PUT", "/dav/Server/Docs/report.docx", &[], "there").await.status, StatusCode::CREATED);
+        sqlx::query("UPDATE drives SET read_only = 1 WHERE id = ?").bind(&space.drive).execute(&env.st.db).await.unwrap();
+        let h = [("destination", "/dav/Server/Docs/renamed.docx")];
+        assert!(!dav.send("MOVE", "/dav/My%20files/report.docx", &h, "").await.status.is_success());
+        assert_eq!(dav.send("GET", "/dav/My%20files/report.docx", &[], "").await.body, "old");
+        assert_eq!(dav.send("GET", "/dav/Server/Docs/report.docx", &[], "").await.body, "there");
     }
 
     #[tokio::test]

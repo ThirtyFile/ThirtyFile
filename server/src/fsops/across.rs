@@ -15,6 +15,46 @@ pub(super) enum Placed {
     Store(HashMap<String, StagedBlob>, HashMap<String, (u64, i64)>),
 }
 
+/// The scan locks of the folder spaces a move or copy across spaces touches, taken in the order `lock` takes them: held
+/// while an item leaves its folder and while the index follows it into the destination's, so a scan never finds it gone
+/// from one folder, or there in the other, before the index says so. They are let go while content is copied or
+/// written, which can take long, and taken again for the index to follow.
+pub(super) struct Turn {
+    st: AppState,
+    drives: Vec<String>,
+    held: Vec<OwnedMutexGuard<()>>,
+}
+
+impl Turn {
+    /// For an item (`top`) going to `dest`: the space it leaves only when it moves. None to take when the caller holds
+    /// the spaces' locks for the whole change already (`held`).
+    pub(super) fn new(st: &AppState, top: &Node, dest: &Node, moving: bool, held: bool) -> Turn {
+        if held {
+            return Turn { st: st.clone(), drives: Vec::new(), held: Vec::new() };
+        }
+        let mut drives: Vec<String> = [(moving && top.in_folder_space()).then(|| top.drive()), dest.in_folder_space().then(|| dest.drive())]
+            .into_iter()
+            .flatten()
+            .map(str::to_string)
+            .collect();
+        drives.sort();
+        drives.dedup();
+        Turn { st: st.clone(), drives, held: Vec::new() }
+    }
+
+    pub(super) async fn take(&mut self) {
+        if self.held.is_empty() {
+            for d in &self.drives {
+                self.held.push(lock_space(&self.st, d).await);
+            }
+        }
+    }
+
+    pub(super) fn release(&mut self) {
+        self.held.clear();
+    }
+}
+
 /// Each item's path relative to the first one (the item being moved or copied); the list is ordered by depth
 pub(super) fn layout(nodes: &[Node]) -> Vec<Option<String>> {
     let mut rels: HashMap<&str, String> = HashMap::new();
@@ -123,10 +163,12 @@ pub(super) async fn ingest(st: &AppState, nodes: &[Node], drive: &str, moving: b
     Ok(Placed::Store(staged, seen))
 }
 
-/// Puts the content of `nodes` (an item and everything in it) into place for `dest`
-pub(super) async fn place(st: &AppState, nodes: &[Node], dest: &Node, moving: bool, progress: &Tracker) -> AppResult<Placed> {
+/// Puts the content of `nodes` (an item and everything in it) into place for `dest`. A move within the same disk renames
+/// the item away from its folder with `turn` held, and keeps it held; copying or writing content lets it go.
+pub(super) async fn place(st: &AppState, nodes: &[Node], dest: &Node, moving: bool, progress: &Tracker, turn: &mut Turn) -> AppResult<Placed> {
     let top = &nodes[0];
     if !dest.in_folder_space() {
+        turn.release();
         return ingest(st, nodes, dest.drive(), moving, progress).await;
     }
     for n in nodes {
@@ -135,6 +177,11 @@ pub(super) async fn place(st: &AppState, nodes: &[Node], dest: &Node, moving: bo
     // The first steps on disk: a folder for the item under a name scans ignore, and for a move within the same disk,
     // the item renamed into it
     let (d, t, rename_first, other) = (dest.clone(), top.clone(), moving && top.in_folder_space(), other_disk());
+    if rename_first {
+        turn.take().await;
+    } else {
+        turn.release();
+    }
     let (within, wrap, tmp, renamed) = on_disk(dest.drive(), disk_wake(), move || {
         let within = abs(&d)?;
         let wrap = within.join(&format!("{}{}", if moving { MOVE_PREFIX } else { COPY_PREFIX }, new_id())).map_err(gone_or_disk_error)?;
@@ -165,6 +212,7 @@ pub(super) async fn place(st: &AppState, nodes: &[Node], dest: &Node, moving: bo
         // index follows, the original stays where it was and this is only a copy: it is made in a folder named as one,
         // which is removed rather than put back should ThirtyFile stop meanwhile (`clean_leftovers`)
         Some(Err(from)) => {
+            turn.release();
             let (name, p) = (top.name.clone(), progress.clone());
             let copied = tokio::task::spawn_blocking(move || {
                 let copy_wrap = within.join(&format!("{COPY_PREFIX}{}", new_id())).map_err(|e| (e, None))?;
@@ -226,11 +274,21 @@ pub(super) async fn undo(st: &AppState, placed: Placed) {
                     return;
                 }
                 match renamed_from {
+                    // Back under its name, or under a numbered one should something have taken that meanwhile (never
+                    // over it)
                     Some(from) => {
-                        if std::fs::rename(tmp.as_path(), from.as_path()).is_err() && std::fs::symlink_metadata(tmp.as_path()).is_ok() {
-                            tracing::warn!("Couldn't move {:?} back where it was", from.name().unwrap_or_default());
-                        } else {
-                            let _ = std::fs::remove_dir(wrap.as_path());
+                        let is_dir = std::fs::symlink_metadata(tmp.as_path()).is_ok_and(|m| m.is_dir());
+                        let back = match (from.parent(), from.name()) {
+                            (Some(dir), Some(name)) => {
+                                put_back_into(&tmp, &dir, name, is_dir).unwrap_or_else(|| Err(io::ErrorKind::AlreadyExists.into())).map(|_| ())
+                            }
+                            _ => rename_new(tmp.as_path(), from.as_path()),
+                        };
+                        match back {
+                            Ok(()) => {
+                                let _ = std::fs::remove_dir(wrap.as_path());
+                            }
+                            Err(e) => tracing::warn!("Couldn't move {:?} back where it was: {e}", from.name().unwrap_or_default()),
                         }
                     }
                     // A copy: it goes
@@ -293,17 +351,25 @@ pub struct Across {
     pub(super) moving: bool,
     /// Items of the destination these replace, moved to the trash in the change's transaction already
     pub(super) replaced: Vec<String>,
+    /// Whether the caller holds the scan locks of the spaces involved for the whole change
+    pub(super) held: bool,
 }
 
 impl Across {
     /// None when there is nothing to do this way
     pub fn new(dest: Node, items: Vec<Vec<Node>>, moving: bool) -> Option<Across> {
-        (!items.is_empty()).then_some(Across { dest, items, moving, replaced: Vec::new() })
+        (!items.is_empty()).then_some(Across { dest, items, moving, replaced: Vec::new(), held: false })
     }
 
     /// The items of the destination (ids) the items replace: put in the trash so these can take their names
     pub fn replacing(mut self, replaced: Vec<String>) -> Across {
         self.replaced = replaced;
+        self
+    }
+
+    /// The caller holds the scan locks of both spaces until the change is done (removing a personal space)
+    pub fn spaces_held(mut self) -> Across {
+        self.held = true;
         self
     }
 
@@ -317,19 +383,26 @@ impl Across {
 
     pub async fn run(self, st: &AppState, user: &User, progress: &Tracker) -> AppResult<()> {
         progress.add_total(self.items.iter().flatten().map(work_of).sum());
-        if self.moving { move_across(st, user, &self.dest, self.items, progress).await } else { copy_across(st, user, &self.dest, self.items, progress).await }
+        if self.moving {
+            move_items_across(st, user, &self.dest, self.items, progress, self.held).await
+        } else {
+            copy_items_across(st, user, &self.dest, self.items, progress, self.held).await
+        }
     }
 }
 
 /// Moves items to a folder of another space, where one of the two (or both) is a folder space. The content is put in
 /// place first (renamed when both folders are on the same disk, else copied); then the index moves the items, which
 /// keep their ids and with them their shares, permissions and favourites; then the originals are removed.
-/// `items`: each item with everything in it (not in the trash), ordered by depth.
-pub async fn move_across(st: &AppState, user: &User, dest: &Node, items: Vec<Vec<Node>>, progress: &Tracker) -> AppResult<()> {
+/// `items`: each item with everything in it (not in the trash), ordered by depth. `held`: the caller holds the scan
+/// locks of both spaces for the whole change.
+async fn move_items_across(st: &AppState, user: &User, dest: &Node, items: Vec<Vec<Node>>, progress: &Tracker, held: bool) -> AppResult<()> {
     for nodes in items {
-        let mut placed = place(st, &nodes, dest, true, progress).await?;
+        let mut turn = Turn::new(st, &nodes[0], dest, true, held);
+        let mut placed = place(st, &nodes, dest, true, progress, &mut turn).await?;
         #[cfg(test)]
         after_place().await;
+        turn.take().await;
         let result = {
             let _w = st.write_lock.lock().await;
             commit_move(st, user, dest, &nodes, &placed).await
@@ -360,6 +433,7 @@ pub async fn move_across(st: &AppState, user: &User, dest: &Node, items: Vec<Vec
                 return Err(e);
             }
         }
+        drop(turn);
     }
     Ok(())
 }
@@ -451,7 +525,9 @@ pub(super) async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: 
         .bind(&ids)
         .execute(&mut *tx)
         .await?;
-    let bytes: i64 = nodes.iter().filter(|n| !n.is_folder()).map(|n| n.size).sum();
+    // What the space it leaves stops counting (as the index counted it), and what the destination counts now (as the
+    // content found or stored): items gone meanwhile are purged, which takes them off the space's count itself
+    let (mut leaves, mut arrives) = (0i64, 0i64);
     let mut extras = Vec::new();
     let mut remove = Vec::new();
     match placed {
@@ -463,7 +539,13 @@ pub(super) async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: 
                 let Some(rel) = rel else { continue };
                 let full = if rel.is_empty() { dest_rel.clone() } else { format!("{dest_rel}/{rel}") };
                 match s {
-                    Some(s) => record(&mut tx, &n.id, dest.drive(), &full, &s).await?,
+                    Some(s) => {
+                        record(&mut tx, &n.id, dest.drive(), &full, &s).await?;
+                        if !n.is_folder() {
+                            leaves += n.size;
+                            arrives += s.size;
+                        }
+                    }
                     // Gone from the server before it could be moved: gone from the index too, with the earlier versions
                     // it may still have in the content store
                     None => extras.extend(tree::purge_subtree(&mut tx, &n.id).await?),
@@ -488,6 +570,10 @@ pub(super) async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: 
             .await?;
             for (n, name) in nodes.iter().zip(&names) {
                 sqlx::query("UPDATE nodes SET name = ? WHERE id = ?").bind(name).bind(&n.id).execute(&mut *tx).await?;
+                if !n.is_folder() {
+                    leaves += n.size;
+                    arrives += staged.get(&n.id).map_or(n.size, |s| s.size);
+                }
                 if let Some(s) = staged.get(&n.id) {
                     extras.extend(tree::commit_blob(&mut tx, s).await?);
                     sqlx::query("UPDATE nodes SET blob_hash = ?, size = ? WHERE id = ?").bind(&s.hash).bind(s.size).bind(&n.id).execute(&mut *tx).await?;
@@ -499,8 +585,8 @@ pub(super) async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: 
         }
     }
     sqlx::query("UPDATE nodes SET parent_id = ? WHERE id = ?").bind(&dest.id).bind(&top.id).execute(&mut *tx).await?;
-    tree::adjust_usage(&mut tx, &src_drive, -bytes).await?;
-    tree::adjust_usage(&mut tx, dest.drive(), bytes).await?;
+    tree::adjust_usage(&mut tx, &src_drive, -leaves).await?;
+    tree::adjust_usage(&mut tx, dest.drive(), arrives).await?;
     if let Some(p) = &top.parent_id {
         tree::touch(&mut tx, p).await?;
     }
@@ -513,12 +599,14 @@ pub(super) async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: 
 
 /// Copies items to a folder of another space (or of the same folder space), where one of the two (or both) is a folder
 /// space: the content is written first, then indexed. `plans`: each item with everything in it (not in the trash),
-/// ordered by depth.
-pub async fn copy_across(st: &AppState, user: &User, dest: &Node, plans: Vec<Vec<Node>>, progress: &Tracker) -> AppResult<()> {
+/// ordered by depth. `held` as for moves.
+async fn copy_items_across(st: &AppState, user: &User, dest: &Node, plans: Vec<Vec<Node>>, progress: &Tracker, held: bool) -> AppResult<()> {
     for nodes in plans {
-        let placed = place(st, &nodes, dest, false, progress).await?;
+        let mut turn = Turn::new(st, &nodes[0], dest, false, held);
+        let placed = place(st, &nodes, dest, false, progress, &mut turn).await?;
         #[cfg(test)]
         after_place().await;
+        turn.take().await;
         let result = {
             let _w = st.write_lock.lock().await;
             commit_copy(st, user, dest, &nodes, &placed).await
@@ -533,6 +621,7 @@ pub async fn copy_across(st: &AppState, user: &User, dest: &Node, plans: Vec<Vec
                 return Err(e);
             }
         }
+        drop(turn);
     }
     Ok(())
 }
@@ -608,6 +697,18 @@ pub(super) async fn commit_copy(st: &AppState, user: &User, dest: &Node, nodes: 
     logs::record_activity(&mut tx, user, Some(top), "copy", &format!("→ {to}")).await?;
     tx.commit().await?;
     Ok(extras)
+}
+
+/// Tests: a move across spaces, as `Across::run` makes it
+#[cfg(test)]
+pub async fn move_across(st: &AppState, user: &User, dest: &Node, items: Vec<Vec<Node>>, progress: &Tracker) -> AppResult<()> {
+    move_items_across(st, user, dest, items, progress, false).await
+}
+
+/// Tests: a copy across spaces, as `Across::run` makes it
+#[cfg(test)]
+pub async fn copy_across(st: &AppState, user: &User, dest: &Node, plans: Vec<Vec<Node>>, progress: &Tracker) -> AppResult<()> {
+    copy_items_across(st, user, dest, plans, progress, false).await
 }
 
 #[cfg(test)]

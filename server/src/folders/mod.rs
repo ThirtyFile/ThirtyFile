@@ -869,8 +869,12 @@ async fn remove_gone(st: &AppState, drive: &Drive, root: &Path, mut gone: Vec<(S
         if last_removed.as_deref().is_some_and(|up| path.strip_prefix(up).is_some_and(|rest| rest.starts_with('/'))) {
             continue;
         }
-        let now: Option<(Option<String>,)> =
-            sqlx::query_as("SELECT fs_path FROM nodes WHERE id = ? AND trashed_at IS NULL").bind(&id).fetch_optional(&st.db).await?;
+        // Still this space's, at that path (a change may have moved it to another space meanwhile)
+        let now: Option<(Option<String>,)> = sqlx::query_as("SELECT fs_path FROM nodes WHERE id = ? AND drive_id = ? AND trashed_at IS NULL")
+            .bind(&id)
+            .bind(&drive.id)
+            .fetch_optional(&st.db)
+            .await?;
         if now.is_none_or(|(p,)| p.as_deref() != Some(path.as_str())) {
             continue;
         }
