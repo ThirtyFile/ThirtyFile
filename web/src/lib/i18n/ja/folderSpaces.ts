@@ -31,6 +31,7 @@ export default {
   "Move the focus without changing the selection": "選択を変えずにフォーカスを移動",
   "Open the menu of the item with the focus": "フォーカスのある項目のメニューを開く",
   "External changes appear within seconds": "外部の変更は数秒以内に表示されます",
+  "The space's folder stopped answering": "スペースのフォルダーが応答しなくなりました",
   "Changes are checked when opened and every {n} minutes": "開いたときと {n} 分ごとに変更を確認します",
   "Changes are checked when opened; scheduled checks are off": "開いたときに変更を確認します。定期確認は無効です",
 } satisfies Record<string, string>;

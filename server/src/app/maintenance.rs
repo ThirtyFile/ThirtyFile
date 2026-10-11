@@ -56,6 +56,13 @@ async fn maintain(st: AppState, trash_days: i64, hours: Arc<AtomicU32>) {
             })
             .await;
         }
+        // Changes of many items that stopped halfway, finished rather than left for the next start
+        step("unfinished changes", async {
+            if let Err(e) = tree::changes::retry_unfinished(&st).await {
+                tracing::warn!("Couldn't finish changes that stopped halfway: {}", e.message);
+            }
+        })
+        .await;
         if trash_days > 0 {
             step("trash", async {
                 match nodes::purge_expired_trash(&st, trash_days).await {

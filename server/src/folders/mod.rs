@@ -178,6 +178,10 @@ pub struct Memory {
     /// of it take one at a time
     pub space_locks: crate::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
     pub scan_locks: crate::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
+    /// Spaces whose scan is asked for again after the one running now (`scan_soon`), and spaces a scheduled scan is
+    /// waiting to start for
+    pub again: crate::sync::Mutex<HashSet<String>>,
+    pub scheduled: crate::sync::Mutex<HashSet<String>>,
 }
 
 /// A scan in progress, shown in the Control panel
@@ -612,7 +616,14 @@ async fn compare(st: &AppState, drive: &Drive, root: &Path, report: &mut ScanRep
     });
     let (mut found, mut root_empty, mut matched, mut identities, mut any_gone) = (0, false, false, false, false);
     let mut differing = Vec::new();
-    while let Some((rel, items)) = rx.recv().await {
+    // A disk that stops answering (a stale network mount) ends the scan rather than holding the space: the read stays
+    // stuck on its thread, and the next scan tries again
+    loop {
+        let next = match tokio::time::timeout(scan_stall(), rx.recv()).await {
+            Ok(next) => next,
+            Err(_) => return Ok(Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "the folder stopped answering"))),
+        };
+        let Some((rel, items)) = next else { break };
         if rel.is_empty() {
             root_empty = items.is_empty();
         }
@@ -701,7 +712,9 @@ async fn update_index(st: &AppState, drive: &Drive, root: &Path, differing: Vec<
     for chunk in differing.chunks(FOLDERS_PER_READ) {
         // Read again, now that nothing else changes the space
         let (root, rels) = (root.to_path_buf(), chunk.to_vec());
-        let read = tokio::task::spawn_blocking(move || {
+        // With the space's lock held: a disk that stops answering ends the scan (and lets the space go)
+        let key = format!("scan of {}", drive.id);
+        let read = crate::util::blocking_within(key, scan_stall(), move || {
             rels.into_iter()
                 .map(|rel| {
                     let mut r = ScanReport::default();
@@ -711,7 +724,7 @@ async fn update_index(st: &AppState, drive: &Drive, root: &Path, differing: Vec<
                 .collect::<Vec<_>>()
         })
         .await
-        .map_err(AppError::internal)?;
+        .ok_or_else(|| AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, "The space's folder stopped answering"))?;
         for (rel, items, r) in read {
             for s in r.skipped {
                 report.skip(s);
@@ -894,6 +907,15 @@ async fn remove_gone(st: &AppState, drive: &Drive, root: &Path, mut gone: Vec<(S
     Ok(())
 }
 
+/// How long a scan waits for the next folder read before it gives up (a stale network mount)
+fn scan_stall() -> std::time::Duration {
+    std::time::Duration::from_secs(if cfg!(test) { 2 } else { 300 })
+}
+
+/// New items a folder opened on the web is brought up to date with at most, during the request: more (a large copy
+/// made on the server) are left to a scan in the background, and the listing shows the index as it is meanwhile
+const SYNC_NEW_LIMIT: usize = 2000;
+
 /// A folder opened again within this long isn't read again: what changed on the server shows at the next opening
 /// after that (or the next scan)
 const REREAD_AFTER: std::time::Duration = std::time::Duration::from_secs(5);
@@ -974,20 +996,27 @@ async fn try_sync_folder(st: &AppState, folder: &Node, wait: bool) -> AppResult<
     .bind(&folder.id)
     .fetch_all(&st.db)
     .await?;
-    // New items that already exist elsewhere in the space were moved here: leave them to the full scan
+    // New items that already exist elsewhere in the space were moved here: leave them to the full scan. So are many
+    // new items (a large copy made on the server): finding them all would keep whoever opened the folder waiting
     let known: HashSet<&str> = indexed.iter().filter_map(|n| n.fs_path.as_deref()).collect();
+    let new: Vec<&Entry> = entries.iter().filter(|e| !known.contains(e.rel.as_str())).collect();
+    if new.len() > SYNC_NEW_LIMIT {
+        drop(_scanning);
+        scan_later(st, &drive.id);
+        return Ok(());
+    }
     let mut moved_in = false;
-    for e in &entries {
-        if known.contains(e.rel.as_str()) || e.ino == 0 {
-            continue;
-        }
+    for e in new.iter().filter(|e| e.ino != 0) {
         let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE drive_id = ? AND fs_dev = ? AND fs_ino = ? AND trashed_at IS NULL")
             .bind(&drive.id)
             .bind(e.dev)
             .bind(e.ino)
             .fetch_one(&st.db)
             .await?;
-        moved_in |= n > 0;
+        if n > 0 {
+            moved_in = true;
+            break;
+        }
     }
     // Paths above this folder aren't part of this look: the planner must not treat them as gone
     indexed.retain(|n| n.parent_id.as_deref() == Some(folder.id.as_str()) || n.id == folder.id);
@@ -1018,8 +1047,10 @@ async fn try_sync_folder(st: &AppState, folder: &Node, wait: bool) -> AppResult<
         reads.retain(|_, t| t.elapsed() < REREAD_AFTER);
         reads.insert(folder.id.clone(), read_at);
     }
+    // Something went away (or came from elsewhere in the space): a scan works out where, also when one is running now
+    // (it may have read this folder before the change)
     if gone {
-        scan_later(st, &drive.id);
+        scan_soon(st, &drive.id);
     }
     Ok(())
 }
@@ -1044,6 +1075,26 @@ pub fn scan_later(st: &AppState, drive_id: &str) {
         }
     });
 }
+
+/// Starts a full scan in the background, or, when one is running, another once it is done: asked for any number of
+/// times meanwhile (the watcher's queue overflowing again and again), only that one more
+pub fn scan_soon(st: &AppState, drive_id: &str) {
+    if !st.part::<Memory>().again.lock().insert(drive_id.to_string()) {
+        return;
+    }
+    let (st, id) = (st.clone(), drive_id.to_string());
+    tokio::spawn(async move {
+        let _scanning = scan_lock(&st, &id).lock_owned().await;
+        st.part::<Memory>().again.lock().remove(&id);
+        if let Err(e) = run_scan(&st, &id).await {
+            tracing::warn!("Scanning a folder space failed: {}", e.message);
+        }
+    });
+}
+
+/// Scheduled scans running at once: each space's scan in a task of its own, so one whose disk stops answering doesn't
+/// hold up the others
+static SCHEDULED_SCANS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
 
 /// Spaces watched for changes are scanned this many times less often than the interval set in the Control panel
 const WATCHED_SCAN_FACTOR: i64 = 4;
@@ -1103,13 +1154,20 @@ async fn scan_due_spaces(st: AppState) {
                     }
                 };
             for (id, last) in due {
-                // Watched spaces only need the regular scan for what watching can miss
-                if !scan_due(&st, &id, last, now()) {
+                // Watched spaces only need the regular scan for what watching can miss; one already waiting or
+                // running isn't started again
+                if !scan_due(&st, &id, last, now()) || !st.part::<Memory>().scheduled.lock().insert(id.clone()) {
                     continue;
                 }
-                if let Err(e) = scan(&st, &id).await {
-                    tracing::warn!("Scanning a folder space failed: {}", e.message);
-                }
+                let st = st.clone();
+                tokio::spawn(async move {
+                    if let Ok(_turn) = SCHEDULED_SCANS.acquire().await
+                        && let Err(e) = scan(&st, &id).await
+                    {
+                        tracing::warn!("Scanning a folder space failed: {}", e.message);
+                    }
+                    st.part::<Memory>().scheduled.lock().remove(&id);
+                });
             }
         }
     }
