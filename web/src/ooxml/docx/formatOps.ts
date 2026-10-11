@@ -11,7 +11,7 @@
  */
 
 import { kid } from "../core/package";
-import { placeIn, WordXml } from "./xmlEdit";
+import { placeIn, storyRoot, WordXml } from "./xmlEdit";
 
 /** Character formatting differing from what a run had (a color is "RRGGBB"; a highlight null when taken off) */
 export interface Fmt {
@@ -258,7 +258,7 @@ function splitAt(x: WordXml, t: Element, k: number): Element | null {
  * out; null when the marks aren't both there (any mark left is taken out too)
  */
 export function markedParagraphs(doc: Document): Element[] | null {
-  const body = byName(doc.documentElement, "body")[0];
+  const body = storyRoot(doc);
   if (!body) return null;
   const texts = byName(body, "t");
   const startP = paragraphOf(texts.find((t) => (t.textContent ?? "").includes(MARK_START)) ?? null);
@@ -281,7 +281,7 @@ export function paragraphProp(x: WordXml, pPr: Element, name: string): Element {
 }
 
 export function formatRange(doc: Document, f: RangeFormat): boolean {
-  const body = byName(doc.documentElement, "body")[0];
+  const body = storyRoot(doc);
   if (!body) return false;
   const texts = () => byName(body, "t");
   const find = (mark: string) => texts().find((t) => (t.textContent ?? "").includes(mark));

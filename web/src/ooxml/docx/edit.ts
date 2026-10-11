@@ -16,11 +16,13 @@
  *
  * Table cells hold blocks of their own (each cell is a container, like the body): their paragraphs are edited the same
  * way, while the table's rows, columns and settings stay as they are. A cell always keeps a paragraph, as Word needs.
+ *
+ * A header or footer part is edited the same way: its root holds its blocks as the body does.
  */
 
 import { attr, kid } from "../core/package";
 import { applyFmt, rPrOf, type Fmt } from "./formatOps";
-import { WordXml } from "./xmlEdit";
+import { storyRoot, WordXml } from "./xmlEdit";
 
 const W14 = "http://schemas.microsoft.com/office/word/2010/wordml";
 const XML_NS = "http://www.w3.org/XML/1998/namespace";
@@ -164,8 +166,8 @@ function propsOf(el: Element, body: Element): { head: Element[]; tail: Element[]
 }
 
 export function planEdits(doc: Document | null): EditPlan | null {
-  const root = doc?.documentElement;
-  const body = kid(root, "body");
+  // document.xml's body, or a header's or footer's root (which holds its blocks the same way)
+  const body = storyRoot(doc);
   if (!doc || !body) return null;
   const plan: EditPlan = {
     doc,

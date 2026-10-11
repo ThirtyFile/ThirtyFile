@@ -2,7 +2,9 @@
  * Editing a Word document's text in the browser (the preview frame runs it; components/DocxEditor.tsx is the host).
  *
  * The body is shown as one page-wide sheet, drawn by the same renderer as the preview so text keeps its fonts, sizes,
- * spacing and list numbers; pages, headers and footers aren't shown. Paragraphs that only hold text are edited in place
+ * spacing and list numbers; pages aren't shown. Headers and footers are edited one at a time, each opened in the view
+ * instead of the body (as wide as its section's text), and edited like it; one can be added to a document without
+ * (hfOps.ts). Paragraphs that only hold text are edited in place
  * (one contenteditable for the whole body, so selecting, typing, Enter, Backspace and undo are the browser's own); every
  * other block is shown as it is and can't be changed (edit.ts says which, and how the edits are written back).
  *
@@ -30,11 +32,13 @@ import { originalPieces, planEdits, readAllEdits, readParagraph, samePieces, sav
 import { formatRange, MARK_END, MARK_START, type Fmt, type RangeFormat } from "./formatOps";
 import { formatList, listKind, type ListFormat, type ListKind } from "./listOps";
 import { hasCjk } from "./fonts";
+import { addStory, listStories, type Story, type StoryKind } from "./hfOps";
 import { cellRange, changeTable, type BorderKind, type TableOp } from "./tableOps";
 import { loadDocx, normalStyle } from "./index";
 import { contentWidth, parseSection, type Section } from "./section";
 import { fixScaled, resolveTabs } from "./tabs";
 import { alternate } from "./xml";
+import { storyRoot } from "./xmlEdit";
 
 /** Texts of the editing view, in the person's language (the frame has no dictionary of its own) */
 export interface EditorTexts {
@@ -70,6 +74,8 @@ export interface EditorOptions {
   /** Parts with edits not saved yet (by path: document.xml, a numbering part a list made…), to open instead of the archive's */
   parts?: Record<string, string>;
   texts: EditorTexts;
+  /** Path of the header or footer to open instead of the body */
+  story?: string | null;
   caret?: Caret | null;
   scroll?: number;
   /** The text changed (typing, deleting, undo…) */
@@ -151,8 +157,17 @@ export interface DocxEditor {
   styles: ParagraphStyle[];
   /** The fonts the document names in its font table */
   fonts: FontChoice[];
-  /** Path of document.xml */
+  /** Path of the part open in the view: document.xml, or the header or footer open */
   path: string;
+  /** The headers and footers the document has, the one open (null: the body), and those the first section has none of */
+  stories: Story[];
+  story: string | null;
+  canAdd: Record<StoryKind, boolean>;
+  /**
+   * The parts adding a header or footer to the first section makes (document.xml, its relationships, the new part and
+   * the content types), and the new part's path; undefined when the first section has one
+   */
+  addStory(kind: StoryKind): Promise<{ parts: Record<string, string>; path: string } | undefined>;
   /**
    * The parts a list change (bulleted, numbered, a level in or out) makes of the paragraphs the selection touches:
    * document.xml, and the numbering part with its relationship and content type when they change; and where to put
@@ -192,26 +207,35 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
   pkg.useParts(opts.parts ?? {});
   const loaded = await loadDocx(pkg);
   const { doc, docXml, docRels } = loaded;
-  const plan = planEdits(docXml);
-  if (!plan) throw new Error("The document has no body");
+  const docBody = storyRoot(docXml);
+  if (!docXml || !docBody) throw new Error("The document has no body");
 
-  // ── Sections: each block's section, as the preview groups them ──
-  const bodyBlocks = plan.containers[0].blocks;
+  // ── Sections: each body block's section, as the preview groups them ──
   const sectPrs: (Element | null)[] = [];
-  const secOf = new Map<number, number>();
-  for (const i of bodyBlocks) {
-    const b = plan.blocks[i];
-    secOf.set(i, sectPrs.length);
+  const secAt = new Map<Element, number>();
+  for (const b of Array.from(docBody.children)) {
+    if (b.localName === "sectPr") continue;
+    secAt.set(b, sectPrs.length);
     const sp = b.localName === "p" ? kid(kid(b, "pPr"), "sectPr") : null;
     if (sp) sectPrs.push(sp);
   }
-  sectPrs.push(kid(plan.body, "sectPr"));
+  sectPrs.push(kid(docBody, "sectPr"));
   const sections: Section[] = [];
   sectPrs.forEach((sp, i) => sections.push(parseSection(sp, i ? sections[i - 1] : null)));
 
+  // ── The part edited: the body, or a header or footer the document has ──
+  const stories = listStories(sections, docRels, (path) => !!loaded.parts.get(path));
+  const story = stories.find((x) => x.path === opts.story) ?? null;
+  const storyPath = story?.path ?? loaded.docPath;
+  const plan = planEdits(story ? (loaded.parts.get(story.path) ?? null) : docXml);
+  if (!plan) throw new Error("The document has no body");
+  const bodyBlocks = plan.containers[0].blocks;
+
   // ── The view ──
   const normal = normalStyle(doc);
-  const first = sections[0];
+  // The page the view is as wide as: the first section's, or the header's or footer's section's
+  const first = sections[story?.section ?? 0];
+  const margin = (m: number) => (story ? 24 : Math.max(24, Math.min(m, 96)));
   const editable = h("div", {
     class: "tf-docx-editable",
     contenteditable: "true",
@@ -224,7 +248,7 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
     "div",
     {
       class: "tf-docx-sheet",
-      style: `width:${first.width}px;padding:${Math.max(24, Math.min(first.top, 96))}px ${first.right}px ${Math.max(24, Math.min(first.bottom, 96))}px ${first.left}px`,
+      style: `width:${first.width}px;padding:${margin(first.top)}px ${first.right}px ${margin(first.bottom)}px ${first.left}px`,
     },
     editable,
   );
@@ -272,12 +296,25 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
   let writerSec = -1;
   for (const i of bodyBlocks) {
     const block = plan.blocks[i];
-    const sec = Math.min(secOf.get(i) ?? 0, sections.length - 1);
+    const sec = story ? story.section : Math.min(secAt.get(block) ?? 0, sections.length - 1);
     if (!writer || sec !== writerSec) {
       const s = sections[sec];
-      const cols = s.cols.num;
+      // A header or footer is as wide as its section's text; the body's text as wide as a column
+      const cols = story ? 1 : s.cols.num;
       const width = cols > 1 ? (contentWidth(s) - s.cols.space * (cols - 1)) / cols : contentWidth(s);
-      const flow: Flow = { doc, part: loaded.docPath, rels: docRels, section: s, width, story: "body", depth: 0, fields: shared.fields, comments: shared.comments, floats, edit };
+      const flow: Flow = {
+        doc,
+        part: storyPath,
+        rels: story ? (doc.rels.get(storyPath) ?? []) : docRels,
+        section: s,
+        width,
+        story: story?.kind ?? "body",
+        depth: 0,
+        fields: shared.fields,
+        comments: shared.comments,
+        floats,
+        edit,
+      };
       writer = new BlockWriter(flow, (item) => items.push(item));
       writerSec = sec;
     }
@@ -321,7 +358,7 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
     if (now.hl !== before.hl) out.hl = now.hl;
     return Object.keys(out).length ? out : undefined;
   };
-  const styles = await paragraphStyles(pkg, docRels, docXml);
+  const styles = await paragraphStyles(pkg, docRels, plan.doc);
   const fontTable = docRels.find((r) => r.type.endsWith("/fontTable") && !r.external)?.target;
   const fonts = fontNames(fontTable ? await pkg.xml(fontTable) : null);
   // The parts lists use: the numbering part (where it is, or where it goes), the document's relationships, content types
@@ -574,6 +611,13 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
    * The document as edited, with marks at the selection's ends (`word`: no selection takes the word at the caret), and
    * where the caret was; undefined when there is no selection in the view
    */
+  /** A copy of a part, so the view's own stays as it was until it is opened again */
+  const copy = async (path: string | null) => {
+    const d = path ? await pkg.xml(path) : null;
+    return d ? (d.cloneNode(true) as Document) : null;
+  };
+  const emptyRels = () => new DOMParser().parseFromString('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>', "application/xml");
+
   const markSelection = (word: boolean): { doc: Document; caret: Caret | null } | undefined => {
     restoreSelection();
     const sel = getSelection();
@@ -605,7 +649,7 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
   return {
     collect() {
       const xml = saveEdits(plan, readAllEdits(editable, fmtOf), shown);
-      return { path: loaded.docPath, xml, caret: caretOf(editable), scroll: root.scrollTop };
+      return { path: storyPath, xml, caret: caretOf(editable), scroll: root.scrollTop };
     },
     tableOp(op, change = {}) {
       restoreSelection();
@@ -636,7 +680,7 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
         otherTc?.removeAttribute("data-tf-other");
       }
       const doc = new DOMParser().parseFromString(text, "application/xml");
-      const body = Array.from(doc.documentElement.children).find((e) => e.localName === "body");
+      const body = storyRoot(doc);
       const cells = Array.from(body?.querySelectorAll("*") ?? []).filter((e) => e.localName === "tc");
       const target = cells.find((e) => e.hasAttribute("data-tf-cell"));
       const other = cells.find((e) => e.hasAttribute("data-tf-other"));
@@ -669,24 +713,39 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
     async formatList(f) {
       const marked = markSelection(false);
       if (!marked) return undefined;
-      // Copies of the parts a list may change, so the view's own stay as they were until it is opened again
-      const copy = async (path: string | null) => {
-        const d = path ? await pkg.xml(path) : null;
-        return d ? (d.cloneNode(true) as Document) : null;
-      };
-      const rels = (await copy(relsPath)) ?? new DOMParser().parseFromString('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>', "application/xml");
+      // Copies of the parts a list may change (the numbering part is the document's, whichever part is open)
+      const rels = (await copy(relsPath)) ?? emptyRels();
       const result = formatList(
         { doc: marked.doc, numbering: await copy(numberingPath), styles: stylesPath ? await pkg.xml(stylesPath) : null, rels, types: await copy("[Content_Types].xml") },
         f,
       );
       if (!result) return undefined;
-      const parts: Record<string, string> = { [loaded.docPath]: writeXml(marked.doc) };
+      const parts: Record<string, string> = { [storyPath]: writeXml(marked.doc) };
       if (result.changed.numbering && result.numbering) parts[numberingPath] = writeXml(result.numbering);
       if (result.changed.rels && result.rels) parts[relsPath] = writeXml(result.rels);
       if (result.changed.types && result.types) parts["[Content_Types].xml"] = writeXml(result.types);
       return { parts, caret: marked.caret };
     },
-    path: loaded.docPath,
+    async addStory(kind) {
+      // The document as edited: with the view's edits when it shows the body
+      const text = (!story && saveEdits(plan, readAllEdits(editable, fmtOf), shown)) || writeXml(docXml);
+      const docCopy = new DOMParser().parseFromString(text, "application/xml");
+      const rels = (await copy(relsPath)) ?? emptyRels();
+      const types = await copy("[Content_Types].xml");
+      const given = opts.parts ?? {};
+      const added = addStory(
+        { doc: docCopy, rels, types, styles: stylesPath ? await pkg.xml(stylesPath) : null, docPath: loaded.docPath, taken: (path) => pkg.has(path) || path in given },
+        kind,
+      );
+      if (!added) return undefined;
+      const parts: Record<string, string> = { [loaded.docPath]: writeXml(docCopy), [relsPath]: writeXml(rels), [added.path]: writeXml(added.part) };
+      if (added.typesChanged && types) parts["[Content_Types].xml"] = writeXml(types);
+      return { parts, path: added.path };
+    },
+    path: storyPath,
+    stories,
+    story: story?.path ?? null,
+    canAdd: { header: !sections[0]?.headers.default, footer: !sections[0]?.footers.default },
     styles,
     fonts,
     focus: () => editable.focus({ preventScroll: true }),

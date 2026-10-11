@@ -464,3 +464,63 @@ test("fonts and line spacing are changed from the toolbar, and the file gets the
   expect(paragraphs.find((p) => p.includes("Second"))).toContain('<w:rPr><w:rFonts w:ascii="Georgia" w:hAnsi="Georgia" w:cs="Georgia"/></w:rPr><w:t>Second</w:t>');
   expect(paragraphs.find((p) => p.includes("Third"))).toContain('<w:rFonts w:ascii="Microsoft JhengHei" w:hAnsi="Microsoft JhengHei" w:eastAsia="Microsoft JhengHei"/>');
 });
+
+test("a header and a footer are added and edited, and the document shows them once saved", async ({ page }) => {
+  await signIn(page);
+  const dir = await makeFolder(page, "Word headers");
+  const id = await uploadFile(page, dir, "headers.docx", Buffer.from(await buildDocument("<w:p><w:r><w:t>Body text</w:t></w:r></w:p>")));
+  const { frame, text } = await openEditor(page, id, "headers.docx");
+  const menu = page.getByRole("button", { name: "Header and footer" });
+
+  // A header added and typed into (the view shows it instead of the body)
+  await menu.click();
+  await page.getByRole("menuitem", { name: "Add header" }).click();
+  await expect(page.getByText("Header: it shows on every page that uses it.", { exact: false })).toBeVisible();
+  await expect(frame.getByText("Body text")).toBeHidden();
+  await text.click();
+  await text.pressSequentially("Annual report");
+
+  // A footer added the same way, from the menu that now names the header; Ctrl+Z right after takes it away again
+  await page.getByRole("button", { name: "Header", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Add footer" }).click();
+  await expect(page.getByText("Footer: it shows on every page that uses it.", { exact: false })).toBeVisible();
+  await text.press("ControlOrMeta+z");
+  await expect(frame.getByText("Annual report")).toBeVisible();
+  await page.getByRole("button", { name: "Header", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Add footer" }).click();
+  await expect(page.getByText("Footer: it shows on every page that uses it.", { exact: false })).toBeVisible();
+  await text.click();
+  await text.pressSequentially("Example footer");
+
+  // Back to the header, which kept its text, then to the body
+  await page.getByRole("button", { name: "Footer", exact: true }).click();
+  await page.getByRole("menuitemradio", { name: "Header" }).click();
+  await frame.getByText("Annual report").click();
+  await text.press("End");
+  await text.pressSequentially(" 2026");
+  await page.getByRole("button", { name: "Back to document" }).click();
+  await frame.getByText("Body text").click();
+  await text.press("End");
+  await text.pressSequentially(" here");
+
+  const save = saving(page, id);
+  await page.getByRole("button", { name: "Save" }).click();
+  expect((await save).ok()).toBe(true);
+  const { zip, xml } = await savedXml(page, id);
+  expect(xml).toContain("<w:t>Body text here</w:t>");
+  expect(xml).toMatch(/<w:sectPr><w:headerReference w:type="default" r:id="rId3"\/><w:footerReference w:type="default" r:id="rId4"\/><w:pgSz /);
+  expect(await zip.file("word/header1.xml")!.async("string")).toContain(">Annual report 2026<");
+  expect(await zip.file("word/footer1.xml")!.async("string")).toContain(">Example footer<");
+  const rels = await zip.file("word/_rels/document.xml.rels")!.async("string");
+  expect(rels).toContain('Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"');
+  expect(rels).toContain('Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"');
+  const types = await zip.file("[Content_Types].xml")!.async("string");
+  expect(types).toContain('PartName="/word/header1.xml"');
+  expect(types).toContain('PartName="/word/footer1.xml"');
+
+  // The preview shows them on the page
+  await page.getByRole("button", { name: "Done editing" }).click();
+  const preview = page.frameLocator('iframe[title="headers.docx"]');
+  await expect(preview.locator(".tf-docx-hdr").getByText("Annual report 2026")).toBeVisible();
+  await expect(preview.locator(".tf-docx-ftr").getByText("Example footer")).toBeVisible();
+});
