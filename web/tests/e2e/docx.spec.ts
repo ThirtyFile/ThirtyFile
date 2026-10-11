@@ -172,8 +172,10 @@ test("rows and columns are added and deleted from the menus, and Ctrl+Z right af
   await expect(page.getByRole("button", { name: "Insert", exact: true })).toBeDisabled();
   await frame.getByText("C", { exact: true }).click();
   await menu("Insert", "Insert row below");
-  await page.keyboard.type("E");
+  // The view opens again with the new row, the cursor in it
   await expect(frame.locator("tr")).toHaveCount(3);
+  await expect(frame.locator("td[data-cell]:focus")).toHaveCount(1);
+  await page.keyboard.type("E");
 
   // Deleting a column, then Ctrl+Z right after, brings it back
   await frame.getByText("B", { exact: true }).click();
@@ -271,4 +273,53 @@ test("cells selected together are merged, a cell is split from the dialog, and C
     ],
   ]);
   expect([...xml.matchAll(/<w:gridCol w:w="(\d+)"\/>/g)].map((m) => m[1])).toEqual(["3000", "1500", "1500"]);
+});
+
+test("borders, shading and column widths are changed, and cells selected together stay selected", async ({ page }) => {
+  await signIn(page);
+  const dir = await makeFolder(page, "Word look");
+  const cell = (text: string) => `<w:tc><w:tcPr><w:tcW w:w="3000" w:type="dxa"/></w:tcPr><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:tc>`;
+  const body =
+    '<w:tbl><w:tblPr><w:tblW w:w="6000" w:type="dxa"/></w:tblPr><w:tblGrid><w:gridCol w:w="3000"/><w:gridCol w:w="3000"/></w:tblGrid>' +
+    `<w:tr>${cell("A")}${cell("B")}</w:tr><w:tr>${cell("C")}${cell("D")}</w:tr></w:tbl><w:p/>`;
+  const id = await uploadFile(page, dir, "look.docx", Buffer.from(await buildDocument(body)));
+  const { frame } = await openEditor(page, id, "look.docx");
+
+  // All borders round the cell under the cursor
+  await frame.getByText("A", { exact: true }).click();
+  await page.getByRole("button", { name: "Borders" }).click();
+  await page.getByRole("menuitem", { name: "All borders" }).click();
+  await expect(frame.locator("td").first()).toBeVisible();
+
+  // Shading for A and B together; they stay selected for the next change
+  await frame.getByText("A", { exact: true }).click();
+  await frame.getByText("B", { exact: true }).click({ modifiers: ["Shift"] });
+  await page.getByRole("button", { name: "Shading" }).click();
+  // The palette has this color twice (in its first and last rows)
+  await page.getByRole("menuitem", { name: "#FFC000" }).first().click();
+  await expect(frame.locator("td[data-picked]")).toHaveCount(2);
+
+  // A's right border dragged 60 pixels to the right
+  await page.keyboard.press("Escape");
+  const a = (await frame.locator("td").first().boundingBox())!;
+  await page.mouse.move(a.x + a.width - 1, a.y + a.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(a.x + a.width + 59, a.y + a.height / 2, { steps: 6 });
+  await page.mouse.up();
+  await expect.poll(async () => (await frame.locator("td").first().boundingBox())!.width).toBeGreaterThan(a.width + 40);
+
+  const save = saving(page, id);
+  await page.getByRole("button", { name: "Save" }).click();
+  expect((await save).ok()).toBe(true);
+  const { xml } = await savedXml(page, id);
+  const cells = [...xml.matchAll(/<w:tc>(.*?)<\/w:tc>/g)].map((m) => m[1]);
+  expect(cells[0]).toContain('<w:tcBorders><w:top w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:left w:val="single" w:sz="4" w:space="0" w:color="auto"/>');
+  expect(cells[1]).toContain('<w:left w:val="single" w:sz="4" w:space="0" w:color="auto"/>');
+  expect(cells[2]).toContain('<w:top w:val="single" w:sz="4" w:space="0" w:color="auto"/>');
+  for (const c of cells.slice(0, 2)) expect(c).toContain('<w:shd w:val="clear" w:color="auto" w:fill="FFC000"/>');
+  expect(cells[2]).not.toContain("<w:shd");
+  const widths = [...xml.matchAll(/<w:gridCol w:w="(\d+)"\/>/g)].map((m) => Number(m[1]));
+  expect(widths[0] + widths[1]).toBe(6000);
+  expect(widths[0]).toBeGreaterThan(3600);
+  expect(xml).toContain(`<w:tcW w:w="${widths[0]}" w:type="dxa"/>`);
 });

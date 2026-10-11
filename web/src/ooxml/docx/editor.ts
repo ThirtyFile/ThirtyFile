@@ -10,7 +10,8 @@
  * is): Enter and Backspace stay in the cell, and Tab moves to the next cell (Shift+Tab to the one before), as in Word.
  * Rows and columns are added and deleted by changing the document (tableOps.ts) and opening the view again on it: the
  * host keeps the change before it, so Ctrl+Z right after undoes it. Cells are selected together for merging by
- * dragging across them or Shift+clicking another one; any key lets go of them.
+ * dragging across them or Shift+clicking another one; any key lets go of them. A column's right border is dragged to
+ * make it wider or narrower (a guide line shows where it goes).
  *
  * The browser's editing is limited to what can be written back: plain text only (formatting commands, pasting rich
  * content and dragging are refused), and Backspace or Delete never joins a paragraph with a block that is kept as it is.
@@ -22,7 +23,7 @@ import { BlockWriter, type BlockItem } from "./blocks";
 import type { Flow, PageFloat } from "./context";
 import { DOCX_CSS } from "./css";
 import { originalPieces, planEdits, readAllEdits, readParagraph, samePieces, saveEdits, writeXml, type EditPlan } from "./edit";
-import { cellRange, changeTable, type TableOp } from "./tableOps";
+import { cellRange, changeTable, type BorderKind, type TableOp } from "./tableOps";
 import { loadDocx, normalStyle } from "./index";
 import { contentWidth, parseSection, type Section } from "./section";
 import { fixScaled, resolveTabs } from "./tabs";
@@ -43,6 +44,19 @@ export interface Caret {
   block: number;
   offset: number;
   cell?: number;
+  /** Cells selected together (their corners' containers), selected again once the view is opened */
+  pick?: [number, number];
+}
+
+/** What a change of a table needs besides the caret's cell: the split's numbers, the borders, the shading, a column's move */
+export interface TableChange {
+  cols?: number;
+  rows?: number;
+  border?: BorderKind;
+  color?: string | null;
+  /** Resizing: the cell (container) whose right edge moves, and by how many twips */
+  cell?: number;
+  delta?: number;
 }
 
 export interface EditorOptions {
@@ -59,6 +73,8 @@ export interface EditorOptions {
   onUndo?(): boolean;
   /** The caret went into a table cell or out of one (`cell`), or cells were selected together for merging (`cells`) */
   onPlace?(place: { cell: boolean; cells: number }): void;
+  /** A change of a table made in the view itself (dragging a column's border), for the host to make as it makes the menus' */
+  onTable?(op: TableOp, change: TableChange): void;
 }
 
 export interface DocxEditor {
@@ -68,7 +84,7 @@ export interface DocxEditor {
    * The document with the table of the caret's cell changed as `op` says, and the cell (container) to put the caret in
    * once it is opened again; undefined when the caret isn't in a cell or that table can't be changed this way
    */
-  tableOp(op: TableOp, split?: { cols: number; rows: number }): { xml: string; cell: number | null } | undefined;
+  tableOp(op: TableOp, change?: TableChange): { xml: string; cell: number | null; pick?: [number, number] } | undefined;
   focus(): void;
   dispose(): void;
 }
@@ -86,6 +102,7 @@ const EDIT_CSS = `
 .tf-docx-editable [data-cell]:focus-within{box-shadow:inset 0 0 0 2px rgba(37,99,235,.55)}
 .tf-docx-editable [data-cell][data-picked]{background-image:linear-gradient(rgba(37,99,235,.22),rgba(37,99,235,.22))}
 .tf-docx-editable [data-picked] ::selection{background:transparent}
+.tf-docx-guide{position:fixed;width:0;border-left:1px dashed #2563eb;pointer-events:none;z-index:10}
 `;
 
 /** Input the editor can't write back: formatting, lists, links, rich drops */
@@ -306,8 +323,51 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
   };
   let dragFrom: HTMLElement | null = null;
   const sameTable = (a: HTMLElement, b: HTMLElement) => a.closest("table") === b.closest("table");
+  // A column's right border: grabbed within a few pixels of it, moved with a guide line, applied when let go
+  const EDGE = 4;
+  const edgeOf = (e: MouseEvent) => {
+    const cell = cellOf(e.target as Node);
+    if (!cell) return null;
+    const box = cell.getBoundingClientRect();
+    if (Math.abs(e.clientX - box.right) <= EDGE) return cell;
+    // Just right of a border, the pointer is over the next cell: the border is the cell before's
+    const prev = cell.previousElementSibling;
+    return Math.abs(e.clientX - box.left) <= EDGE && prev instanceof HTMLElement && prev.dataset.cell !== undefined ? prev : null;
+  };
+  let resizing: { cell: HTMLElement; x: number; guide: HTMLElement } | null = null;
+  const onHover = (e: MouseEvent) => {
+    if (resizing || e.buttons) return;
+    editable.style.cursor = edgeOf(e) ? "col-resize" : "";
+  };
+  const onResizeMove = (e: MouseEvent) => {
+    if (resizing) resizing.guide.style.left = `${e.clientX}px`;
+  };
+  const onResizeEnd = (e: MouseEvent) => {
+    if (!resizing) return;
+    const { cell, x, guide } = resizing;
+    resizing = null;
+    guide.remove();
+    document.removeEventListener("mousemove", onResizeMove);
+    document.removeEventListener("mouseup", onResizeEnd);
+    editable.style.cursor = "";
+    // Pixels on screen, at the page's zoom, as twips (15 to a CSS pixel)
+    const zoom = Number(sheet.style.zoom) || 1;
+    const delta = Math.round(((e.clientX - x) / zoom) * 15);
+    if (Math.abs(delta) >= 15) opts.onTable?.("resize", { cell: Number(cell.dataset.cell), delta });
+  };
   const onMouseDown = (e: MouseEvent) => {
     if (e.button !== 0) return;
+    const edge = edgeOf(e);
+    if (edge) {
+      e.preventDefault();
+      const table = edge.closest("table")!.getBoundingClientRect();
+      const guide = h("div", { class: "tf-docx-guide", style: `left:${e.clientX}px;top:${table.top}px;height:${table.height}px` });
+      document.body.append(guide);
+      resizing = { cell: edge, x: e.clientX, guide };
+      document.addEventListener("mousemove", onResizeMove);
+      document.addEventListener("mouseup", onResizeEnd);
+      return;
+    }
     const cell = cellOf(e.target as Node);
     if (e.shiftKey && cell) {
       const from = picked?.a ?? cellOf(getSelection()?.anchorNode ?? null);
@@ -339,6 +399,7 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
   document.addEventListener("selectionchange", onSelection);
   editable.addEventListener("mousedown", onMouseDown);
   editable.addEventListener("mousemove", onMouseMove);
+  editable.addEventListener("mousemove", onHover);
   document.addEventListener("mouseup", onMouseUp);
   editable.addEventListener("beforeinput", onBeforeInput);
   editable.addEventListener("keydown", onKeyDown);
@@ -357,6 +418,8 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
       if (caret) placeCaret(editable, caret);
     }
     onSelection();
+    const [pa, pb] = (caret?.pick ?? []).map((c) => editable.querySelector<HTMLElement>(`[data-cell="${c}"]`));
+    if (pa && pb) pick(pa, pb);
   };
   focus();
 
@@ -365,12 +428,23 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
       const xml = saveEdits(plan, readAllEdits(editable), shown);
       return { path: loaded.docPath, xml, caret: caretOf(editable), scroll: root.scrollTop };
     },
-    tableOp(op, split) {
-      // Merging: the cells selected together; anything else: the caret's cell (or the first of those selected)
-      const host = op === "merge" ? picked?.a : (cellOf(getSelection()?.anchorNode ?? null) ?? picked?.a);
+    tableOp(op, change = {}) {
+      // Merging, borders and shading: the cells selected together; resizing: the cell whose border was dragged;
+      // anything else: the caret's cell (or the first of those selected)
+      const ranged = op === "merge" || op === "border" || op === "shade";
+      const host =
+        op === "resize"
+          ? editable.querySelector<HTMLElement>(`[data-cell="${change.cell}"]`)
+          : op === "merge"
+            ? picked?.a
+            : ranged && picked
+              ? picked.a
+              : (cellOf(getSelection()?.anchorNode ?? null) ?? picked?.a);
       const tc = host ? plan.containers[Number(host.dataset.cell)]?.el : undefined;
-      const otherTc = op === "merge" && picked ? plan.containers[Number(picked.b.dataset.cell)]?.el : undefined;
+      const otherTc = ranged && picked ? plan.containers[Number(picked.b.dataset.cell)]?.el : undefined;
       if (!tc || tc.localName !== "tc" || (op === "merge" && !otherTc)) return undefined;
+      // Borders and shading keep the cells: they stay selected once the view is opened again
+      const keep: [number, number] | undefined = (op === "border" || op === "shade") && picked ? [Number(picked.a.dataset.cell), Number(picked.b.dataset.cell)] : undefined;
       // The document as edited, with the cells marked so they can be found in it
       tc.setAttribute("data-tf-cell", "");
       otherTc?.setAttribute("data-tf-other", "");
@@ -389,12 +463,12 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
       if (!target) return undefined;
       target.removeAttribute("data-tf-cell");
       other?.removeAttribute("data-tf-other");
-      const focusCell = changeTable(target, op, { other, cols: split?.cols, rows: split?.rows });
+      const focusCell = changeTable(target, op, { other, cols: change.cols, rows: change.rows, border: change.border, color: change.color, delta: change.delta });
       if (focusCell === undefined) return undefined;
       // Containers are the body, then the cells in document order (as planEdits makes them)
       const after = Array.from(body?.querySelectorAll("*") ?? []).filter((e) => e.localName === "tc");
       const at = focusCell ? after.indexOf(focusCell) : -1;
-      return { xml: writeXml(doc), cell: at >= 0 ? at + 1 : null };
+      return { xml: writeXml(doc), cell: at >= 0 ? at + 1 : null, pick: keep };
     },
     focus: () => editable.focus({ preventScroll: true }),
     dispose() {
@@ -403,6 +477,10 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
       document.removeEventListener("mouseup", onMouseUp);
       editable.removeEventListener("mousedown", onMouseDown);
       editable.removeEventListener("mousemove", onMouseMove);
+      editable.removeEventListener("mousemove", onHover);
+      document.removeEventListener("mousemove", onResizeMove);
+      document.removeEventListener("mouseup", onResizeEnd);
+      resizing?.guide.remove();
       editable.removeEventListener("beforeinput", onBeforeInput);
       editable.removeEventListener("keydown", onKeyDown);
       editable.removeEventListener("paste", onPaste);

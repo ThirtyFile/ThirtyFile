@@ -14,7 +14,7 @@ import { renderPptx } from "@/ooxml/pptx";
 import { OoxmlPackage, h } from "@/ooxml/core/package";
 import { parseTheme, type Theme } from "@/ooxml/core/theme";
 import { anchorBox, readDrawings, renderItem } from "@/ooxml/xlsx/drawings";
-import { openDocxEditor, type Caret, type DocxEditor, type EditorTexts } from "@/ooxml/docx/editor";
+import { openDocxEditor, type Caret, type DocxEditor, type EditorTexts, type TableChange } from "@/ooxml/docx/editor";
 import type { TableOp } from "@/ooxml/docx/tableOps";
 
 type RenderMessage = { type: "render"; kind: "docx" | "pptx"; buffer: ArrayBuffer };
@@ -32,7 +32,7 @@ type CollectMessage = { type: "collect"; id: number };
  * Word editing: change the table the caret is in (answered "table-refused" when it can't be): a row or column added or
  * deleted, the cells selected together merged, or the caret's cell split into `cols` columns and `rows` rows
  */
-type TableMessage = { type: "table"; op: TableOp; cols?: number; rows?: number };
+type TableMessage = { type: "table"; op: TableOp; cols?: number; rows?: number; border?: string; color?: string | null };
 type Message = RenderMessage | LoadXlsxMessage | DrawingsMessage | ScrollMessage | EditMessage | CollectMessage | TableMessage;
 
 const root = document.getElementById("root")!;
@@ -70,7 +70,8 @@ async function render({ kind, buffer }: RenderMessage) {
 
 /** After typing stops, and when the frame loses focus, the edited document goes to the host, which keeps it when the tab is switched */
 const CHANGED_DELAY = 600;
-const TABLE_OPS = new Set<string>(["rowAbove", "rowBelow", "colLeft", "colRight", "deleteRow", "deleteCol", "merge", "split"]);
+const TABLE_OPS = new Set<string>(["rowAbove", "rowBelow", "colLeft", "colRight", "deleteRow", "deleteCol", "merge", "split", "border", "shade"]);
+const BORDER_KINDS = new Set<string>(["all", "outside", "inside", "thickOutside", "top", "bottom", "left", "right", "none"]);
 
 /**
  * The document being edited. `base` is the document.xml the view was last opened on (null: the archive's): a change of
@@ -126,6 +127,10 @@ async function openEditor(xml: string | null, caret: Caret | null | undefined, s
       return true;
     },
     onPlace: (place) => reply({ type: "place", ...place }),
+    // Dragging a column's border: made like the menus' changes, after what may already be waiting
+    onTable: (op, change) => {
+      queue = queue.then(() => changeTable(op, change)).catch((err: unknown) => reply({ type: "error", message: err instanceof Error ? err.message : String(err) }));
+    },
   });
 }
 
@@ -160,13 +165,21 @@ async function edit({ buffer, xml, texts, caret, scroll }: EditMessage) {
   }
 }
 
-async function tableOp({ op, cols, rows }: TableMessage) {
+/** A table change asked for by the host's menus: only the values each change takes, checked */
+function tableOp({ op, cols, rows, border, color }: TableMessage) {
+  const change: TableChange = {};
+  if (op === "split") Object.assign(change, { cols: Number(cols) || 1, rows: Number(rows) || 1 });
+  if (op === "border") change.border = BORDER_KINDS.has(String(border)) ? (border as TableChange["border"]) : undefined;
+  if (op === "shade") change.color = typeof color === "string" ? color : null;
+  return changeTable(op, change);
+}
+
+async function changeTable(op: TableOp, change: TableChange) {
   if (!editor || !editing) return;
   const before = edited();
   let changed: ReturnType<DocxEditor["tableOp"]>;
   try {
-    const split = op === "split" ? { cols: Number(cols) || 1, rows: Number(rows) || 1 } : undefined;
-    changed = editor.tableOp(op, split);
+    changed = editor.tableOp(op, change);
   } catch (err) {
     console.warn("docx table", err);
     changed = undefined;
@@ -176,7 +189,7 @@ async function tableOp({ op, cols, rows }: TableMessage) {
     return;
   }
   editing.undo.push({ xml: before.xml, caret: before.caret });
-  await reopen(changed.xml, changed.cell !== null ? { block: -1, offset: 0, cell: changed.cell } : before.caret);
+  await reopen(changed.xml, changed.cell !== null ? { block: -1, offset: 0, cell: changed.cell, pick: changed.pick } : before.caret);
 }
 
 function collect({ id }: CollectMessage) {
