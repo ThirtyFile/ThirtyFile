@@ -524,3 +524,51 @@ test("a header and a footer are added and edited, and the document shows them on
   await expect(preview.locator(".tf-docx-hdr").getByText("Annual report 2026")).toBeVisible();
   await expect(preview.locator(".tf-docx-ftr").getByText("Example footer")).toBeVisible();
 });
+
+test("page numbers are inserted in a footer, typed around, and shown on the page once saved", async ({ page }) => {
+  await signIn(page);
+  const dir = await makeFolder(page, "Word page numbers");
+  // A page number already in the body, as Word writes it
+  const field =
+    '<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>4</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>';
+  const body = `<w:p><w:r><w:t xml:space="preserve">Printed on page </w:t></w:r>${field}</w:p>`;
+  const id = await uploadFile(page, dir, "numbers.docx", Buffer.from(await buildDocument(body)));
+  const { frame, text } = await openEditor(page, id, "numbers.docx");
+
+  // Its paragraph can be edited: the field is one piece, and text goes after it
+  await expect(frame.locator("[data-atom]")).toHaveCount(1);
+  await frame.getByText("Printed on page").click();
+  await text.press("End");
+  await text.pressSequentially(" of the report");
+
+  await page.getByRole("button", { name: "Header and footer" }).click();
+  await page.getByRole("menuitem", { name: "Add footer" }).click();
+  await expect(page.getByText("Footer: it shows on every page that uses it.", { exact: false })).toBeVisible();
+  const menu = page.getByRole("button", { name: "Footer", exact: true });
+
+  // "Page", the page number, "of", the number of pages: the caret goes on after each field
+  await text.click();
+  await text.pressSequentially("Page ");
+  await menu.click();
+  await page.getByRole("menuitem", { name: "Insert page number" }).click();
+  await expect(frame.locator("[data-atom]")).toHaveCount(1);
+  await text.pressSequentially(" of ");
+  await menu.click();
+  await page.getByRole("menuitem", { name: "Insert number of pages" }).click();
+  await expect(frame.locator("[data-atom]")).toHaveCount(2);
+  await expect(frame.getByRole("textbox", { name: "Document text" })).toHaveText("Page 1 of 1");
+
+  const save = saving(page, id);
+  await page.getByRole("button", { name: "Save" }).click();
+  expect((await save).ok()).toBe(true);
+  const { zip, xml } = await savedXml(page, id);
+  expect(xml).toContain(`<w:p><w:r><w:t xml:space="preserve">Printed on page </w:t></w:r>${field}<w:r><w:t xml:space="preserve"> of the report</w:t></w:r></w:p>`);
+  const footer = await zip.file("word/footer1.xml")!.async("string");
+  expect(footer).toMatch(
+    /<w:t xml:space="preserve">Page <\/w:t><\/w:r><w:fldSimple w:instr=" PAGE "><w:r><w:t>1<\/w:t><\/w:r><\/w:fldSimple><w:r><w:t xml:space="preserve"> of <\/w:t><\/w:r><w:fldSimple w:instr=" NUMPAGES ">/,
+  );
+
+  // The preview numbers the page
+  await page.getByRole("button", { name: "Done editing" }).click();
+  await expect(page.frameLocator('iframe[title="numbers.docx"]').locator(".tf-docx-ftr").first()).toHaveText("Page 1 of 1");
+});

@@ -304,6 +304,7 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
     line?: number;
     spaceBefore?: boolean;
     spaceAfter?: boolean;
+    field?: "PAGE" | "NUMPAGES";
   }) => {
     frame.current?.contentWindow?.postMessage({ type: "format", ...change }, "*");
     frame.current?.focus();
@@ -366,6 +367,9 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
         setCanAdd({ header: !!m.canAdd?.header, footer: !!m.canAdd?.footer });
         break;
       }
+      case "field-refused":
+        toast.error(t("Put the cursor in the text first."));
+        break;
       case "story-refused":
         toast.error(t("This can't be added here."));
         break;
@@ -492,6 +496,13 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
               {(canAdd.header || canAdd.footer) && <DropdownMenuSeparator />}
               {canAdd.header && <DropdownMenuItem onClick={() => openStory({ add: "header" })}>{t("Add header")}</DropdownMenuItem>}
               {canAdd.footer && <DropdownMenuItem onClick={() => openStory({ add: "footer" })}>{t("Add footer")}</DropdownMenuItem>}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem disabled={formatOff} onClick={() => format({ field: "PAGE" })}>
+                {t("Insert page number")}
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled={formatOff} onClick={() => format({ field: "NUMPAGES" })}>
+                {t("Insert number of pages")}
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           {current && (

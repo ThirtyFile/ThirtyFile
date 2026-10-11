@@ -280,7 +280,27 @@ class InlineRenderer {
     for (const c of flatKids(parent)) this.node(c);
   }
 
+  /** Editing: the field being shown (in a span the view keeps as one piece), and its last element */
+  private atom: { el: HTMLElement; last: Element } | null = null;
+
   node(c: Element) {
+    const atom = this.atom ? undefined : this.f.edit?.atom?.(c);
+    if (atom) {
+      const el = h("span", { class: "tf-docx-atom", "data-atom": atom.id, "data-ro": "", contenteditable: "false" });
+      this.push(el);
+      this.atom = { el, last: atom.last };
+    }
+    try {
+      this.nodeContent(c);
+    } finally {
+      if (this.atom && this.atom.last === c) {
+        this.pop(this.atom.el);
+        this.atom = null;
+      }
+    }
+  }
+
+  private nodeContent(c: Element) {
     const f = this.f;
     switch (c.localName) {
       case "r":

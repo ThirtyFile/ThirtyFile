@@ -15,7 +15,7 @@ import { OoxmlPackage, h } from "@/ooxml/core/package";
 import { parseTheme, type Theme } from "@/ooxml/core/theme";
 import { anchorBox, readDrawings, renderItem } from "@/ooxml/xlsx/drawings";
 import { FONT_NAME, openDocxEditor, type Caret, type DocxEditor, type EditorTexts, type FormatCommand, type TableChange } from "@/ooxml/docx/editor";
-import type { RangeFormat } from "@/ooxml/docx/formatOps";
+import type { FieldKind, RangeFormat } from "@/ooxml/docx/formatOps";
 import type { ListFormat } from "@/ooxml/docx/listOps";
 import type { TableOp } from "@/ooxml/docx/tableOps";
 
@@ -58,6 +58,8 @@ type FormatMessage = {
   line?: number;
   spaceBefore?: boolean;
   spaceAfter?: boolean;
+  /** A field to insert at the caret: the page number, or the number of pages */
+  field?: string;
 };
 /** Word editing: open a header or footer the document has (`path`; null: the body), or add one (`add`) and open it */
 type StoryMessage = { type: "story"; path?: string | null; add?: string };
@@ -271,6 +273,11 @@ function format(msg: FormatMessage) {
     queue = queue.then(() => changeList({ list })).catch((err: unknown) => reply({ type: "error", message: err instanceof Error ? err.message : String(err) }));
     return;
   }
+  if (msg.field === "PAGE" || msg.field === "NUMPAGES") {
+    const kind = msg.field;
+    queue = queue.then(() => addField(kind)).catch((err: unknown) => reply({ type: "error", message: err instanceof Error ? err.message : String(err) }));
+    return;
+  }
   if (msg.level === 1 || msg.level === -1) {
     const level = msg.level;
     queue = queue.then(() => changeList({ level })).catch((err: unknown) => reply({ type: "error", message: err instanceof Error ? err.message : String(err) }));
@@ -312,6 +319,19 @@ async function changeList(f: ListFormat) {
   }
   editing.undo.push({ parts: before.parts, caret: before.caret, story: editing.story });
   await reopen({ ...before.parts, ...changed.parts }, changed.caret);
+}
+
+/** A field inserted at the caret, and the view opened again with the caret just after it */
+async function addField(kind: FieldKind) {
+  if (!editor || !editing) return;
+  const before = edited();
+  const changed = editor.insertField(kind);
+  if (!changed) {
+    reply({ type: "field-refused" });
+    return;
+  }
+  editing.undo.push({ parts: before.parts, caret: before.caret, story: editing.story });
+  await reopen({ ...before.parts, [editor.path]: changed.xml }, changed.caret);
 }
 
 /**
