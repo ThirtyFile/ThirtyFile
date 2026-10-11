@@ -45,6 +45,7 @@ import { ApiError, type FileSource, type Node } from "@/api";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuRadioGroup,
@@ -230,6 +231,8 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
   const [stories, setStories] = useState<Story[]>([]);
   const [story, setStory] = useState<string | null>(null);
   const [canAdd, setCanAdd] = useState<Record<StoryKind, boolean>>({ header: false, footer: false });
+  /** A different first page (the open one's section), and different odd and even pages */
+  const [layout, setLayout] = useState({ firstPage: false, evenOdd: false });
   const waiting = useRef(new Map<number, { resolve(c: Collected): void; reject(e: Error): void }>());
   const nextId = useRef(0);
 
@@ -310,7 +313,7 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
     frame.current?.focus();
   };
   /** A header or footer in the view (null: the body), or one added to the first section and opened */
-  const openStory = (change: { path?: string | null; add?: StoryKind }) => {
+  const openStory = (change: { path?: string | null; add?: StoryKind; firstPage?: boolean; evenOdd?: boolean }) => {
     frame.current?.contentWindow?.postMessage({ type: "story", ...change }, "*");
     frame.current?.focus();
   };
@@ -358,13 +361,14 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
         break;
       }
       case "stories": {
-        const m = msg as { stories?: Story[]; story?: unknown; canAdd?: Partial<Record<StoryKind, unknown>> };
+        const m = msg as { stories?: Story[]; story?: unknown; canAdd?: Partial<Record<StoryKind, unknown>>; layout?: { firstPage?: unknown; evenOdd?: unknown } };
         const list = (m.stories ?? []).filter(
           (x) => typeof x?.path === "string" && (x.kind === "header" || x.kind === "footer") && ["default", "first", "even"].includes(x.type) && Number.isInteger(x.section),
         );
         setStories(list);
         setStory(typeof m.story === "string" && list.some((x) => x.path === m.story) ? m.story : null);
         setCanAdd({ header: !!m.canAdd?.header, footer: !!m.canAdd?.footer });
+        setLayout({ firstPage: !!m.layout?.firstPage, evenOdd: !!m.layout?.evenOdd });
         break;
       }
       case "field-refused":
@@ -496,6 +500,13 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
               {(canAdd.header || canAdd.footer) && <DropdownMenuSeparator />}
               {canAdd.header && <DropdownMenuItem onClick={() => openStory({ add: "header" })}>{t("Add header")}</DropdownMenuItem>}
               {canAdd.footer && <DropdownMenuItem onClick={() => openStory({ add: "footer" })}>{t("Add footer")}</DropdownMenuItem>}
+              <DropdownMenuSeparator />
+              <DropdownMenuCheckboxItem checked={layout.firstPage} closeOnClick onCheckedChange={(on) => openStory({ firstPage: on })}>
+                {t("Different first page")}
+              </DropdownMenuCheckboxItem>
+              <DropdownMenuCheckboxItem checked={layout.evenOdd} closeOnClick onCheckedChange={(on) => openStory({ evenOdd: on })}>
+                {t("Different odd and even pages")}
+              </DropdownMenuCheckboxItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem disabled={formatOff} onClick={() => format({ field: "PAGE" })}>
                 {t("Insert page number")}
