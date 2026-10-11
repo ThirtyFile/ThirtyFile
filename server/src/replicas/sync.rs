@@ -212,7 +212,18 @@ async fn recheck_copies(cx: &Ctx<'_>, location: &str, dst: &Arc<dyn Storage>) ->
             if let Some(stop) = cx.stop() {
                 return Ok(Err(stop));
             }
-            let whole = state == "stale" && matches!(read_back(dst.as_ref(), &hash, size).await, Ok((h, n)) if h == hash && n == size as u64);
+            let read = if state == "stale" { Some(read_back(dst.as_ref(), &hash, size).await) } else { None };
+            // A copy that couldn't be read now (the target not answering) isn't taken for damaged: the sync stops, and
+            // the copy is checked again next time
+            if let Some(Err(e)) = &read
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                return Err(AppError::new(
+                    axum::http::StatusCode::BAD_GATEWAY,
+                    format!("Couldn't read a copy back on the target: {}", crate::locations::describe(e)),
+                ));
+            }
+            let whole = matches!(read, Some(Ok((h, n))) if h == hash && n == size as u64);
             if whole {
                 let _w = st.write_lock.lock().await;
                 sqlx::query("UPDATE replica_copies SET state = 'verified', verified_at = ? WHERE hash = ? AND location_id = ?")

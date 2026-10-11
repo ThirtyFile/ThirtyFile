@@ -426,6 +426,7 @@ export default {
   "The content {hash} is missing": "コンテンツ {hash} が見つかりません",
   "{n} item of the copy is missing or damaged|{n} items of the copy are missing or damaged": "バックアップ内の {n} 件の項目が見つからないか、破損しています",
   "Couldn't read from the copy's location: {error}": "バックアップの保存場所から読み取れませんでした：{error}",
+  "Couldn't read a copy back on the target: {error}": "ターゲット上のコピーを読み戻せませんでした：{error}",
   "Couldn't delete from the copy's location: {error}": "バックアップの保存場所から削除できませんでした：{error}",
   "The copy's location can't be reached: {error}": "バックアップの保存場所に接続できません：{error}",
   "This snapshot no longer exists": "このスナップショットはもう存在しません",

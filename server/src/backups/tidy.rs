@@ -79,9 +79,15 @@ pub async fn verify(cx: &Ctx<'_>) -> AppResult<Stop> {
                         .execute(&st.db)
                         .await?;
                 }
-                Ok(_) => cx.failed("", None, format!("The content {} is damaged", &hash[..12])),
+                Ok(_) => {
+                    cx.failed("", None, format!("The content {} is damaged", &hash[..12]));
+                    forget_object(st, &set.id, dst.as_ref(), &key, &hash).await?;
+                }
                 Err(Ok(stop)) => return Ok(stop),
-                Err(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => cx.failed("", None, format!("The content {} is missing", &hash[..12])),
+                Err(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => {
+                    cx.failed("", None, format!("The content {} is missing", &hash[..12]));
+                    forget_object(st, &set.id, dst.as_ref(), &key, &hash).await?;
+                }
                 Err(Err(e)) => return Err(read_error(&e)),
             }
             cx.done(1, size).await?;
@@ -277,4 +283,21 @@ async fn sweep(cx: &Ctx<'_>, dst: &dyn Storage, dir: &str) -> AppResult<Option<S
         }
     }
     Ok(None)
+}
+
+/// A content the destination doesn't hold whole any more: what is left of it there goes, and the set no longer counts
+/// it as held, so the next snapshot stores it again (snapshots name content by its hash, so the earlier ones that name
+/// it are whole again then). Without this, every later snapshot would take it for stored, and once the earlier good
+/// snapshots aged out, nothing would hold that file.
+async fn forget_object(st: &crate::state::AppState, set: &str, dst: &dyn crate::storage::Storage, key: &str, hash: &str) -> AppResult<()> {
+    if let Err(e) = dst.delete_at(key).await {
+        tracing::warn!("Couldn't delete damaged backup content: {e}");
+    }
+    let _w = st.write_lock.lock().await;
+    let mut tx = crate::db::begin_write(&st.db).await?;
+    sqlx::query("DELETE FROM backup_objects WHERE set_id = ? AND hash = ?").bind(set).bind(hash).execute(&mut *tx).await?;
+    // Files of folder spaces read before are taken as stored by what they were then: read again
+    sqlx::query("DELETE FROM backup_folder_files WHERE set_id = ? AND hash = ?").bind(set).bind(hash).execute(&mut *tx).await?;
+    tx.commit().await?;
+    Ok(())
 }

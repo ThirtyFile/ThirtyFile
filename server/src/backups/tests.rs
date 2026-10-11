@@ -640,6 +640,79 @@ async fn a_copy_can_be_checked_and_what_is_missing_or_damaged_is_found() {
     assert_eq!(run_job(&env, &check).await, "failed");
     let (failures,): (String,) = sqlx::query_as("SELECT failures FROM backup_jobs WHERE id = ?").bind(&check).fetch_one(&env.st.db).await.unwrap();
     assert!(failures.contains("damaged") && failures.contains("missing"), "{failures}");
+    // Neither counts as held any more, and the damaged one is gone from the destination: the next snapshot stores both
+    // again, rather than taking them for stored
+    let (held,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM backup_objects WHERE set_id = ?").bind(&set).fetch_one(&env.st.db).await.unwrap();
+    assert_eq!(held, 0);
+    assert!(!objects[0].exists());
+}
+
+#[tokio::test]
+async fn a_snapshot_replaces_the_list_of_files_and_marker_a_try_before_it_left() {
+    // Records what the destination is asked to do with the snapshot's list of files and its completion marker
+    struct Recorded {
+        inner: Arc<dyn Storage>,
+        log: Arc<crate::sync::Mutex<Vec<String>>>,
+    }
+    impl Recorded {
+        fn note(&self, what: &str, key: &str) {
+            if key.contains("/snapshots/") {
+                self.log.lock().push(format!("{what} {}", key.rsplit('/').next().unwrap_or_default()));
+            }
+        }
+    }
+    impl Storage for Recorded {
+        fn put_file<'a>(&'a self, hash: &'a str, src: &'a FsPath) -> BoxFuture<'a, std::io::Result<()>> {
+            self.inner.put_file(hash, src)
+        }
+        fn open<'a>(&'a self, hash: &'a str, start: u64, len: u64) -> BoxFuture<'a, std::io::Result<storage::BoxReader>> {
+            self.inner.open(hash, start, len)
+        }
+        fn delete<'a>(&'a self, hash: &'a str) -> BoxFuture<'a, std::io::Result<()>> {
+            self.inner.delete(hash)
+        }
+        fn check(&self) -> BoxFuture<'_, std::io::Result<()>> {
+            self.inner.check()
+        }
+        fn ping(&self) -> BoxFuture<'_, std::io::Result<()>> {
+            self.inner.ping()
+        }
+        fn content_dir(&self) -> &'static str {
+            self.inner.content_dir()
+        }
+        fn list_dir<'a>(&'a self, dir: &'a str) -> BoxFuture<'a, std::io::Result<Vec<storage::Entry>>> {
+            self.inner.list_dir(dir)
+        }
+        fn stat<'a>(&'a self, key: &'a str) -> BoxFuture<'a, std::io::Result<Option<storage::Entry>>> {
+            self.inner.stat(key)
+        }
+        fn put_at<'a>(&'a self, key: &'a str, src: &'a FsPath) -> BoxFuture<'a, std::io::Result<()>> {
+            self.note("put", key);
+            self.inner.put_at(key, src)
+        }
+        fn open_at<'a>(&'a self, key: &'a str, start: u64, len: u64) -> BoxFuture<'a, std::io::Result<storage::BoxReader>> {
+            self.inner.open_at(key, start, len)
+        }
+        fn delete_at<'a>(&'a self, key: &'a str) -> BoxFuture<'a, std::io::Result<()>> {
+            self.note("delete", key);
+            self.inner.delete_at(key)
+        }
+    }
+    let env = testutil::env().await;
+    let amy = env.user("amy", true).await;
+    env.upload(&amy, amy.root(), "a.txt", b"first").await;
+    add_nas(&env, "nas").await;
+    let log: Arc<crate::sync::Mutex<Vec<String>>> = Default::default();
+    let inner = env.st.storages.read().get("nas").cloned().unwrap();
+    env.st.storages.write().insert("nas".into(), Arc::new(Recorded { inner, log: log.clone() }));
+    let (_, job) = copy_all(&env, "local", "nas").await;
+    assert_eq!(run_job(&env, &job).await, "done");
+    // The marker of an earlier try goes first, then its list; only then are they stored (a destination that keeps a
+    // file already there, as SFTP does, would otherwise keep the earlier list)
+    let log = log.lock().clone();
+    let at = |what: &str| log.iter().position(|l| l.starts_with(what)).unwrap_or_else(|| panic!("{what} in {log:?}"));
+    assert!(at("delete complete") < at("delete manifest"), "{log:?}");
+    assert!(at("delete manifest") < at("put manifest"), "{log:?}");
 }
 
 #[tokio::test]
