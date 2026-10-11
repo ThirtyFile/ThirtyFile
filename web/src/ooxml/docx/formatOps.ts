@@ -230,6 +230,33 @@ function splitAt(x: WordXml, t: Element, k: number): Element | null {
  * Applies `f` to the range between the marks in `doc`, and takes the marks out. False when the marks aren't both there
  * (nothing is changed, and any mark left is taken out).
  */
+/**
+ * The paragraphs the marks are in and those between them (the paragraphs the selection touches), with the marks taken
+ * out; null when the marks aren't both there (any mark left is taken out too)
+ */
+export function markedParagraphs(doc: Document): Element[] | null {
+  const body = byName(doc.documentElement, "body")[0];
+  if (!body) return null;
+  const texts = byName(body, "t");
+  const startP = paragraphOf(texts.find((t) => (t.textContent ?? "").includes(MARK_START)) ?? null);
+  const endP = paragraphOf(texts.find((t) => (t.textContent ?? "").includes(MARK_END)) ?? null);
+  for (const t of texts) if (HAS_MARK.test(t.textContent ?? "")) t.textContent = (t.textContent ?? "").replace(MARKS, "");
+  const ps = byName(body, "p");
+  const i = startP ? ps.indexOf(startP) : -1;
+  const j = endP ? ps.indexOf(endP) : -1;
+  return i >= 0 && j >= i ? ps.slice(i, j + 1) : null;
+}
+
+/** A paragraph's properties element, made when missing (it comes first) */
+export function paragraphProps(x: WordXml, p: Element): Element {
+  return pPrOf(x, p);
+}
+
+/** A paragraph property `name` in its place among the others, its attributes cleared to be set afresh */
+export function paragraphProp(x: WordXml, pPr: Element, name: string): Element {
+  return prop(x, pPr, name, PPR);
+}
+
 export function formatRange(doc: Document, f: RangeFormat): boolean {
   const body = byName(doc.documentElement, "body")[0];
   if (!body) return false;
@@ -247,11 +274,7 @@ export function formatRange(doc: Document, f: RangeFormat): boolean {
   const endP = paragraphOf(endT);
   // A style or alignment is the paragraphs': the runs stay as they are, the marks just go
   if (!("size" in f)) {
-    for (const t of texts()) if (HAS_MARK.test(t.textContent ?? "")) t.textContent = (t.textContent ?? "").replace(MARKS, "");
-    const ps = byName(body, "p");
-    const i = startP ? ps.indexOf(startP) : -1;
-    const j = endP ? ps.indexOf(endP) : -1;
-    for (const p of i >= 0 && j >= i ? ps.slice(i, j + 1) : []) {
+    for (const p of markedParagraphs(doc) ?? []) {
       const pPr = pPrOf(x, p);
       if ("align" in f) x.set(prop(x, pPr, "jc", PPR), "val", f.align);
       else if (f.isDefault) kid(pPr, "pStyle")?.remove();

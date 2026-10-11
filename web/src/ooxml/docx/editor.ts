@@ -28,6 +28,7 @@ import type { Flow, PageFloat } from "./context";
 import { DOCX_CSS } from "./css";
 import { originalPieces, planEdits, readAllEdits, readParagraph, samePieces, saveEdits, writeXml, type EditPlan, type FmtOf } from "./edit";
 import { formatRange, MARK_END, MARK_START, type Fmt, type RangeFormat } from "./formatOps";
+import { formatList, listKind, type ListFormat, type ListKind } from "./listOps";
 import { cellRange, changeTable, type BorderKind, type TableOp } from "./tableOps";
 import { loadDocx, normalStyle } from "./index";
 import { contentWidth, parseSection, type Section } from "./section";
@@ -65,8 +66,8 @@ export interface TableChange {
 }
 
 export interface EditorOptions {
-  /** document.xml with edits not saved yet, to open instead of the archive's */
-  xml?: string | null;
+  /** Parts with edits not saved yet (by path: document.xml, a numbering part a list made…), to open instead of the archive's */
+  parts?: Record<string, string>;
   texts: EditorTexts;
   caret?: Caret | null;
   scroll?: number;
@@ -78,6 +79,8 @@ export interface EditorOptions {
   onUndo?(): boolean;
   /** The caret went into a table cell or out of one (`cell`), or cells were selected together for merging (`cells`) */
   onPlace?(place: Place): void;
+  /** Tab or Shift+Tab at the start of a list item: the host moves it a level in or out, as the toolbar's buttons do */
+  onList?(f: ListFormat): void;
   /** A change of a table made in the view itself (dragging a column's border), for the host to make as it makes the menus' */
   onTable?(op: TableOp, change: TableChange): void;
 }
@@ -92,6 +95,8 @@ export interface CaretFormat {
   size: number;
   style: string | null;
   align: "left" | "center" | "right" | "both";
+  /** The kind of list the paragraph is in, if any */
+  list: ListKind | null;
 }
 
 /** Where the caret is: in a table cell, how many cells are selected together, and the formatting there */
@@ -128,6 +133,14 @@ export interface DocxEditor {
   formatRange(f: RangeFormat): { xml: string; caret: Caret | null } | undefined;
   /** The paragraph styles the document defines (shown in its own style list) */
   styles: ParagraphStyle[];
+  /** Path of document.xml */
+  path: string;
+  /**
+   * The parts a list change (bulleted, numbered, a level in or out) makes of the paragraphs the selection touches:
+   * document.xml, and the numbering part with its relationship and content type when they change; and where to put
+   * the caret once the view is opened again. Undefined when there is no selection
+   */
+  formatList(f: ListFormat): Promise<{ parts: Record<string, string>; caret: Caret | null } | undefined>;
   focus(): void;
   dispose(): void;
 }
@@ -158,10 +171,7 @@ const FORMATS = new Set(["formatBold", "formatItalic", "formatUnderline", "forma
 const CONTROL = /[\u{0}-\u{8}\u{b}\u{c}\u{e}-\u{1f}\u{fffe}\u{ffff}]/gu;
 
 export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts: EditorOptions): Promise<DocxEditor> {
-  const rootRels = await pkg.rels("");
-  const docPath = rootRels.find((r) => r.type.endsWith("/officeDocument"))?.target ?? "word/document.xml";
-  if (opts.xml) pkg.replaceXml(docPath, opts.xml);
-  else pkg.forgetXml(docPath);
+  pkg.useParts(opts.parts ?? {});
   const loaded = await loadDocx(pkg);
   const { doc, docXml, docRels } = loaded;
   const plan = planEdits(docXml);
@@ -294,6 +304,11 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
     return Object.keys(out).length ? out : undefined;
   };
   const styles = await paragraphStyles(pkg, docRels, docXml);
+  // The parts lists use: the numbering part (where it is, or where it goes), the document's relationships, content types
+  const numberingPath = docRels.find((r) => r.type.endsWith("/numbering") && !r.external)?.target ?? loaded.docPath.replace(/[^/]*$/, "numbering.xml");
+  const relsPath = loaded.docPath.replace(/([^/]*)$/, "_rels/$1.rels");
+  const stylesPath = docRels.find((r) => r.type.endsWith("/styles") && !r.external)?.target ?? null;
+  const numbering = await pkg.xml(numberingPath);
 
   // A view narrower than the page shows the page smaller
   const fit = () => {
@@ -329,6 +344,15 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
       if (cell && cell !== editable) {
         e.preventDefault();
         moveToCell(cell, e.shiftKey ? -1 : 1);
+        return;
+      }
+      // At the start of a list item (or with several paragraphs selected in a list), Tab and Shift+Tab change its level
+      const sel = getSelection();
+      const p = sel?.rangeCount ? blockOf(editable, sel.anchorNode) : null;
+      const listed = !!p?.querySelector(".tf-docx-marker");
+      if (listed && p && sel && (!sel.isCollapsed ? blockOf(editable, sel.focusNode) !== p : atEdge(p, sel.getRangeAt(0), true))) {
+        e.preventDefault();
+        opts.onList?.({ level: e.shiftKey ? -1 : 1 });
         return;
       }
       if (e.shiftKey) return;
@@ -369,7 +393,7 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
     return host && host !== editable ? host : null;
   };
   const pickedCells = () => Array.from(editable.querySelectorAll<HTMLElement>("[data-cell][data-picked]"));
-  const place = () => opts.onPlace?.({ cell: inCell === true || !!picked, cells: picked ? pickedCells().length : 0, fmt: caretFormat(plan, editable) });
+  const place = () => opts.onPlace?.({ cell: inCell === true || !!picked, cells: picked ? pickedCells().length : 0, fmt: caretFormat(plan, editable, numbering) });
   let lastFmt = "";
   // The last selection the person made: the host's toolbar takes focus away (a list of sizes, a color menu), and focus
   // coming back may move the selection, so commands from the toolbar act on this one. Once the view loses focus, the
@@ -400,7 +424,7 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
     keepSelection();
     const now = !!cellOf(getSelection()?.anchorNode ?? null);
     // Told when the cell or the formatting where the caret is changes
-    const fmt = JSON.stringify(caretFormat(plan, editable));
+    const fmt = JSON.stringify(caretFormat(plan, editable, numbering));
     if (now === inCell && fmt === lastFmt) return;
     inCell = now;
     lastFmt = fmt;
@@ -524,6 +548,38 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
   };
   focus();
 
+  /**
+   * The document as edited, with marks at the selection's ends (`word`: no selection takes the word at the caret), and
+   * where the caret was; undefined when there is no selection in the view
+   */
+  const markSelection = (word: boolean): { doc: Document; caret: Caret | null } | undefined => {
+    restoreSelection();
+    const sel = getSelection();
+    if (!sel?.rangeCount || !editable.contains(sel.anchorNode)) return undefined;
+    if (word && sel.isCollapsed) {
+      sel.modify("move", "backward", "word");
+      sel.modify("extend", "forward", "word");
+    }
+    const caret = caretOf(editable);
+    const range = sel.getRangeAt(0);
+    const start = document.createTextNode(MARK_START);
+    const end = document.createTextNode(MARK_END);
+    const atEnd = range.cloneRange();
+    atEnd.collapse(false);
+    atEnd.insertNode(end);
+    const atStart = range.cloneRange();
+    atStart.collapse(true);
+    atStart.insertNode(start);
+    let text: string;
+    try {
+      text = saveEdits(plan, readAllEdits(editable, fmtOf), shown) ?? writeXml(plan.doc);
+    } finally {
+      start.remove();
+      end.remove();
+    }
+    return { doc: new DOMParser().parseFromString(text, "application/xml"), caret };
+  };
+
   return {
     collect() {
       const xml = saveEdits(plan, readAllEdits(editable, fmtOf), shown);
@@ -583,35 +639,32 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
       onSelection();
     },
     formatRange(f) {
-      restoreSelection();
-      const sel = getSelection();
-      if (!sel?.rangeCount || !editable.contains(sel.anchorNode)) return undefined;
-      // A font size for no selection: the word at the caret, as in Word
-      if ("size" in f && sel.isCollapsed) {
-        sel.modify("move", "backward", "word");
-        sel.modify("extend", "forward", "word");
-      }
-      const caret = caretOf(editable);
-      const range = sel.getRangeAt(0);
-      const start = document.createTextNode(MARK_START);
-      const end = document.createTextNode(MARK_END);
-      const atEnd = range.cloneRange();
-      atEnd.collapse(false);
-      atEnd.insertNode(end);
-      const atStart = range.cloneRange();
-      atStart.collapse(true);
-      atStart.insertNode(start);
-      let text: string;
-      try {
-        text = saveEdits(plan, readAllEdits(editable, fmtOf), shown) ?? writeXml(plan.doc);
-      } finally {
-        start.remove();
-        end.remove();
-      }
-      const doc = new DOMParser().parseFromString(text, "application/xml");
-      if (!formatRange(doc, f)) return undefined;
-      return { xml: writeXml(doc), caret };
+      const marked = markSelection("size" in f);
+      if (!marked) return undefined;
+      if (!formatRange(marked.doc, f)) return undefined;
+      return { xml: writeXml(marked.doc), caret: marked.caret };
     },
+    async formatList(f) {
+      const marked = markSelection(false);
+      if (!marked) return undefined;
+      // Copies of the parts a list may change, so the view's own stay as they were until it is opened again
+      const copy = async (path: string | null) => {
+        const d = path ? await pkg.xml(path) : null;
+        return d ? (d.cloneNode(true) as Document) : null;
+      };
+      const rels = (await copy(relsPath)) ?? new DOMParser().parseFromString('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>', "application/xml");
+      const result = formatList(
+        { doc: marked.doc, numbering: await copy(numberingPath), styles: stylesPath ? await pkg.xml(stylesPath) : null, rels, types: await copy("[Content_Types].xml") },
+        f,
+      );
+      if (!result) return undefined;
+      const parts: Record<string, string> = { [loaded.docPath]: writeXml(marked.doc) };
+      if (result.changed.numbering && result.numbering) parts[numberingPath] = writeXml(result.numbering);
+      if (result.changed.rels && result.rels) parts[relsPath] = writeXml(result.rels);
+      if (result.changed.types && result.types) parts["[Content_Types].xml"] = writeXml(result.types);
+      return { parts, caret: marked.caret };
+    },
+    path: loaded.docPath,
     styles,
     focus: () => editable.focus({ preventScroll: true }),
     dispose() {
@@ -807,7 +860,7 @@ function shownOfBlock(block: HTMLElement): Shown {
 }
 
 /** The formatting where the caret is */
-function caretFormat(plan: EditPlan, editable: HTMLElement): CaretFormat | null {
+function caretFormat(plan: EditPlan, editable: HTMLElement, numbering: Document | null): CaretFormat | null {
   const sel = getSelection();
   const node = sel?.anchorNode ?? null;
   if (!node || !editable.contains(node)) return null;
@@ -820,6 +873,11 @@ function caretFormat(plan: EditPlan, editable: HTMLElement): CaretFormat | null 
   const source = para ? plan.blocks[Number(para.dataset.para)] : null;
   const pStyle = source ? kid(kid(source, "pPr"), "pStyle") : null;
   const align = para ? getComputedStyle(para).textAlign : "left";
+  const numPr = source ? kid(kid(source, "pPr"), "numPr") : null;
+  const numVal = (name: string) => {
+    const e = kid(numPr, name);
+    return e ? (e.getAttributeNS(e.namespaceURI, "val") ?? e.getAttribute("w:val")) : null;
+  };
   return {
     b: shown?.b ?? Number(cs.fontWeight) >= 600,
     i: shown?.i ?? cs.fontStyle !== "normal",
@@ -828,6 +886,7 @@ function caretFormat(plan: EditPlan, editable: HTMLElement): CaretFormat | null 
     size: Math.round(parseFloat(cs.fontSize) * 0.75 * 2) / 2,
     style: pStyle ? (pStyle.getAttributeNS(pStyle.namespaceURI, "val") ?? pStyle.getAttribute("w:val")) : null,
     align: align === "center" ? "center" : align === "right" || align === "end" ? "right" : align === "justify" ? "both" : "left",
+    list: listKind(numbering, numVal("numId"), Number(numVal("ilvl") ?? 0) || 0),
   };
 }
 

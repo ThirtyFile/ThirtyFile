@@ -2,7 +2,7 @@
 // didn't touch is kept as it was
 import JSZip from "jszip";
 import { expect, test, type Page } from "@playwright/test";
-import { buildDocument, UNKNOWN_CONTENT, UNKNOWN_PART } from "../fixtures";
+import { buildDocument, buildDocx, UNKNOWN_CONTENT, UNKNOWN_PART } from "../fixtures";
 import { answer, makeFolder, signIn, uploadFile } from "./helpers";
 
 const HEADING = '<w:p w14:paraId="10000001"><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Quarterly report</w:t></w:r></w:p>';
@@ -376,4 +376,49 @@ test("text is formatted from the toolbar and with shortcuts, and the file gets j
   const second = paragraphs.find((p) => p.includes("Second"))!;
   expect(second).toContain('<w:pStyle w:val="Heading1"/>');
   expect(second).toMatch(/<w:rPr><w:color w:val="FF0000"\/><w:sz w:val="28"\/><w:szCs w:val="28"\/><w:highlight w:val="yellow"\/><\/w:rPr><w:t>Second<\/w:t>/);
+});
+
+test("bulleted and numbered lists are made, and a document without lists gets its numbering part", async ({ page }) => {
+  await signIn(page);
+  const dir = await makeFolder(page, "Word lists");
+  // A bare document: no numbering part, not even relationships
+  const id = await uploadFile(page, dir, "lists.docx", Buffer.from(await buildDocx(["One", "Two", "Three", "Four"])));
+  const { frame, text } = await openEditor(page, id, "lists.docx");
+  const bullets = page.getByRole("button", { name: "Bulleted list" });
+
+  // One and Two become a bulleted list; Tab at the start of Two moves it a level in
+  await frame.getByText("One").click();
+  await frame.getByText("Two").click({ modifiers: ["Shift"] });
+  await bullets.click();
+  await expect(frame.locator(".tf-docx-marker")).toHaveCount(2);
+  await frame.getByText("Two").click();
+  await text.press("Home");
+  await text.press("Tab");
+  await expect(frame.getByText("Two")).toBeVisible();
+  await frame.getByText("One").click();
+  await expect(bullets).toHaveAttribute("aria-pressed", "true");
+
+  // Three and Four become a numbered list, then Four is taken out of it
+  await frame.getByText("Three").click();
+  await frame.getByText("Four").click({ modifiers: ["Shift"] });
+  await page.getByRole("button", { name: "Numbered list" }).click();
+  await expect(frame.locator(".tf-docx-marker")).toHaveCount(4);
+  await frame.getByText("Four").click();
+  await page.getByRole("button", { name: "Numbered list" }).click();
+  await expect(frame.locator(".tf-docx-marker")).toHaveCount(3);
+
+  const save = saving(page, id);
+  await page.getByRole("button", { name: "Save" }).click();
+  expect((await save).ok()).toBe(true);
+  const { zip, xml } = await savedXml(page, id);
+  const items = [...xml.matchAll(/<w:p>(.*?)<\/w:p>/g)].map((m) => {
+    const num = /<w:numPr><w:ilvl w:val="(\d)"\/><w:numId w:val="(\d+)"\/><\/w:numPr>/.exec(m[1]);
+    return `${/<w:t[^>]*>([^<]*)<\/w:t>/.exec(m[1])?.[1]}:${num ? `${num[2]}/${num[1]}` : "-"}`;
+  });
+  expect(items).toEqual(["One:1/0", "Two:1/1", "Three:2/0", "Four:-"]);
+  const numbering = await zip.file("word/numbering.xml")!.async("string");
+  expect(numbering).toContain('<w:numFmt w:val="bullet"/>');
+  expect(numbering).toContain('<w:numFmt w:val="decimal"/>');
+  expect(await zip.file("word/_rels/document.xml.rels")!.async("string")).toContain('Target="numbering.xml"');
+  expect(await zip.file("[Content_Types].xml")!.async("string")).toContain('PartName="/word/numbering.xml"');
 });

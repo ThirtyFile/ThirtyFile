@@ -5,29 +5,33 @@
 import JSZip from "jszip";
 import { api, fetchOffice, type FileSource, type Node } from "@/api";
 import { getDraft, onDraftRemoved } from "@/lib/drafts";
-import { cloneZip, readEntry } from "@/ooxml/core/package";
+import { cloneZip } from "@/ooxml/core/package";
 import type { Caret } from "@/ooxml/docx/editor";
 import { t } from "@/lib/i18n";
 
+/** Edited parts of the file by path (document.xml, and the numbering part a list made, say); the others are the file's */
+export type Parts = Record<string, string>;
+
 export interface DocxSession {
-  /** The file as opened: saving puts the edited document.xml into a copy of it, every other part stays as it was */
+  /** The file as opened: saving puts the edited parts into a copy of it, every other part stays as it was */
   zip: JSZip;
   /** Its bytes, for the editing frame (each frame gets a copy) */
   buffer: ArrayBuffer;
   /** updated_at when opened or last saved, sent when saving so a newer version isn't overwritten */
   base: number;
-  /** Path of document.xml (known once the frame has answered) */
-  path: string | null;
-  /** document.xml as edited, and as last saved here: null is as it was in the file when opened */
-  current: string | null;
-  saved: string | null;
+  /** The edited parts, and those last saved here: null is the file as it was when opened */
+  current: Parts | null;
+  saved: Parts | null;
   caret: Caret | null;
   scroll: number;
 }
 
 const sessions = new Map<string, DocxSession>();
 
-export const isDirty = (s: DocxSession) => s.current !== s.saved;
+/** Parts compared by what they hold (no parts, or none edited, being the file as opened) */
+const partsKey = (parts: Parts | null) => (parts && Object.keys(parts).length ? JSON.stringify(Object.entries(parts).sort(([a], [b]) => a.localeCompare(b))) : "");
+
+export const isDirty = (s: DocxSession) => partsKey(s.current) !== partsKey(s.saved);
 
 // Draft removed while the session still has unsaved edits = the edits were discarded (closing the tab, say)
 onDraftRemoved((nodeId) => {
@@ -47,7 +51,7 @@ export function reusableSession(node: Node): DocxSession | undefined {
 export async function openSession(node: Node, source: FileSource, signal?: AbortSignal): Promise<DocxSession> {
   const buffer = await fetchOffice(source.contentUrl(node), signal);
   const zip = await JSZip.loadAsync(buffer.slice(0));
-  return { zip, buffer, base: node.updated_at, path: null, current: null, saved: null, caret: null, scroll: 0 };
+  return { zip, buffer, base: node.updated_at, current: null, saved: null, caret: null, scroll: 0 };
 }
 
 export function keepSession(nodeId: string, s: DocxSession) {
@@ -65,19 +69,20 @@ export function dropSession(nodeId: string) {
 const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 /**
- * Saves `xml` (null: document.xml as it was when opened) into the file. Only document.xml changes: the archive's other
- * entries are written as they are.
+ * Saves the edited parts into the file (null: the file as it was when opened). Only those parts change: the archive's
+ * other entries are written as they are, and a part edited before but not now is the archive's again.
  */
-export async function saveSession(s: DocxSession, nodeId: string, path: string, xml: string | null): Promise<Node> {
-  const text = xml ?? (await readEntry(s.zip, path, "string"));
-  if (text === null) throw new Error(t("Couldn't save"));
+export async function saveSession(s: DocxSession, nodeId: string, parts: Parts | null): Promise<Node> {
   const work = cloneZip(s.zip);
-  work.file(path, text, { createFolders: false });
+  for (const [path, text] of Object.entries(parts ?? {})) {
+    if (typeof text !== "string") throw new Error(t("Couldn't save"));
+    work.file(path, text, { createFolders: false });
+  }
   // Folder entries aren't written (only the entries themselves are dropped, not the files under them)
   for (const [p, entry] of Object.entries(work.files)) if (entry.dir) delete work.files[p];
   const blob = await work.generateAsync({ type: "blob", compression: "DEFLATE", mimeType: DOCX_TYPE });
   const node = await api.saveContent(nodeId, blob, s.base);
   s.base = node.updated_at;
-  s.saved = xml;
+  s.saved = parts;
   return node;
 }

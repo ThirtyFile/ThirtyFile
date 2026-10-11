@@ -16,6 +16,7 @@ import { parseTheme, type Theme } from "@/ooxml/core/theme";
 import { anchorBox, readDrawings, renderItem } from "@/ooxml/xlsx/drawings";
 import { openDocxEditor, type Caret, type DocxEditor, type EditorTexts, type FormatCommand, type TableChange } from "@/ooxml/docx/editor";
 import type { RangeFormat } from "@/ooxml/docx/formatOps";
+import type { ListFormat } from "@/ooxml/docx/listOps";
 import type { TableOp } from "@/ooxml/docx/tableOps";
 
 type RenderMessage = { type: "render"; kind: "docx" | "pptx"; buffer: ArrayBuffer };
@@ -27,7 +28,9 @@ type ScrollMessage = { type: "scroll"; x: number; y: number };
  * Word editing: open the document for editing (`xml`: its edited document.xml not saved yet). The frame then says
  * "input" when the text changes and "save" for Ctrl+S, and answers "collect" with the edited document.xml
  */
-type EditMessage = { type: "edit"; kind: "docx"; buffer: ArrayBuffer; xml?: string | null; texts: EditorTexts; caret?: Caret | null; scroll?: number };
+type EditMessage = { type: "edit"; kind: "docx"; buffer: ArrayBuffer; parts?: Parts; texts: EditorTexts; caret?: Caret | null; scroll?: number };
+/** Edited parts by path (document.xml, a numbering part a list made…); the others are the archive's */
+type Parts = Record<string, string>;
 type CollectMessage = { type: "collect"; id: number };
 /**
  * Word editing: change the table the caret is in (answered "table-refused" when it can't be): a row or column added or
@@ -38,7 +41,7 @@ type TableMessage = { type: "table"; op: TableOp; cols?: number; rows?: number; 
  * Word editing: formatting of the selection. `cmd` is one of the view's own commands (bold… with `value` a color);
  * `size`, `style` or `align` change the document and open the view again (answered "format-refused" when they can't)
  */
-type FormatMessage = { type: "format"; cmd?: string; value?: string; size?: number; style?: string; isDefault?: boolean; align?: string };
+type FormatMessage = { type: "format"; cmd?: string; value?: string; size?: number; style?: string; isDefault?: boolean; align?: string; list?: string; level?: number };
 type Message = RenderMessage | LoadXlsxMessage | DrawingsMessage | ScrollMessage | EditMessage | CollectMessage | TableMessage | FormatMessage;
 
 const root = document.getElementById("root")!;
@@ -87,14 +90,21 @@ const COLOR = /^(#[0-9a-f]{6}|transparent)$/i;
  * a table's shape opens the view again on the changed document, keeping the one before it in `undo`, for Ctrl+Z right
  * after (`typed` says whether anything was typed since)
  */
-let editing: { pkg: OoxmlPackage; texts: EditorTexts; base: string | null; undo: { xml: string | null; caret: Caret | null }[]; typed: boolean } | null = null;
+let editing: { pkg: OoxmlPackage; texts: EditorTexts; base: Parts; undo: { parts: Parts; caret: Caret | null }[]; typed: boolean } | null = null;
 let changedTimer = 0;
 
-/** The edited document.xml, null when it is the archive's */
-function edited() {
+/** The edited parts (none: the archive as it is), with the caret and scroll */
+function edited(): { parts: Parts; caret: Caret | null; scroll: number } {
   if (!editor || !editing) throw new Error("The document isn't open for editing");
   const c = editor.collect();
-  return { ...c, xml: c.xml ?? editing.base };
+  return { parts: c.xml ? { ...editing.base, [c.path]: c.xml } : editing.base, caret: c.caret, scroll: c.scroll };
+}
+
+/** Only parts with text, from a message */
+function partsOf(value: unknown): Parts {
+  const out: Parts = {};
+  if (value && typeof value === "object") for (const [k, v] of Object.entries(value)) if (typeof v === "string") out[k] = v;
+  return out;
 }
 
 function sendChanged() {
@@ -111,13 +121,13 @@ window.addEventListener("blur", () => {
   if (changedTimer) sendChanged();
 });
 
-async function openEditor(xml: string | null, caret: Caret | null | undefined, scroll: number | undefined): Promise<DocxEditor> {
+async function openEditor(parts: Parts, caret: Caret | null | undefined, scroll: number | undefined): Promise<DocxEditor> {
   const e = editing!;
   editor?.dispose();
   editor = null;
-  e.base = xml;
+  e.base = parts;
   const opened = await openDocxEditor(e.pkg, root, {
-    xml,
+    parts,
     texts: e.texts,
     caret,
     scroll,
@@ -132,10 +142,14 @@ async function openEditor(xml: string | null, caret: Caret | null | undefined, s
       const last = e.undo[e.undo.length - 1];
       if (!last || e.typed) return false;
       e.undo.pop();
-      queue = queue.then(() => reopen(last.xml, last.caret)).catch((err: unknown) => reply({ type: "error", message: err instanceof Error ? err.message : String(err) }));
+      queue = queue.then(() => reopen(last.parts, last.caret)).catch((err: unknown) => reply({ type: "error", message: err instanceof Error ? err.message : String(err) }));
       return true;
     },
     onPlace: (place) => reply({ type: "place", ...place }),
+    // Tab or Shift+Tab in a list item: made like the toolbar's level buttons
+    onList: (f) => {
+      queue = queue.then(() => changeList(f)).catch((err: unknown) => reply({ type: "error", message: err instanceof Error ? err.message : String(err) }));
+    },
     // Dragging a column's border: made like the menus' changes, after what may already be waiting
     onTable: (op, change) => {
       queue = queue.then(() => changeTable(op, change)).catch((err: unknown) => reply({ type: "error", message: err instanceof Error ? err.message : String(err) }));
@@ -146,23 +160,24 @@ async function openEditor(xml: string | null, caret: Caret | null | undefined, s
 }
 
 /** The view opened again on a changed document, and the host told */
-async function reopen(xml: string | null, caret: Caret | null) {
+async function reopen(parts: Parts, caret: Caret | null) {
   const scroll = root.scrollTop;
-  await openEditor(xml, caret, scroll);
+  await openEditor(parts, caret, scroll);
   editing!.typed = false;
   reply({ type: "input" });
   sendChanged();
 }
 
-async function edit({ buffer, xml, texts, caret, scroll }: EditMessage) {
+async function edit({ buffer, parts: given, texts, caret, scroll }: EditMessage) {
+  const parts = partsOf(given);
   dispose?.();
   dispose = null;
   editor = null;
   root.replaceChildren();
   const pkg = await OoxmlPackage.open(buffer);
-  editing = { pkg, texts, base: xml ?? null, undo: [], typed: false };
+  editing = { pkg, texts, base: parts, undo: [], typed: false };
   try {
-    const opened = await openEditor(xml ?? null, caret, scroll);
+    const opened = await openEditor(parts, caret, scroll);
     reply({ type: "styles", styles: opened.styles });
     dispose = () => {
       editor?.dispose();
@@ -200,8 +215,8 @@ async function changeTable(op: TableOp, change: TableChange) {
     reply({ type: "table-refused" });
     return;
   }
-  editing.undo.push({ xml: before.xml, caret: before.caret });
-  await reopen(changed.xml, changed.cell !== null ? { block: -1, offset: 0, cell: changed.cell, pick: changed.pick } : before.caret);
+  editing.undo.push({ parts: before.parts, caret: before.caret });
+  await reopen({ ...before.parts, [editor.path]: changed.xml }, changed.cell !== null ? { block: -1, offset: 0, cell: changed.cell, pick: changed.pick } : before.caret);
 }
 
 /** Formatting from the host's toolbar: the view's own commands right away; size, style and alignment by opening the view again */
@@ -212,6 +227,16 @@ function format(msg: FormatMessage) {
     const value = msg.value !== undefined && COLOR.test(msg.value) ? msg.value : undefined;
     if ((msg.cmd === "foreColor" || msg.cmd === "hiliteColor") && !value) return;
     editor.format(msg.cmd as FormatCommand, value);
+    return;
+  }
+  if (msg.list === "bullet" || msg.list === "number" || msg.list === "none") {
+    const list = msg.list;
+    queue = queue.then(() => changeList({ list })).catch((err: unknown) => reply({ type: "error", message: err instanceof Error ? err.message : String(err) }));
+    return;
+  }
+  if (msg.level === 1 || msg.level === -1) {
+    const level = msg.level;
+    queue = queue.then(() => changeList({ level })).catch((err: unknown) => reply({ type: "error", message: err instanceof Error ? err.message : String(err) }));
     return;
   }
   let f: RangeFormat | null = null;
@@ -229,10 +254,23 @@ function format(msg: FormatMessage) {
         reply({ type: "format-refused" });
         return;
       }
-      editing.undo.push({ xml: before.xml, caret: before.caret });
-      await reopen(changed.xml, changed.caret);
+      editing.undo.push({ parts: before.parts, caret: before.caret });
+      await reopen({ ...before.parts, [editor.path]: changed.xml }, changed.caret);
     })
     .catch((err: unknown) => reply({ type: "error", message: err instanceof Error ? err.message : String(err) }));
+}
+
+/** A list change (bulleted, numbered, a level in or out): the parts it changes, and the view opened again on them */
+async function changeList(f: ListFormat) {
+  if (!editor || !editing) return;
+  const before = edited();
+  const changed = await editor.formatList(f);
+  if (!changed) {
+    reply({ type: "format-refused" });
+    return;
+  }
+  editing.undo.push({ parts: before.parts, caret: before.caret });
+  await reopen({ ...before.parts, ...changed.parts }, changed.caret);
 }
 
 function collect({ id }: CollectMessage) {
