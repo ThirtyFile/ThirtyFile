@@ -31,6 +31,7 @@ export default {
   "Move the focus without changing the selection": "移动焦点，不更改选择",
   "Open the menu of the item with the focus": "打开焦点所在项目的菜单",
   "External changes appear within seconds": "外部变更会在数秒内显示",
+  "The space's folder stopped answering": "空间的文件夹已停止响应",
   "Changes are checked when opened and every {n} minutes": "打开时及每 {n} 分钟检查变更",
   "Changes are checked when opened; scheduled checks are off": "打开时检查变更；定期检查已关闭",
 } satisfies Record<string, string>;
