@@ -673,7 +673,7 @@ mod tests {
         std::fs::set_permissions(space.dir.join("tool"), std::fs::Permissions::from_mode(0o6755)).unwrap();
         crate::folders::scan(&env.st, &space.drive).await.unwrap();
         let (tool, _) = env.node_at(&space.drive, "tool").await.unwrap();
-        crate::files::save_content(State(env.st.clone()), admin.clone(), UrlPath(tool), HeaderMap::new(), axum::body::Bytes::from_static(b"uploaded"))
+        let _ = crate::files::save_content(State(env.st.clone()), admin.clone(), UrlPath(tool), HeaderMap::new(), axum::body::Bytes::from_static(b"uploaded"))
             .await
             .unwrap();
         let mode = std::fs::metadata(space.dir.join("tool")).unwrap().permissions().mode();
