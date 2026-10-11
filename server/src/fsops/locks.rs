@@ -123,6 +123,33 @@ pub async fn lock(st: &AppState, user: &User, ids: &[&str]) -> AppResult<SpaceLo
     Ok(SpaceLocks { st: st.clone(), held, renamed: Default::default(), unfinished: Default::default(), committed: Default::default() })
 }
 
+/// `lock`, for a request about these items: only the spaces where the user may see one of them. Holding a space's
+/// lock, and waiting for its disk to answer, isn't for anyone who knows an item's id; the change then finds the items
+/// it can't see, as it would without the lock.
+pub async fn lock_seen(st: &AppState, user: &User, ids: &[&str]) -> AppResult<SpaceLocks> {
+    let ids: Vec<&str> = ids.iter().filter_map(|id| tree::resolve_alias(user, id).ok()).collect();
+    let in_folders: Vec<(String,)> = sqlx::query_as(
+        "SELECT n.id FROM nodes n JOIN drives d ON d.id = n.drive_id
+         WHERE d.mode = 'folder' AND n.id IN (SELECT value FROM json_each(?)) ORDER BY n.drive_id",
+    )
+    .bind(serde_json::to_string(&ids).unwrap())
+    .fetch_all(&st.db)
+    .await?;
+    let mut c = st.db.acquire().await?;
+    let mut seen: Vec<String> = Vec::new();
+    let mut spaces = std::collections::HashSet::new();
+    for (id,) in in_folders {
+        let Some(node) = tree::get_node(&mut c, &id).await? else { continue };
+        // One item the user may see is enough for its space
+        if !spaces.contains(node.drive()) && tree::role_on(&mut c, user, &node).await?.is_some() {
+            spaces.insert(node.drive().to_string());
+            seen.push(id);
+        }
+    }
+    drop(c);
+    lock(st, user, &seen.iter().map(String::as_str).collect::<Vec<_>>()).await
+}
+
 pub async fn lock_space(st: &AppState, drive_id: &str) -> OwnedMutexGuard<()> {
     crate::folders::drive_lock(st, drive_id).lock_owned().await
 }

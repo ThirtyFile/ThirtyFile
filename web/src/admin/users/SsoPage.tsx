@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Pending } from "@/components/ErrorState";
+import { useConfirmIdentity } from "@/components/ConfirmIdentity";
 import { LocationSelect } from "@/components/LocationSelect";
 import { ProviderIcon, SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
 import { copyAndSay } from "@/lib/utils";
@@ -184,9 +185,12 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
     // reset only sets state
   }, [saved]);
 
+  // A provider set up here signs people in: whoever saves confirms who they are
+  const identity = useConfirmIdentity("sso-me");
   const save = useMutation({
-    mutationFn: () => api.updateSsoSettings(req),
+    mutationFn: () => api.updateSsoSettings({ ...req, my_password: identity.values.password, my_code: identity.values.code }),
     onSuccess: (data) => {
+      identity.clear();
       // What the server stored: secrets are blank again, domains are trimmed and lower-cased
       shown.current = data;
       reset(data);
@@ -523,7 +527,13 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
         </Section>
       ))}
 
-      <div className="sticky bottom-0 -mx-6 -mb-6 flex items-center gap-2 border-t bg-background/95 px-6 py-3 backdrop-blur">
+      <div className="sticky bottom-0 -mx-6 -mb-6 flex flex-wrap items-center gap-2 border-t bg-background/95 px-6 py-3 backdrop-blur">
+        {dirty && (
+          <div className="grid basis-full gap-1.5">
+            <p className="text-xs text-muted-foreground">{t("These settings decide who can sign in, so confirm it's you to save.")}</p>
+            {identity.fields(t("For your security, this can only be done within 10 minutes of signing in."))}
+          </div>
+        )}
         <span className="text-xs text-muted-foreground">{dirty ? t("You have unsaved changes") : t("Secrets are stored only on the server and won't be shown again")}</span>
         <span className="flex-1" />
         {dirty && (
@@ -532,7 +542,7 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
           </Button>
         )}
         {invalid && <span className="text-xs text-destructive">{t("Enter the space size as a number of GB (blank = default, 0 = unlimited)")}</span>}
-        <Button size="sm" disabled={!dirty || invalid || save.isPending} onClick={() => save.mutate()}>
+        <Button size="sm" disabled={!dirty || invalid || save.isPending || !identity.ready} onClick={() => save.mutate()}>
           {save.isPending && <Loader2Icon className="animate-spin" />}
           {t("Save")}
         </Button>

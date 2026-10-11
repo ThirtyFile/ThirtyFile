@@ -121,6 +121,9 @@ pub struct CreateReq {
     /// The storage location of their personal space; when omitted, the system setting's
     #[serde(default)]
     personal_location: Option<String>,
+    /// An administrator is only created by one who confirms who they are (see `update`)
+    #[serde(flatten)]
+    me: crate::tokens::Confirmation,
 }
 
 fn default_role() -> String {
@@ -143,12 +146,15 @@ pub async fn get_row(st: &AppState, id: i64) -> AppResult<UserRow> {
     Ok(row.ok_or_else(|| AppError::not_found("User not found"))?.named(crate::i18n::names(st)))
 }
 
-pub async fn create(State(st): State<AppState>, Admin(me): Admin, Json(req): Json<CreateReq>) -> AppResult<Json<UserRow>> {
+pub async fn create(State(st): State<AppState>, Admin(me): Admin, Json(mut req): Json<CreateReq>) -> AppResult<Json<UserRow>> {
     let username = req.username.trim();
     validate_username(username)?;
     validate_password(&req.password, min_password(&st))?;
     let role = UserRole::parse(&req.role)?;
     let display_name = validate_display_name(&req.display_name)?.to_string();
+    if role == UserRole::Admin {
+        std::mem::take(&mut req.me).check(&st, &me).await?;
+    }
     let password_hash = hash_password(req.password.clone()).await?;
     crate::personal::check_ahead(&st, req.personal_space, req.personal_location.as_deref()).await;
     let id = {
@@ -460,6 +466,7 @@ mod tests {
             quota_bytes: quota,
             personal_space: None,
             personal_location: None,
+            me: Default::default(),
         })
     }
 
@@ -475,10 +482,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn administrators_are_created_and_email_or_sign_in_settings_saved_only_by_one_who_confirms() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let new_admin = |me| Json(CreateReq { role: "admin".into(), me, ..req("helper", None).0 });
+        let wrong = crate::tokens::Confirmation { my_password: Some(testutil::wrong_password()), my_code: None };
+        assert!(create(State(env.st.clone()), Admin(admin.clone()), new_admin(Default::default())).await.is_err());
+        assert!(create(State(env.st.clone()), Admin(admin.clone()), new_admin(wrong)).await.is_err());
+        let Json(row) = create(State(env.st.clone()), Admin(admin.clone()), new_admin(testutil::confirmed())).await.unwrap();
+        assert_eq!(row.role, UserRole::Admin);
+        // A standard user hands over nothing
+        let _ = create(State(env.st.clone()), Admin(admin.clone()), req("plain", None)).await.unwrap();
+
+        // The email server receives password resets, and a sign-in provider signs people in
+        let mail = |v: serde_json::Value| Json(serde_json::from_value::<crate::mail::SaveReq>(v).unwrap());
+        assert!(crate::mail::update_settings(State(env.st.clone()), Admin(admin.clone()), mail(json!({ "enabled": false }))).await.is_err());
+        let saved =
+            crate::mail::update_settings(State(env.st.clone()), Admin(admin.clone()), mail(json!({ "enabled": false, "my_password": testutil::password() })));
+        assert!(saved.await.is_ok());
+        let sso = |v: serde_json::Value| Json(serde_json::from_value::<crate::sso::SaveReq>(v).unwrap());
+        let headers = axum::http::HeaderMap::new;
+        assert!(crate::sso::update_settings(State(env.st.clone()), Admin(admin.clone()), headers(), sso(json!({}))).await.is_err());
+        assert!(
+            crate::sso::update_settings(State(env.st.clone()), Admin(admin.clone()), headers(), sso(json!({ "my_password": testutil::password() }))).await.is_ok()
+        );
+    }
+
+    #[tokio::test]
     async fn two_administrators_removing_each_other_leave_one() {
         let env = testutil::env().await;
         let first = env.admin().await;
-        let Json(row) = create(State(env.st.clone()), Admin(first.clone()), Json(CreateReq { role: "admin".into(), ..req("second", None).0 })).await.unwrap();
+        let Json(row) =
+            create(State(env.st.clone()), Admin(first.clone()), Json(CreateReq { role: "admin".into(), me: testutil::confirmed(), ..req("second", None).0 }))
+                .await
+                .unwrap();
         let second = crate::auth::user_by_id(&env.st, &mut env.st.db.acquire().await.unwrap(), row.id).await.unwrap().unwrap();
         let demote = || Json(serde_json::from_value::<UpdateReq>(json!({ "role": "user", "my_password": testutil::password() })).unwrap());
         // Both signed in as administrators; the first one's change lands first

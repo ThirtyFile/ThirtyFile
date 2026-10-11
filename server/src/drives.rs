@@ -471,8 +471,9 @@ pub async fn access(State(st): State<AppState>, user: User, Path(id): Path<Strin
     );
     let mut inherited: Vec<GrantInfo> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(&node.id).bind(&drive.name).fetch_all(&mut *c).await?;
     // Someone who only has the folder shared with them (not a member of the space) sees the grants from the shared
-    // folder down, like the path they see: the folders above it and who else can access them are not theirs to know
-    if !can_manage {
+    // folder down, like the path they see: the folders above it and who else can access them are not theirs to know.
+    // Managing the shared folder doesn't change that; administrators manage every space but personal ones.
+    if !(user.is_admin() && drive.kind != tree::SpaceKind::Personal) {
         let member_of = tree::member_of(&mut c, &user).await?;
         if !member_of.iter().any(|d| d == node.drive()) {
             let shared = tree::shared_ids(&mut c, &user, &member_of).await?;
@@ -924,15 +925,21 @@ mod tests {
         let amy = env.user("amy", true).await;
         let ben = env.user("ben", true).await;
         let carol = env.user("carol", true).await;
+        let dave = env.user("dave", true).await;
         let private = env.folder(&amy, amy.root(), "Private").await;
         let shared = env.folder(&amy, &private, "Shared").await;
         let inner = env.folder(&amy, &shared, "Inner").await;
         env.grant(&private, &carol, "viewer").await;
         env.grant(&shared, &ben, "editor").await;
+        env.grant(&shared, &dave, "manager").await;
         // Ben only has "Shared": he sees the grant on it, not the ones on "Private" or on the space root
         let Json(info) = access(State(env.st.clone()), ben.clone(), Path(inner.clone())).await.unwrap();
         assert!(!info.can_manage);
-        assert_eq!(info.inherited.iter().map(|g| g.node_id.as_str()).collect::<Vec<_>>(), vec![shared.as_str()]);
+        assert_eq!(info.inherited.iter().map(|g| g.node_id.as_str()).collect::<Vec<_>>(), vec![shared.as_str(), shared.as_str()]);
+        // Nor does Dave, who manages "Shared"
+        let Json(info) = access(State(env.st.clone()), dave.clone(), Path(inner.clone())).await.unwrap();
+        assert!(info.can_manage);
+        assert!(info.inherited.iter().all(|g| g.node_id == shared), "{:?}", info.inherited.iter().map(|g| &g.node_id).collect::<Vec<_>>());
         // Amy, the owner, still sees everything
         let Json(info) = access(State(env.st.clone()), amy.clone(), Path(inner)).await.unwrap();
         assert!(info.inherited.iter().any(|g| g.node_id == private) && info.inherited.iter().any(|g| g.node_id == shared));

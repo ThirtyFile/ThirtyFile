@@ -726,7 +726,7 @@ mod tests {
         {
             let mut s = SsoSettings::default();
             s.microsoft.tenant = tenant.into();
-            let res = update_settings(State(env.st.clone()), Admin(admin.clone()), HeaderMap::new(), Json(s)).await;
+            let res = update_settings(State(env.st.clone()), Admin(admin.clone()), HeaderMap::new(), Json(SaveReq { settings: s, me: testutil::confirmed() })).await;
             assert_eq!(res.is_ok(), ok, "{tenant}");
         }
     }
@@ -816,7 +816,7 @@ mod tests {
         let (m, base) = mock_server().await;
         let admin = env.admin().await;
         let save = |oidc: Value| {
-            let req = serde_json::from_value(json!({ "oidc": oidc })).unwrap();
+            let req = serde_json::from_value(json!({ "oidc": oidc, "my_password": testutil::password() })).unwrap();
             update_settings(State(env.st.clone()), Admin(admin.clone()), HeaderMap::new(), Json(req))
         };
         let oidc = |issuer: &str| json!({ "enabled": true, "client_id": "oidc-client", "client_secret": testutil::password(), "name": "Company login", "issuer": issuer, "provisioning": "create" });

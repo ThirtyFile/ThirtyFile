@@ -2,6 +2,9 @@ import type { Branding } from "@/lib/branding";
 import { request, get, post, enc } from "@/api/client";
 import type { BrandingReq, EmailSettings, EmailSettingsReq, SsoSettings, SsoSettingsReq, SystemSettingsReq, SystemInfo } from "@/api/types";
 
+/** Who is saving, asked again (see `useConfirmIdentity`) */
+type Confirmation = { my_password?: string; my_code?: string };
+
 /** System settings, branding, email and single sign-on (administrators) */
 export const settingsApi = {
   systemSettings: () => get<SystemInfo>("/admin/settings"),
@@ -13,8 +16,10 @@ export const settingsApi = {
   uploadLoginBackground: (file: File) => request<Branding>("PUT", "/admin/branding/background", undefined, file),
   deleteLoginBackground: () => request<Branding>("DELETE", "/admin/branding/background"),
   emailSettings: () => get<EmailSettings>("/admin/email"),
-  updateEmailSettings: (req: EmailSettingsReq) => request<EmailSettings>("PUT", "/admin/email", req),
+  /** Saving takes the administrator's own password (and code): `my_password`, `my_code` */
+  updateEmailSettings: (req: EmailSettingsReq & Confirmation) => request<EmailSettings>("PUT", "/admin/email", req),
   testEmail: (req: EmailSettingsReq & { to: string }) => post("/admin/email/test", req),
   ssoSettings: () => get<SsoSettings>("/admin/sso"),
-  updateSsoSettings: (s: SsoSettingsReq) => request<SsoSettings>("PUT", "/admin/sso", s),
+  /** Saving takes the administrator's own password (and code), like the email settings */
+  updateSsoSettings: (s: SsoSettingsReq & Confirmation) => request<SsoSettings>("PUT", "/admin/sso", s),
 };

@@ -7,9 +7,11 @@ export const usersApi = {
   /** A page of accounts, by id */
   usersPage: (after: number, limit: number, q = "", signal?: AbortSignal) =>
     get<UserRow[]>(`/admin/users${qs({ after: String(after), limit: String(limit), q: q.trim() || undefined })}`, signal),
-  /** `personal_space` / `personal_location`: "My files" and its storage location; left out, the system settings decide */
-  createUser: (req: Partial<Omit<UserRow, "personal_space" | "personal_location">> & { password: string; personal_space?: boolean; personal_location?: string }) =>
-    post<UserRow>("/admin/users", req),
+  /** `personal_space` / `personal_location`: "My files" and its storage location; left out, the system settings decide.
+   *  An administrator also takes the administrator's own password (and code): `my_password`, `my_code` */
+  createUser: (
+    req: Partial<Omit<UserRow, "personal_space" | "personal_location">> & { password: string; personal_space?: boolean; personal_location?: string; my_password?: string; my_code?: string },
+  ) => post<UserRow>("/admin/users", req),
   /** A new password or a different role also takes the administrator's own password (and code): `my_password`, `my_code` */
   updateUser: (id: number, req: Partial<UserRow> & { password?: string; my_password?: string; my_code?: string }) => request<UserRow>("PATCH", enc`/admin/users/${id}`, req),
   /** Deletes a user: their personal space's files are moved to another space (move_to, a space id) or deleted (delete_files) */

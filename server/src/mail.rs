@@ -137,6 +137,15 @@ pub struct SettingsReq {
     insecure: bool,
 }
 
+/// Saving the settings: the administrator confirms who they are, since the server they name receives password resets
+#[derive(Deserialize)]
+pub struct SaveReq {
+    #[serde(flatten)]
+    settings: SettingsReq,
+    #[serde(flatten)]
+    me: crate::tokens::Confirmation,
+}
+
 /// The settings asked for, checked; a blank password keeps the saved one (and there is none without a username), but
 /// only for the same server and account: otherwise it would be sent to wherever the new settings point, and anyone
 /// able to change them could collect it (as for storage locations, locations/)
@@ -178,9 +187,10 @@ fn settings_from(req: SettingsReq, saved: &SmtpSettings) -> AppResult<SmtpSettin
     Ok(SmtpSettings { enabled: req.enabled, host, port, security: req.security, username, password, from, insecure: req.insecure })
 }
 
-pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Json(req): Json<SettingsReq>) -> AppResult<Json<Value>> {
+pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Json(req): Json<SaveReq>) -> AppResult<Json<Value>> {
     let saved = load(&st.db).await;
-    let s = settings_from(req, &saved)?;
+    let s = settings_from(req.settings, &saved)?;
+    req.me.check(&st, &user).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     store(&mut tx, &s).await?;

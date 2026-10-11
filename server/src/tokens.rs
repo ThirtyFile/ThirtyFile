@@ -69,6 +69,22 @@ pub struct CreateReq {
     code: Option<String>,
 }
 
+/// Who is acting, asked again with an administrator's change that hands over accounts (see `confirm_identity`): their
+/// password, and a two-factor code when they have one
+#[derive(Deserialize, Default)]
+pub struct Confirmation {
+    #[serde(default)]
+    pub my_password: Option<String>,
+    #[serde(default)]
+    pub my_code: Option<String>,
+}
+
+impl Confirmation {
+    pub async fn check(self, st: &AppState, user: &User) -> AppResult<()> {
+        confirm_identity(st, user, self.my_password, self.my_code.as_deref(), crate::admin::SIGN_IN_AGAIN).await
+    }
+}
+
 /// Accounts without a password (single sign-on) confirm who they are by having signed in this recently
 const RECENT_SIGN_IN: i64 = 10 * 60;
 
