@@ -13,7 +13,7 @@
  * - A list item moves a level in or out; any other paragraph's left indent changes by half an inch.
  */
 
-import { attr, kid } from "../core/package";
+import { attr, kid, kids } from "../core/package";
 import { markedParagraphs, paragraphProp, paragraphProps } from "./formatOps";
 import { WordXml } from "./xmlEdit";
 
@@ -50,8 +50,6 @@ const NUMBERING_TYPE = "application/vnd.openxmlformats-officedocument.wordproces
 /** Word's half inch, the indent of each level (twips) */
 const STEP = 720;
 const MAX_LEVEL = 8;
-
-const kids = (el: Element | null | undefined, name: string) => Array.from(el?.children ?? []).filter((c) => c.localName === name);
 
 /** Word's bullets for each level: •, ○ and ▪, in its own fonts */
 const BULLETS: [string, string][] = [

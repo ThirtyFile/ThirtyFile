@@ -69,6 +69,7 @@ import { AUTO_COLOR, HIGHLIGHTS } from "@/ooxml/docx/formatOps";
 import type { Story, StoryKind } from "@/ooxml/docx/hfOps";
 import { MAX_SPLIT, type BorderKind, type TableOp } from "@/ooxml/docx/tableOps";
 import { TOO_LARGE } from "@/ooxml/core/package";
+import { caretFormatFrom, partsFrom } from "./frameMessages";
 import { dropSession, isDirty, keepSession, openSession, releaseIfClean, reusableSession, saveSession, type DocxSession, type Parts } from "./session";
 
 /** Word's usual font sizes (points) */
@@ -244,8 +245,8 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
 
   /** What the frame holds becomes the session's */
   const absorb = (c: Collected) => {
-    // The frame says every part it changed (none: the file as opened)
-    const parts = c.parts && typeof c.parts === "object" ? c.parts : {};
+    // The frame says every part it changed (none: the file as opened): only XML parts, as text, are taken
+    const parts = partsFrom(c.parts);
     session.current = Object.keys(parts).length ? parts : null;
     session.caret = c.caret;
     session.scroll = c.scroll;
@@ -349,7 +350,7 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
         const place = msg as { cell?: unknown; cells?: unknown; fmt?: CaretFormat | null };
         setInCell(!!place.cell);
         setPicked(Number(place.cells) || 0);
-        setFmt(place.fmt ?? null);
+        setFmt(caretFormatFrom(place.fmt));
         break;
       }
       case "styles": {
@@ -376,6 +377,10 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
         break;
       case "story-refused":
         toast.error(t("This can't be added here."));
+        break;
+      case "op-error":
+        // A change the frame couldn't make: the editor stays, on the document as it was before it
+        toast.error(t("That change couldn't be made."));
         break;
       case "format-refused":
         toast.error(t("Select some text first."));

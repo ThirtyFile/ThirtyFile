@@ -195,6 +195,7 @@ export default {
   "Put the cursor in the text first.": "先にカーソルを文字の中に置いてください。",
   "Insert page number": "ページ番号を挿入",
   "Insert number of pages": "総ページ数を挿入",
+  "That change couldn't be made.": "この変更はできませんでした。",
   "Different first page": "先頭ページのみ別指定",
   "Different odd and even pages": "奇数/偶数ページ別指定",
   "Normal": "標準",

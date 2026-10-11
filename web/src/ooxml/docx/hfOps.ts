@@ -14,7 +14,7 @@
  *   off keeps them, unused, as Word does.
  */
 
-import { attr, kid } from "../core/package";
+import { attr, kid, kids } from "../core/package";
 import { placeIn, WordXml } from "./xmlEdit";
 
 export type StoryKind = "header" | "footer";
@@ -72,7 +72,6 @@ export interface LayoutChange {
 
 const RELS = "http://schemas.openxmlformats.org/package/2006/relationships";
 const STRICT = "http://purl.oclc.org/ooxml/wordprocessingml/main";
-const kids = (el: Element | null | undefined, name: string) => Array.from(el?.children ?? []).filter((c) => c.localName === name);
 
 /** The order Word needs a section's properties in (CT_SectPr), after its headers and footers */
 const SECTPR = [

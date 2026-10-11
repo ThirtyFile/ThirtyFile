@@ -195,6 +195,7 @@ export default {
   "Put the cursor in the text first.": "請先把游標放在文字中。",
   "Insert page number": "插入頁碼",
   "Insert number of pages": "插入總頁數",
+  "That change couldn't be made.": "這項變更無法完成。",
   "Different first page": "第一頁不同",
   "Different odd and even pages": "奇偶頁不同",
   "Normal": "內文",
