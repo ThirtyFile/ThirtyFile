@@ -135,6 +135,9 @@ pub async fn set_up(conn: &mut SqliteConnection, drive_id: &str, root_id: &str, 
     if let Err(e) = mark_space(Path::new(source), drive_id) {
         tracing::debug!("Couldn't write the marker file in {source}: {e}");
     }
+    // And its identity, which tells it apart from another folder put in its place where the marker can't
+    let identity = crate::beneath::Pinned::root(Path::new(source)).ok().and_then(|r| super::folder_identity(&r));
+    super::record_root(conn, drive_id, identity).await?;
     Ok(())
 }
 

@@ -88,9 +88,41 @@ pub fn open_space(root: &Path, drive_id: &str, read_only: bool) -> std::io::Resu
     let pinned = crate::beneath::Pinned::root(root)?;
     match space_marker(&pinned)? {
         Some(id) if id == drive_id => Ok(pinned),
-        None if read_only => Ok(pinned),
+        // Without the marker, only the folder last recognised (when it is known): not another one put in its place
+        None if read_only && known_root(drive_id).is_none_or(|known| folder_identity(&pinned) == Some(known)) => Ok(pinned),
         _ => Err(std::io::Error::new(std::io::ErrorKind::NotFound, "not the space's folder")),
     }
+}
+
+/// The identity of each folder space's folder as scans last recognised it, for reads that can't look it up
+static KNOWN_ROOTS: crate::sync::Mutex<Option<HashMap<String, (i64, i64)>>> = crate::sync::Mutex::new(None);
+
+fn known_root(drive_id: &str) -> Option<(i64, i64)> {
+    KNOWN_ROOTS.lock().as_ref().and_then(|m| m.get(drive_id).copied())
+}
+
+fn remember_root(drive_id: &str, identity: (i64, i64)) {
+    KNOWN_ROOTS.lock().get_or_insert_with(HashMap::new).insert(drive_id.to_string(), identity);
+}
+
+/// The file system identity (device, inode) of an opened folder; None where the system has none
+pub(crate) fn folder_identity(root: &crate::beneath::Pinned) -> Option<(i64, i64)> {
+    std::fs::metadata(root.as_path()).ok().map(|m| identity(&m)).filter(|(_, ino)| *ino != 0)
+}
+
+/// Records the identity of a space's folder: when it is chosen, and when it is found holding the space's marker
+pub(crate) async fn record_root(conn: &mut sqlx::SqliteConnection, drive_id: &str, identity: Option<(i64, i64)>) -> AppResult<()> {
+    let Some((dev, ino)) = identity else { return Ok(()) };
+    sqlx::query("UPDATE drives SET source_dev = ?, source_ino = ? WHERE id = ? AND (source_dev IS NOT ? OR source_ino IS NOT ?)")
+        .bind(dev)
+        .bind(ino)
+        .bind(drive_id)
+        .bind(dev)
+        .bind(ino)
+        .execute(conn)
+        .await?;
+    remember_root(drive_id, (dev, ino));
+    Ok(())
 }
 
 /// Gives the folder `source` of a new space `drive_id` the space's marker, replacing one left by a deleted space (a
@@ -529,7 +561,9 @@ async fn run_scan(st: &AppState, drive_id: &str) -> AppResult<ScanReport> {
             crate::fsops::recover(st, &drive.id, &compared.root).await?;
         }
         if !compared.differing.is_empty() {
-            update_index(st, &drive, &root, compared.differing, compared.any_gone, &mut report).await?;
+            // Through the folder read and checked, not its path again (something else could be there by now)
+            let checked = compared.root.as_path().to_path_buf();
+            update_index(st, &drive, &checked, compared.differing, compared.any_gone, &mut report).await?;
         }
     }
     crate::fsops::clean_trash(st, &drive.id, &root).await?;
@@ -570,6 +604,35 @@ async fn not_the_spaces(st: &AppState, drive: &Drive, root: &Path, compared: &Co
             .bind(&drive.id)
             .fetch_one(&st.db)
             .await?;
+    // The folder's identity, as recorded when it was chosen or last found with its marker. Without the marker, a
+    // folder that isn't that one (another put in its place, or a link to one) is never taken for the space's
+    let now = folder_identity(&compared.root);
+    let (dev, ino): (Option<i64>, Option<i64>) = sqlx::query_as("SELECT source_dev, source_ino FROM drives WHERE id = ?").bind(&drive.id).fetch_one(&st.db).await?;
+    let recorded = dev.zip(ino);
+    if marked {
+        record_root(&mut *st.db.acquire().await?, &drive.id, now).await?;
+    } else {
+        match (recorded, now) {
+            (Some(was), Some(is)) if was != is => {
+                return Ok(Some(format!(
+                    "{} isn't the space's folder any more, and doesn't hold its .thirtyfile-space file: if another folder or disk is there now, put the right one back and check again.",
+                    root.display()
+                )));
+            }
+            (Some(_), _) => remember_root(&drive.id, recorded.unwrap_or_default()),
+            // Nothing tells this folder is the space's: an empty space that can be written to always has its marker
+            // (written when its folder was chosen), and is left as it is without it
+            (None, _) if !has_items && !drive.read_only => {
+                return Ok(Some(format!(
+                    "{} doesn't hold this space's .thirtyfile-space file: if another folder is there now, put the right one back; to use this folder, choose it again for the space.",
+                    root.display()
+                )));
+            }
+            // A read-only space made by an earlier version: this folder is the one from now on
+            (None, Some(_)) if !has_items || compared.same_folder => record_root(&mut *st.db.acquire().await?, &drive.id, now).await?,
+            _ => {}
+        }
+    }
     if compared.root_empty && has_items && !marked {
         return Ok(Some(format!(
             "{} is empty, but the space still has items: if it is on a disk or network share that isn't mounted, mount it and check again. To empty the space, delete its items in ThirtyFile.",
