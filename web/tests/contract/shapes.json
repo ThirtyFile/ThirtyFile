@@ -1,0 +1,506 @@
+{
+  "AccessInfo": {
+    "can_manage": false,
+    "direct": [
+      {
+        "created_at": 0,
+        "expires_at": null,
+        "granted_by_name": "",
+        "id": 0,
+        "inherited_from": null,
+        "node_id": "",
+        "principal_id": 0,
+        "principal_name": "",
+        "principal_type": "",
+        "role": ""
+      }
+    ],
+    "drive": {
+      "id": "",
+      "kind": "",
+      "name": "",
+      "root_id": ""
+    },
+    "inherited": [
+      {
+        "created_at": 0,
+        "expires_at": null,
+        "granted_by_name": "",
+        "id": 0,
+        "inherited_from": "",
+        "node_id": "",
+        "principal_id": 0,
+        "principal_name": "",
+        "principal_type": "",
+        "role": ""
+      }
+    ],
+    "is_drive_root": false,
+    "my_role": "",
+    "node": {
+      "created_at": 0,
+      "drive_id": "",
+      "id": "",
+      "is_favorite": false,
+      "kind": "",
+      "mime": "",
+      "name": "",
+      "owner_name": "",
+      "parent_id": "",
+      "size": 0,
+      "trashed_at": null,
+      "updated_at": 0
+    }
+  },
+  "Activity": {
+    "action": "",
+    "at": 0,
+    "detail": "",
+    "drive_id": "",
+    "drive_name": "",
+    "id": 0,
+    "node_id": "",
+    "node_name": "",
+    "private": false,
+    "username": ""
+  },
+  "Device": {
+    "created_at": 0,
+    "current": false,
+    "id": "",
+    "ip": "",
+    "last_used_at": 0,
+    "method": "",
+    "user_agent": ""
+  },
+  "Drive": {
+    "disabled": false,
+    "id": "",
+    "kind": "",
+    "location_id": "",
+    "location_name": "",
+    "member_count": 0,
+    "mode": "",
+    "name": "",
+    "offline": null,
+    "owner_name": "",
+    "quota_bytes": 0,
+    "read_only": false,
+    "role": "",
+    "root_id": "",
+    "used_bytes": 0
+  },
+  "EmailSettings": {
+    "enabled": false,
+    "from": "",
+    "has_password": false,
+    "host": "",
+    "insecure": false,
+    "port": 0,
+    "security": "",
+    "username": ""
+  },
+  "Grant": {
+    "created_at": 0,
+    "expires_at": null,
+    "granted_by_name": "",
+    "id": 0,
+    "inherited_from": null,
+    "node_id": "",
+    "principal_id": 0,
+    "principal_name": "",
+    "principal_type": "",
+    "role": ""
+  },
+  "Group": {
+    "created_at": 0,
+    "description": "",
+    "id": 0,
+    "members": [
+      {
+        "id": 0,
+        "username": ""
+      }
+    ],
+    "name": ""
+  },
+  "HistoryEntry": {
+    "action": "",
+    "at": 0,
+    "detail": "",
+    "id": 0,
+    "node_id": "",
+    "node_name": "",
+    "username": ""
+  },
+  "Job": {
+    "done": 0,
+    "error": null,
+    "id": "",
+    "kind": "",
+    "name": null,
+    "node_id": null,
+    "state": "",
+    "total": 0
+  },
+  "Located": {
+    "created_at": 0,
+    "drive_id": "",
+    "id": "",
+    "is_favorite": false,
+    "kind": "",
+    "location": "",
+    "location_path": [],
+    "location_space": {
+      "kind": "",
+      "name": ""
+    },
+    "mime": "",
+    "name": "",
+    "owner_name": "",
+    "parent_id": "",
+    "size": 0,
+    "trashed_at": null,
+    "updated_at": 0
+  },
+  "LogStatus": {
+    "activity": {
+      "oldest": 0,
+      "rows": 0
+    },
+    "archive_bytes": 0,
+    "archives": [],
+    "error_log": {
+      "oldest": null,
+      "rows": 0
+    },
+    "last_run": null,
+    "login_log": {
+      "oldest": null,
+      "rows": 0
+    },
+    "settings": {
+      "activity_days": 0,
+      "archive": false,
+      "archive_keep_days": 0,
+      "login_days": 0,
+      "record_visitor": false,
+      "share_days": 0
+    },
+    "share_access": {
+      "oldest": null,
+      "rows": 0
+    }
+  },
+  "Me": {
+    "can_create_drive": false,
+    "can_delete": false,
+    "can_share": false,
+    "can_write": false,
+    "display_name": "",
+    "id": 0,
+    "lang": "",
+    "max_edit_bytes": 0,
+    "min_password_length": 0,
+    "must_change_password": false,
+    "personal_pending": false,
+    "public_url": "",
+    "quota_bytes": 0,
+    "role": "",
+    "root_id": "",
+    "share_policy": {
+      "max_days": 0,
+      "password_required": false,
+      "public_links": false
+    },
+    "shared_root": "",
+    "style": "",
+    "trash_days": 0,
+    "ui_lang": null,
+    "used_bytes": 0,
+    "username": "",
+    "version": "",
+    "version_keep": 0
+  },
+  "Node": {
+    "created_at": 0,
+    "drive_id": "",
+    "id": "",
+    "is_favorite": false,
+    "kind": "",
+    "mime": "",
+    "name": "",
+    "owner_name": "",
+    "parent_id": "",
+    "size": 0,
+    "trashed_at": null,
+    "updated_at": 0
+  },
+  "NodeInfo": {
+    "drive": {
+      "id": "",
+      "kind": "",
+      "name": "",
+      "root_id": ""
+    },
+    "is_root": false,
+    "location": [
+      ""
+    ],
+    "moving": false,
+    "node": {
+      "created_at": 0,
+      "drive_id": "",
+      "id": "",
+      "is_favorite": false,
+      "kind": "",
+      "mime": "",
+      "name": "",
+      "owner_name": "",
+      "parent_id": "",
+      "size": 0,
+      "trashed_at": null,
+      "updated_at": 0
+    },
+    "offline": null,
+    "path": [
+      {
+        "id": "",
+        "name": ""
+      }
+    ],
+    "read_only": false,
+    "role": "",
+    "via_share": false
+  },
+  "NotificationSettings": {
+    "email": "",
+    "email_ready": false,
+    "kinds": {
+      "access_expiring": {
+        "email": false,
+        "in_app": false
+      },
+      "app_password": {
+        "email": false,
+        "in_app": false
+      },
+      "backup": {
+        "email": false,
+        "in_app": false
+      },
+      "link_upload": {
+        "email": false,
+        "in_app": false
+      },
+      "replica": {
+        "email": false,
+        "in_app": false
+      },
+      "shared": {
+        "email": false,
+        "in_app": false
+      },
+      "sign_in_method": {
+        "email": false,
+        "in_app": false
+      },
+      "space_full": {
+        "email": false,
+        "in_app": false
+      }
+    }
+  },
+  "Principal": {
+    "detail": "",
+    "name": "",
+    "principal_id": 0,
+    "principal_type": ""
+  },
+  "ShareInfo": {
+    "allow_download": false,
+    "allow_upload": false,
+    "created_at": 0,
+    "downloads": 0,
+    "drive_id": "",
+    "drive_kind": "",
+    "drive_name": "",
+    "drive_owner": "",
+    "drop_only": false,
+    "expires_at": null,
+    "has_password": false,
+    "id": "",
+    "last_access": null,
+    "max_downloads": null,
+    "node_id": "",
+    "node_kind": "",
+    "node_name": "",
+    "owner_id": 0,
+    "owner_name": "",
+    "private": false,
+    "views": 0
+  },
+  "SharedItem": {
+    "created_at": 0,
+    "drive_id": "",
+    "id": "",
+    "is_favorite": false,
+    "kind": "",
+    "location": "",
+    "location_path": [],
+    "location_space": null,
+    "mime": "",
+    "name": "",
+    "owner_name": "",
+    "parent_id": "",
+    "role": "",
+    "sharer": "",
+    "size": 0,
+    "trashed_at": null,
+    "updated_at": 0
+  },
+  "SsoSettings": {
+    "allowed_domains": [],
+    "domain_rules": [],
+    "github": {
+      "allowed_domains": [],
+      "client_id": "",
+      "defaults": {
+        "can_delete": false,
+        "can_share": false,
+        "can_write": false,
+        "quota_bytes": null
+      },
+      "enabled": false,
+      "groups": [],
+      "has_secret": false,
+      "issuer": "",
+      "name": "",
+      "provisioning": "",
+      "redirect_uri": "",
+      "tenant": ""
+    },
+    "google": {
+      "allowed_domains": [],
+      "client_id": "",
+      "defaults": {
+        "can_delete": false,
+        "can_share": false,
+        "can_write": false,
+        "quota_bytes": null
+      },
+      "enabled": false,
+      "groups": [],
+      "has_secret": false,
+      "issuer": "",
+      "name": "",
+      "provisioning": "",
+      "redirect_uri": "",
+      "tenant": ""
+    },
+    "max_created_per_hour": 0,
+    "microsoft": {
+      "allowed_domains": [],
+      "client_id": "",
+      "defaults": {
+        "can_delete": false,
+        "can_share": false,
+        "can_write": false,
+        "quota_bytes": null
+      },
+      "enabled": false,
+      "groups": [],
+      "has_secret": false,
+      "issuer": "",
+      "name": "",
+      "provisioning": "",
+      "redirect_uri": "",
+      "tenant": ""
+    },
+    "oidc": {
+      "allowed_domains": [],
+      "client_id": "",
+      "defaults": {
+        "can_delete": false,
+        "can_share": false,
+        "can_write": false,
+        "quota_bytes": null
+      },
+      "enabled": false,
+      "groups": [],
+      "has_secret": false,
+      "issuer": "",
+      "name": "",
+      "provisioning": "",
+      "redirect_uri": "",
+      "tenant": ""
+    },
+    "public_url_set": false
+  },
+  "SystemInfo": {
+    "allow_user_drives": false,
+    "default_lang": "",
+    "default_user_quota": 0,
+    "min_password_length": 0,
+    "personal_location": "",
+    "personal_spaces": false,
+    "public_links": false,
+    "public_url": "",
+    "require_two_factor": false,
+    "scan_minutes": 0,
+    "share_max_days": 0,
+    "share_password_required": false,
+    "shared_enabled": false,
+    "shared_root_id": "",
+    "stats": {
+      "groups": 0,
+      "personal_bytes": 0,
+      "personal_files": 0,
+      "share_links": 0,
+      "shared_bytes": 0,
+      "shared_files": 0,
+      "stored_bytes": 0,
+      "team_bytes": 0,
+      "team_drives": 0,
+      "team_files": 0,
+      "trash_bytes": 0,
+      "users": 0,
+      "version_bytes": 0
+    },
+    "version_days": 0,
+    "version_keep": 0
+  },
+  "Tag": {
+    "color": "",
+    "id": 0,
+    "name": ""
+  },
+  "TwoFactorStatus": {
+    "enabled": false,
+    "has_password": false,
+    "recovery_codes_left": 0,
+    "required": false
+  },
+  "UserRow": {
+    "can_delete": false,
+    "can_share": false,
+    "can_write": false,
+    "created_at": 0,
+    "disabled": false,
+    "display_name": "",
+    "files_folder": "",
+    "id": 0,
+    "last_login_at": 0,
+    "personal_location": "",
+    "personal_pending": null,
+    "personal_space": false,
+    "quota_bytes": 0,
+    "role": "",
+    "source": "",
+    "sso": "",
+    "sso_email": "",
+    "two_factor": false,
+    "used_bytes": 0,
+    "username": ""
+  }
+}

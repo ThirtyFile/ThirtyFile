@@ -139,6 +139,7 @@ cd web &amp;&amp; pnpm format</code></pre>
           <li>服务器自行生成的邮件文字，以英文定义在 <code>server/src/i18n/texts.rs</code>，各语言译文位于旁边的文件（<code>zh_tw.rs</code>、<code>zh_cn.rs</code>、<code>ja.rs</code>）。缺少译文时使用英文。服务器测试会检查 <code>texts.rs</code> 中列入 <code>COMPLETE</code>，或语言切换器提供的语言；缺少文字或 <code>{parameters}</code> 与英文不一致时会失败。</li>
           <li>行为改变时，同步更新 <code>site/docs/</code> 中描述该行为的指南。</li>
           <li>0.4.0 的数据库结构已冻结，确保旧版本创建的数据继续有效。结构修改必须新增 <code>server/migrations/0002_&lt;name&gt;.sql</code> 及后续编号的迁移文件，以升级 0.4.0 数据库。禁止修改 <code>0001_init.sql</code> 和此前版本已发布的迁移文件，检查会阻止这种修改。</li>
+          <li>网页应用的 API 类型（<code>web/src/api/types.ts</code>）是手写的。服务器有一项测试把主要响应的结构记录在 <code>web/tests/contract/shapes.json</code>，结构一改就会失败：在 <code>server/</code> 运行 <code>THIRTYFILE_UPDATE_SHAPES=1 cargo test api_shapes</code>，再修改类型直到 <code>pnpm typecheck</code> 通过。</li>
           <li>会更改用户文件的逻辑（公式、工作簿保存、文本编码）须在 <code>web/tests/unit/</code> 中添加单元测试。</li>
         </ul>
         <p>每个 Pull Request 都运行上述轻量检查。完整测试与镜像构建在正式发布和预发布前运行，也可在 <strong>Actions › Build › Run workflow</strong> 手动运行；手动验证不发布任何内容。发布前，两种架构的镜像都会使用 <code>compose.yaml</code> 在最新已发布版本的数据上启动。CodeQL 在合并后、每周及发布前扫描 <code>main</code>。合并到 <code>main</code> 不发布任何内容，网站也不发布：指南随版本发布，以描述用户实际可安装的功能。对当前已发布版本也正确的指南修复可手动发布：在 <strong>Actions › Website › Run workflow</strong> 中选择 <code>main</code> 为要发布的分支或标签。</p>
