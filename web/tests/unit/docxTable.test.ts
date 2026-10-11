@@ -223,3 +223,69 @@ describe("splitting", () => {
     expect(new XMLSerializer().serializeToString(t.tbl)).toBe(before);
   });
 });
+
+/** A cell's border sides, as "side:val/size" */
+const sides = (tc: Element) => find(tc, "tcBorders").flatMap((b) => Array.from(b.children).map((c) => `${c.localName}:${attr(c, "val")}${attr(c, "sz") ? `/${attr(c, "sz")}` : ""}`));
+
+describe("borders and shading", () => {
+  const grid3 = () => table([0, 1, 2].map((r) => row([0, 1, 2].map((c) => cell(`${r}${c}`)).join(""))).join(""), 3);
+
+  test("shading colors the cell under the cursor, or a range, in Word's order of a cell's settings; no color is auto", () => {
+    const t = grid3();
+    expect(changeTable(t.at(0, 0), "shade", { color: "#ffc000" })).toBe(t.at(0, 0));
+    expect(Array.from(find(t.at(0, 0), "tcPr")[0].children).map((c) => c.localName)).toEqual(["tcW", "shd"]);
+    expect(attr(find(t.at(0, 0), "shd")[0], "fill")).toBe("FFC000");
+    changeTable(t.at(1, 0), "shade", { other: t.at(1, 2), color: null });
+    expect([0, 1, 2].map((c) => attr(find(t.at(1, c), "shd")[0], "fill"))).toEqual(["auto", "auto", "auto"]);
+    expect(changeTable(t.at(2, 0), "shade", { color: "red" })).toBeUndefined();
+  });
+
+  test("outside borders go round the range, and the cells across its edge get the same line", () => {
+    const t = grid3();
+    changeTable(t.at(1, 1), "border", { other: t.at(2, 2), border: "outside" });
+    expect(sides(t.at(1, 1))).toEqual(["top:single/4", "left:single/4"]);
+    expect(sides(t.at(2, 2))).toEqual(["bottom:single/4", "right:single/4"]);
+    // Above and to the left of the range
+    expect(sides(t.at(0, 1))).toEqual(["bottom:single/4"]);
+    expect(sides(t.at(1, 0))).toEqual(["right:single/4"]);
+    expect(sides(t.at(0, 0))).toEqual([]);
+  });
+
+  test("inside borders go between the range's cells only; no border hides the lines with nil", () => {
+    const t = grid3();
+    changeTable(t.at(0, 0), "border", { other: t.at(1, 1), border: "inside" });
+    expect(sides(t.at(0, 0))).toEqual(["bottom:single/4", "right:single/4"]);
+    expect(sides(t.at(1, 1))).toEqual(["top:single/4", "left:single/4"]);
+    expect(sides(t.at(0, 2))).toEqual([]);
+    changeTable(t.at(2, 2), "border", { border: "none" });
+    expect(sides(t.at(2, 2))).toEqual(["top:nil", "left:nil", "bottom:nil", "right:nil"]);
+    expect(sides(t.at(1, 2))).toEqual(["bottom:nil"]);
+  });
+
+  test("a border already named by its start or end side is changed there", () => {
+    const t = table(row(cell("A", '<w:tcBorders><w:start w:val="double" w:sz="8"/></w:tcBorders>') + cell("B")));
+    changeTable(t.at(0, 0), "border", { border: "thickOutside" });
+    expect(sides(t.at(0, 0))).toEqual(["top:single/12", "start:single/12", "bottom:single/12", "right:single/12"]);
+  });
+});
+
+describe("column widths", () => {
+  test("moving a column's right edge takes the difference from the next column; cell widths follow", () => {
+    const t = table(row(cell("A") + cell("B") + cell("C")) + row(cell("wide", '<w:gridSpan w:val="2"/>') + cell("F")), 3);
+    expect(changeTable(t.at(0, 0), "resize", { delta: 500 })).toBe(t.at(0, 0));
+    expect(t.grid()).toEqual(["2500", "1500", "2000"]);
+    expect(t.width()).toBe("6000");
+    expect(attr(find(t.at(0, 0), "tcW")[0], "w")).toBe("2500");
+    expect(attr(find(t.at(1, 0), "tcW")[0], "w")).toBe("4000");
+  });
+
+  test("the table's last edge widens the table, and no column gets narrower than 0.2 inch", () => {
+    const t = table(row(cell("A") + cell("B")));
+    changeTable(t.at(0, 1), "resize", { delta: 1000 });
+    expect(t.grid()).toEqual(["2000", "3000"]);
+    expect(t.width()).toBe("5000");
+    changeTable(t.at(0, 0), "resize", { delta: -5000 });
+    expect(t.grid()).toEqual(["288", "4712"]);
+    expect(changeTable(t.at(0, 0), "resize", { delta: -10 })).toBeUndefined();
+  });
+});

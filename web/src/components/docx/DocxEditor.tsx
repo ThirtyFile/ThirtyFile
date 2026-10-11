@@ -11,9 +11,14 @@ import {
   BetweenVerticalStartIcon,
   ChevronDownIcon,
   Columns3Icon,
+  Grid3x3Icon,
   Loader2Icon,
+  PaintBucketIcon,
+  PanelBottomIcon,
   Rows3Icon,
   SaveIcon,
+  SquareDashedIcon,
+  SquareIcon,
   TableCellsMergeIcon,
   TableCellsSplitIcon,
   XIcon,
@@ -21,7 +26,8 @@ import {
 import { toast } from "sonner";
 import { ApiError, type FileSource, type Node } from "@/api";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { ColorMenu } from "@/components/ColorMenu";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -33,7 +39,7 @@ import { shortcut } from "@/lib/keys";
 import { cancellable } from "@/lib/cancellable";
 import { officeErrorMessage } from "@/lib/officeErrors";
 import type { Caret } from "@/ooxml/docx/editor";
-import { MAX_SPLIT, type TableOp } from "@/ooxml/docx/tableOps";
+import { MAX_SPLIT, type BorderKind, type TableOp } from "@/ooxml/docx/tableOps";
 import { TOO_LARGE } from "@/ooxml/core/package";
 import { dropSession, isDirty, keepSession, openSession, releaseIfClean, reusableSession, saveSession, type DocxSession } from "./session";
 
@@ -190,10 +196,11 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
   };
 
   /** A row or column of the caret's table added or deleted, in the frame; the caret stays there */
-  const table = (op: TableOp, split?: { cols: number; rows: number }) => {
-    frame.current?.contentWindow?.postMessage({ type: "table", op, ...split }, "*");
+  const table = (op: TableOp, change?: { cols?: number; rows?: number; border?: BorderKind; color?: string | null }) => {
+    frame.current?.contentWindow?.postMessage({ type: "table", op, ...change }, "*");
     frame.current?.focus();
   };
+  const border = (kind: BorderKind) => table("border", { border: kind });
   const tableOff = !inCell || loading || !!error;
 
   const exit = () => {
@@ -327,7 +334,7 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
                 <Button
                   variant="ghost"
                   size="sm"
-                  title={tableOff ? t("Put the cursor in a table to change its rows and columns") : t("Insert")}
+                  title={tableOff ? t("Put the cursor in a table to change it") : t("Insert")}
                   disabled={tableOff}
                   className="gap-1"
                   onMouseDown={(e) => e.preventDefault()}
@@ -358,7 +365,7 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
                 <Button
                   variant="ghost"
                   size="sm"
-                  title={tableOff ? t("Put the cursor in a table to change its rows and columns") : t("Delete")}
+                  title={tableOff ? t("Put the cursor in a table to change it") : t("Delete")}
                   disabled={tableOff}
                   className="gap-1"
                   onMouseDown={(e) => e.preventDefault()}
@@ -383,7 +390,7 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
                 <Button
                   variant="ghost"
                   size="sm"
-                  title={tableOff ? t("Put the cursor in a table to change its rows and columns") : t("Cells")}
+                  title={tableOff ? t("Put the cursor in a table to change it") : t("Cells")}
                   disabled={tableOff}
                   className="gap-1"
                   onMouseDown={(e) => e.preventDefault()}
@@ -403,6 +410,56 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
               {picked < 2 && <p className="max-w-64 px-2 py-1.5 text-xs text-muted-foreground">{t("To merge cells, drag across them or Shift+click another cell first.")}</p>}
             </DropdownMenuContent>
           </DropdownMenu>
+          {/* Borders and shading: of the cells selected together, or of the cell under the cursor */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title={tableOff ? t("Put the cursor in a table to change it") : t("Borders")}
+                  aria-label={t("Borders")}
+                  disabled={tableOff}
+                  className="gap-0.5 px-1.5"
+                  onMouseDown={(e) => e.preventDefault()}
+                />
+              }
+            >
+              <Grid3x3Icon />
+              <ChevronDownIcon className="size-3 opacity-60" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-auto">
+              <DropdownMenuItem onClick={() => border("all")}>
+                <Grid3x3Icon /> {t("All borders")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => border("outside")}>
+                <SquareIcon /> {t("Outside borders")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => border("inside")}>
+                <Grid3x3Icon className="opacity-70" /> {t("Inside borders")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => border("thickOutside")}>
+                <SquareIcon className="stroke-[3]" /> {t("Thick outside borders")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => border("bottom")}>
+                <PanelBottomIcon /> {t("Bottom border")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => border("top")}>
+                <PanelBottomIcon className="rotate-180" /> {t("Top border")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => border("left")}>
+                <PanelBottomIcon className="rotate-90" /> {t("Left border")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => border("right")}>
+                <PanelBottomIcon className="-rotate-90" /> {t("Right border")}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => border("none")}>
+                <SquareDashedIcon /> {t("No border")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <ColorMenu label={t("Shading")} icon={<PaintBucketIcon className="size-4" />} noneLabel={t("No color")} disabled={tableOff} onPick={(c) => table("shade", { color: c ?? null })} />
           <Button size="sm" disabled={!dirty || saving || loading || !!error} onClick={() => void save()}>
             {saving ? <Loader2Icon className="animate-spin" /> : <SaveIcon />}
             {t("Save")}

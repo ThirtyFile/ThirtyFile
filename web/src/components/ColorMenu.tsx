@@ -1,0 +1,52 @@
+//! A color menu: Office's common palette, and none
+
+import type { ReactNode } from "react";
+import { ChevronDownIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+
+// Office's common palette: the first row is base colors, followed by tints and shades from light to dark
+export const PALETTE = [
+  ["#000000", "#FFFFFF", "#E7E6E6", "#44546A", "#4472C4", "#ED7D31", "#A5A5A5", "#FFC000", "#5B9BD5", "#70AD47"],
+  ["#7F7F7F", "#F2F2F2", "#D0CECE", "#D6DCE4", "#D9E1F2", "#FCE4D6", "#EDEDED", "#FFF2CC", "#DDEBF7", "#E2EFDA"],
+  ["#595959", "#D9D9D9", "#AEAAAA", "#ACB9CA", "#B4C6E7", "#F8CBAD", "#DBDBDB", "#FFE699", "#BDD7EE", "#C6E0B4"],
+  ["#404040", "#BFBFBF", "#757171", "#8497B0", "#8EA9DB", "#F4B084", "#C9C9C9", "#FFD966", "#9BC2E6", "#A9D08E"],
+  ["#262626", "#A6A6A6", "#3A3838", "#333F4F", "#305496", "#C65911", "#7B7B7B", "#BF8F00", "#2F75B5", "#548235"],
+  ["#C00000", "#FF0000", "#FFC000", "#FFFF00", "#92D050", "#00B050", "#00B0F0", "#0070C0", "#002060", "#7030A0"],
+];
+
+/** A color chosen from Office's palette, or none: for fill and font colors (workbooks) and shading (documents) */
+export function ColorMenu(props: { label: string; icon: ReactNode; value?: string; noneLabel: string; disabled?: boolean; onPick(c: string | undefined): void }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="sm"
+            title={props.label}
+            aria-label={props.label}
+            disabled={props.disabled}
+            className="h-7 shrink-0 gap-0.5 px-1"
+            onMouseDown={(e) => e.preventDefault()}
+          />
+        }
+      >
+        <span className="flex flex-col items-center leading-none">
+          {props.icon}
+          <span className="mt-0.5 h-[3px] w-4 rounded-sm border border-black/10" style={{ background: props.value ?? "transparent" }} />
+        </span>
+        <ChevronDownIcon className="size-3 opacity-60" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="w-auto p-2">
+        <DropdownMenuItem onClick={() => props.onPick(undefined)}>{props.noneLabel}</DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <div className="grid grid-cols-10 gap-1 p-1">
+          {PALETTE.flat().map((c) => (
+            <DropdownMenuItem key={c} title={c} aria-label={c} className="size-5 rounded-sm border border-black/15 p-0" style={{ background: c }} onClick={() => props.onPick(c)} />
+          ))}
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}

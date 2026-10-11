@@ -15,20 +15,34 @@
  *   cells spanning the new columns. Splitting into rows regroups a cell merged across rows, or adds rows below a single
  *   cell, in which the row's other cells stay one (merged down). The text stays in the first cell.
  *
+ * - Borders and shading are set on the cells of a range; the cells next to it get the same line on the side they share
+ *   with it, so the result looks as chosen. A column is made wider or narrower by moving its right edge: the column
+ *   next to it gives or takes the difference (the table's last edge widens or narrows the table).
+ *
  * Rows and cells are found by their place in the table's grid (gridBefore, gridSpan). A table this can't follow (rows or
  * cells inside content controls, say) isn't changed at all.
  */
 
 import { attr, kid } from "../core/package";
 
-export type TableOp = "rowAbove" | "rowBelow" | "colLeft" | "colRight" | "deleteRow" | "deleteCol" | "merge" | "split";
+export type TableOp = "rowAbove" | "rowBelow" | "colLeft" | "colRight" | "deleteRow" | "deleteCol" | "merge" | "split" | "border" | "shade" | "resize";
+
+/** Which borders a range of cells gets (as the workbook editor offers them, and inside ones) */
+export type BorderKind = "all" | "outside" | "inside" | "thickOutside" | "top" | "bottom" | "left" | "right" | "none";
 
 /** What merging and splitting need: the other corner of the cells to merge, and how many columns and rows to split into */
 export interface TableOpOptions {
   other?: Element;
   cols?: number;
   rows?: number;
+  /** Borders to set, the shading color ("#RRGGBB", or null for none), and how far (twips) to move a column's right edge */
+  border?: BorderKind;
+  color?: string | null;
+  delta?: number;
 }
+
+/** Narrowest a column is made by moving its edge (0.2 inch) */
+export const MIN_COLUMN = 288;
 
 /** Most columns and rows a cell is split into */
 export const MAX_SPLIT = { cols: 20, rows: 50 };
@@ -258,6 +272,15 @@ export function changeTable(tc: Element, op: TableOp, opts: TableOpOptions = {})
       return opts.other ? mergeCells(t, rows, tc, opts.other) : undefined;
     case "split":
       return splitCell(t, tbl, rows, r, cur, opts.cols ?? 1, opts.rows ?? 1);
+    case "border":
+    case "shade": {
+      const range = opts.other ? rangeBetween(rows, tc, opts.other) : grow(rows, { r1: r, r2: r, c1: cur.start, c2: cur.start + cur.span - 1 });
+      if (!range) return undefined;
+      if (op === "border") return opts.border ? setBorders(t, rows, range, opts.border) : undefined;
+      return setShading(t, rows, range, opts.color ?? null);
+    }
+    case "resize":
+      return resizeColumn(t, tbl, rows, cur, opts.delta ?? 0);
   }
 }
 
@@ -644,4 +667,117 @@ function deleteColumn(t: Tables, tbl: Element, rows: Row[], r: number, cur: Grid
     return null;
   }
   return focus;
+}
+
+// ───────────── Borders, shading and widths ─────────────
+
+/** The order Word needs a cell's borders in (CT_TcBorders) */
+const BORDERS = ["top", "start", "left", "bottom", "end", "right", "insideH", "insideV", "tl2br", "tr2bl"];
+type Side = "top" | "bottom" | "left" | "right";
+/** A side's element names: transitional documents name the left and right sides, strict ones their start and end */
+const SIDE_NAMES: Record<Side, string[]> = { top: ["top"], bottom: ["bottom"], left: ["left", "start"], right: ["right", "end"] };
+const OPPOSITE: Record<Side, Side> = { top: "bottom", bottom: "top", left: "right", right: "left" };
+
+/** A line of a cell's border: a single line of `size` eighths of a point, or none ("nil", which hides the table's own) */
+function setSide(t: Tables, tc: Element, side: Side, size: number | null) {
+  const borders = t.cellProp(tc, "tcBorders");
+  const names = SIDE_NAMES[side];
+  const el = names.map((n) => kid(borders, n)).find(Boolean) ?? placeIn(borders, t.el(names[0]), BORDERS);
+  for (const a of Array.from(el.attributes)) el.removeAttributeNode(a);
+  if (size === null) t.set(el, "val", "nil");
+  else {
+    t.set(el, "val", "single");
+    t.set(el, "sz", String(size));
+    t.set(el, "space", "0");
+    t.set(el, "color", "auto");
+  }
+}
+
+/** The sides of a cell that borders of `kind` set, given which of its sides are on the range's edge */
+function sidesFor(kind: BorderKind, edge: Record<Side, boolean>): Side[] {
+  const all: Side[] = ["top", "bottom", "left", "right"];
+  switch (kind) {
+    case "all":
+    case "none":
+      return all;
+    case "outside":
+    case "thickOutside":
+      return all.filter((s) => edge[s]);
+    case "inside":
+      return all.filter((s) => !edge[s]);
+    default:
+      return edge[kind] ? [kind] : [];
+  }
+}
+
+function setBorders(t: Tables, rows: Row[], range: Range, kind: BorderKind): Element {
+  const { r1, r2, c1, c2 } = range;
+  const size = kind === "none" ? null : kind === "thickOutside" ? 12 : 4;
+  let first: Element | null = null;
+  for (let r = r1; r <= r2; r++) {
+    for (const cell of rows[r].cells) {
+      if (cell.start < c1 || cell.start > c2) continue;
+      first ??= cell.tc;
+      const end = cell.start + cell.span - 1;
+      const edge = { top: r === r1, bottom: r === r2, left: cell.start === c1, right: end === c2 };
+      for (const side of sidesFor(kind, edge)) {
+        setSide(t, cell.tc, side, size);
+        if (!edge[side]) continue;
+        // The cells across the range's edge get the same line on the side they share with it
+        const across =
+          side === "top"
+            ? (rows[r - 1]?.cells ?? []).filter((c) => c.start <= end && c.start + c.span - 1 >= cell.start)
+            : side === "bottom"
+              ? (rows[r + 1]?.cells ?? []).filter((c) => c.start <= end && c.start + c.span - 1 >= cell.start)
+              : side === "left"
+                ? rows[r].cells.filter((c) => c.start + c.span === cell.start)
+                : rows[r].cells.filter((c) => c.start === end + 1);
+        for (const c of across) setSide(t, c.tc, OPPOSITE[side], size);
+      }
+    }
+  }
+  return first!;
+}
+
+function setShading(t: Tables, rows: Row[], range: Range, color: string | null): Element | undefined {
+  const hex = color === null ? "auto" : /^#?([0-9a-f]{6})$/i.exec(color)?.[1]?.toUpperCase();
+  if (!hex) return undefined;
+  let first: Element | null = null;
+  for (let r = range.r1; r <= range.r2; r++) {
+    for (const cell of rows[r].cells) {
+      if (cell.start < range.c1 || cell.start > range.c2) continue;
+      first ??= cell.tc;
+      const shd = t.cellProp(cell.tc, "shd");
+      for (const a of Array.from(shd.attributes)) shd.removeAttributeNode(a);
+      t.set(shd, "val", "clear");
+      t.set(shd, "color", "auto");
+      t.set(shd, "fill", hex);
+    }
+  }
+  return first!;
+}
+
+function resizeColumn(t: Tables, tbl: Element, rows: Row[], cur: GridCell, delta: number): Element | undefined {
+  const cols = gridCols(tbl);
+  const widths = cols.map((c) => num(c, "w"));
+  const e = cur.start + cur.span;
+  if (!Number.isFinite(delta) || Math.round(delta) === 0 || e > cols.length || widths.some((w) => w === null)) return undefined;
+  const w = widths as number[];
+  let d = Math.round(delta);
+  // Neither column narrower than the narrowest allowed: the move stops there
+  d = Math.max(d, MIN_COLUMN - w[e - 1]);
+  if (e < cols.length) d = Math.min(d, w[e] - MIN_COLUMN);
+  if (d === 0) return undefined;
+  w[e - 1] += d;
+  if (e < cols.length) w[e] -= d;
+  else changeWidth(t, tbl, d);
+  cols.forEach((c, i) => t.set(c, "w", String(w[i])));
+  // Every cell's width is that of the columns it spans
+  for (const row of rows)
+    for (const c of row.cells) {
+      const tcW = t.cellProp(c.tc, "tcW");
+      t.set(tcW, "w", String(w.slice(c.start, c.start + c.span).reduce((n, x) => n + x, 0)));
+      t.set(tcW, "type", "dxa");
+    }
+  return cur.tc;
 }
