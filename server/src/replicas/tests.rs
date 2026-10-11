@@ -311,6 +311,61 @@ async fn changes_are_copied_soon_after_and_content_nothing_uses_lets_go_of_its_c
 }
 
 #[tokio::test]
+async fn copies_that_cant_be_read_back_for_a_moment_are_kept() {
+    use futures_util::future::BoxFuture;
+    // A target that doesn't answer reads for now
+    struct Unreadable(Arc<dyn Storage>);
+    impl Storage for Unreadable {
+        fn put_file<'a>(&'a self, h: &'a str, p: &'a std::path::Path) -> BoxFuture<'a, std::io::Result<()>> {
+            self.0.put_file(h, p)
+        }
+        fn open<'a>(&'a self, _: &'a str, _: u64, _: u64) -> BoxFuture<'a, std::io::Result<storage::BoxReader>> {
+            Box::pin(async { Err(std::io::ErrorKind::TimedOut.into()) })
+        }
+        fn delete<'a>(&'a self, h: &'a str) -> BoxFuture<'a, std::io::Result<()>> {
+            self.0.delete(h)
+        }
+        fn check(&self) -> BoxFuture<'_, std::io::Result<()>> {
+            self.0.check()
+        }
+        fn ping(&self) -> BoxFuture<'_, std::io::Result<()>> {
+            self.0.ping()
+        }
+        fn content_dir(&self) -> &'static str {
+            self.0.content_dir()
+        }
+        fn stat<'a>(&'a self, key: &'a str) -> BoxFuture<'a, std::io::Result<Option<storage::Entry>>> {
+            self.0.stat(key)
+        }
+        fn put_at<'a>(&'a self, key: &'a str, src: &'a std::path::Path) -> BoxFuture<'a, std::io::Result<()>> {
+            self.0.put_at(key, src)
+        }
+    }
+    let env = testutil::env().await;
+    let amy = env.user("amy", true).await;
+    env.upload(&amy, amy.root(), "a.txt", b"first").await;
+    env.upload(&amy, amy.root(), "b.txt", b"second").await;
+    let nas = add_nas(&env, "nas").await;
+    let id = make(&env, json!({ "source": "local", "targets": [{ "location": "nas" }] })).await;
+    assert_eq!(settle(&env, &id).await, ["done"]);
+    // Copies to check again (an old primary's), and a target that doesn't answer reads: the sync stops, and the copies
+    // stay, to be checked next time
+    sqlx::query("UPDATE replica_copies SET state = 'stale'").execute(&env.st.db).await.unwrap();
+    let inner = env.st.storage("nas").unwrap();
+    env.st.storages.write().insert("nas".into(), Arc::new(Unreadable(inner.clone())));
+    let ran = settle(&env, &id).await;
+    assert!(ran.iter().all(|s| s != "done"), "{ran:?}");
+    assert_eq!(copies(&env, "nas").await.iter().filter(|(_, s)| s == "stale").count(), 2);
+    assert!(stored(&nas, b"first").is_file() && stored(&nas, b"second").is_file());
+    // Answering again: a sync checks them, and they count
+    env.st.storages.write().insert("nas".into(), inner);
+    let q = serde_json::from_value(json!({})).unwrap();
+    let Json(_) = api::sync(State(env.st.clone()), Admin(env.admin().await), Path(id.clone()), Json(q)).await.unwrap();
+    assert_eq!(run_queued(&env, &id).await, ["done"]);
+    assert_eq!(copies(&env, "nas").await.iter().filter(|(_, s)| s == "verified").count(), 2);
+}
+
+#[tokio::test]
 async fn a_damaged_or_missing_copy_is_found_and_replaced_from_a_checked_one() {
     let env = testutil::env().await;
     let amy = env.user("amy", true).await;

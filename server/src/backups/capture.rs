@@ -1035,6 +1035,12 @@ async fn publish(cx: &Ctx<'_>, set: &Set, snapshot: &str, dst: &dyn Storage, m: 
     tokio::fs::copy(&m.path, &copy).await?;
     let key = layout::manifest_key(&set.id, snapshot);
     let put = async {
+        // A snapshot tried again has the same id, so the destination may hold the list and the marker of the earlier
+        // try: they go first (the marker first: without it the snapshot isn't a restore point meanwhile). A destination
+        // that keeps a file already there (SFTP, some FTP servers) would otherwise keep the old list, which the marker
+        // written next wouldn't match.
+        dst.delete_at(&layout::complete_key(&set.id, snapshot)).await?;
+        dst.delete_at(&key).await?;
         dst.put_at(&key, &copy).await?;
         match dst.stat(&key).await? {
             Some(e) if e.size == m.size => Ok(()),

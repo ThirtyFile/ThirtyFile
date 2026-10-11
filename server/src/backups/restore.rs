@@ -558,7 +558,7 @@ async fn restore_file(r: &Restore<'_>, parent: &str, item: &Item<'_>, conflict: 
     }
     let result = restore_into(r, parent, &Item { name: &name, ..*item }, &tmp, conflict).await;
     let _ = tokio::fs::remove_file(&tmp).await;
-    result.map(Ok)
+    result
 }
 
 /// Reads a content of the set into a temp file, checked against its SHA-256; Err(stop) inside when asked to stop
@@ -589,7 +589,8 @@ async fn fetch(cx: &Ctx<'_>, set: &str, dst: &dyn Storage, hash: &str, size: i64
 
 /// Into the space: through content.rs, like an upload. A content store that holds the content already needs no copy of
 /// it; the file is recorded, or (told to replace) the file there gets it
-async fn restore_into(r: &Restore<'_>, parent: &str, item: &Item<'_>, tmp: &std::path::Path, conflict: &str) -> AppResult<Outcome> {
+/// Ok(Err(stop)) when asked to stop while the content is fetched again
+async fn restore_into(r: &Restore<'_>, parent: &str, item: &Item<'_>, tmp: &std::path::Path, conflict: &str) -> AppResult<Result<Outcome, Stop>> {
     let (cx, st, target) = (r.cx, r.cx.st, r.target);
     let (name, source, hash, size, modified) = (item.name, item.source, item.hash, item.size, item.modified);
     let folder = folder_node(st, parent).await?;
@@ -598,9 +599,8 @@ async fn restore_into(r: &Restore<'_>, parent: &str, item: &Item<'_>, tmp: &std:
         Ok(s) => s,
         // Registered content is missing or damaged, or its last reference disappeared: fetch the backup and retry.
         Err(_) if !target.is_folder() && tokio::fs::metadata(tmp).await.is_err() => {
-            match fetch(cx, r.set, r.dst, hash, size, tmp).await? {
-                Ok(()) => {}
-                Err(_) => return Err(AppError::internal("stopped while fetching")),
+            if let Err(stop) = fetch(cx, r.set, r.dst, hash, size, tmp).await? {
+                return Ok(Err(stop));
             }
             content::stage_restored(st, &folder, received()).await?
         }
@@ -659,7 +659,7 @@ async fn restore_into(r: &Restore<'_>, parent: &str, item: &Item<'_>, tmp: &std:
     match result {
         Ok((written, outcome)) => {
             staged.finish(st, written).await;
-            Ok(outcome)
+            Ok(Ok(outcome))
         }
         Err(e) => {
             staged.abandon(st).await;
