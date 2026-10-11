@@ -29,6 +29,7 @@ import { DOCX_CSS } from "./css";
 import { originalPieces, planEdits, readAllEdits, readParagraph, samePieces, saveEdits, writeXml, type EditPlan, type FmtOf } from "./edit";
 import { formatRange, MARK_END, MARK_START, type Fmt, type RangeFormat } from "./formatOps";
 import { formatList, listKind, type ListFormat, type ListKind } from "./listOps";
+import { hasCjk } from "./fonts";
 import { cellRange, changeTable, type BorderKind, type TableOp } from "./tableOps";
 import { loadDocx, normalStyle } from "./index";
 import { contentWidth, parseSection, type Section } from "./section";
@@ -97,6 +98,12 @@ export interface CaretFormat {
   align: "left" | "center" | "right" | "both";
   /** The kind of list the paragraph is in, if any */
   list: ListKind | null;
+  /** The font shown at the caret */
+  font: string;
+  /** The paragraph's line spacing in 240ths of a line (null: not a multiple of lines), and its space before and after (twips) */
+  line: number | null;
+  before: number;
+  after: number;
 }
 
 /** Where the caret is: in a table cell, how many cells are selected together, and the formatting there */
@@ -104,6 +111,15 @@ export interface Place {
   cell: boolean;
   cells: number;
   fmt: CaretFormat | null;
+}
+
+/** A font name the editor shows and writes: letters, digits, spaces and a few marks */
+export const FONT_NAME = /^[\p{L}\p{N} .\-'&()]{1,64}$/u;
+
+/** A font for the host's font list: East Asian fonts are set for East Asian text too */
+export interface FontChoice {
+  name: string;
+  eastAsia: boolean;
 }
 
 /** A paragraph style the document defines, for the host's style list */
@@ -127,12 +143,14 @@ export interface DocxEditor {
   /** A formatting command on the selection, in the view */
   format(cmd: FormatCommand, value?: string): void;
   /**
-   * The document with the selection's font size, paragraph style or alignment changed, and where to put the caret once
+   * The document with the selection's font, font size, paragraph style, alignment or spacing changed, and where to put the caret once
    * it is opened again; undefined when there is no selection to change
    */
   formatRange(f: RangeFormat): { xml: string; caret: Caret | null } | undefined;
   /** The paragraph styles the document defines (shown in its own style list) */
   styles: ParagraphStyle[];
+  /** The fonts the document names in its font table */
+  fonts: FontChoice[];
   /** Path of document.xml */
   path: string;
   /**
@@ -304,6 +322,8 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
     return Object.keys(out).length ? out : undefined;
   };
   const styles = await paragraphStyles(pkg, docRels, docXml);
+  const fontTable = docRels.find((r) => r.type.endsWith("/fontTable") && !r.external)?.target;
+  const fonts = fontNames(fontTable ? await pkg.xml(fontTable) : null);
   // The parts lists use: the numbering part (where it is, or where it goes), the document's relationships, content types
   const numberingPath = docRels.find((r) => r.type.endsWith("/numbering") && !r.external)?.target ?? loaded.docPath.replace(/[^/]*$/, "numbering.xml");
   const relsPath = loaded.docPath.replace(/([^/]*)$/, "_rels/$1.rels");
@@ -401,6 +421,8 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
   let lastRange: Range | null = null;
   let frozen = false;
   const onWindowBlur = () => {
+    // The selection as it is now: a selection made just before (a double-click) may not have been reported yet
+    keepSelection();
     frozen = true;
   };
   const onTouch = () => {
@@ -639,7 +661,7 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
       onSelection();
     },
     formatRange(f) {
-      const marked = markSelection("size" in f);
+      const marked = markSelection("size" in f || "font" in f);
       if (!marked) return undefined;
       if (!formatRange(marked.doc, f)) return undefined;
       return { xml: writeXml(marked.doc), caret: marked.caret };
@@ -666,6 +688,7 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
     },
     path: loaded.docPath,
     styles,
+    fonts,
     focus: () => editable.focus({ preventScroll: true }),
     dispose() {
       ro?.disconnect();
@@ -887,7 +910,28 @@ function caretFormat(plan: EditPlan, editable: HTMLElement, numbering: Document 
     style: pStyle ? (pStyle.getAttributeNS(pStyle.namespaceURI, "val") ?? pStyle.getAttribute("w:val")) : null,
     align: align === "center" ? "center" : align === "right" || align === "end" ? "right" : align === "justify" ? "both" : "left",
     list: listKind(numbering, numVal("numId"), Number(numVal("ilvl") ?? 0) || 0),
+    font: cs.fontFamily.split(",")[0].replace(/["']/g, "").trim(),
+    line: para?.dataset.spLine ? Number(para.dataset.spLine) : null,
+    before: Number(para?.dataset.spBefore ?? 0) || 0,
+    after: Number(para?.dataset.spAfter ?? 0) || 0,
   };
+}
+
+/** Character sets of East Asian fonts in a font table: Shift JIS, Hangul, Johab, GB 2312, Big5 */
+const EAST_ASIAN_CHARSETS = new Set(["80", "81", "82", "86", "88"]);
+
+/** The fonts a font table names (those safe to show and to write back), East Asian by their character set or name */
+function fontNames(table: Document | null): FontChoice[] {
+  const out = new Map<string, FontChoice>();
+  for (const f of Array.from(table?.documentElement?.children ?? [])) {
+    if (f.localName !== "font") continue;
+    const name = f.getAttributeNS(f.namespaceURI, "name") ?? f.getAttribute("w:name") ?? "";
+    if (!FONT_NAME.test(name)) continue;
+    const charset = kid(f, "charset");
+    const cs = (charset?.getAttributeNS(charset.namespaceURI, "val") ?? charset?.getAttribute("w:val") ?? "").toUpperCase();
+    out.set(name, { name, eastAsia: EAST_ASIAN_CHARSETS.has(cs) || hasCjk(name) });
+  }
+  return Array.from(out.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** The paragraph styles the document defines that Word shows in its gallery, and those its paragraphs use */
