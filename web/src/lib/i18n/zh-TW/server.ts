@@ -426,6 +426,7 @@ export default {
   "The content {hash} is missing": "內容 {hash} 遺失",
   "{n} item of the copy is missing or damaged|{n} items of the copy are missing or damaged": "備份中有 {n} 個項目遺失或損毀",
   "Couldn't read from the copy's location: {error}": "無法從備份所在的位置讀取：{error}",
+  "Couldn't read a copy back on the target: {error}": "無法讀回目標位置上的副本：{error}",
   "Couldn't delete from the copy's location: {error}": "無法從備份所在的位置刪除：{error}",
   "The copy's location can't be reached: {error}": "無法連線到備份所在的位置：{error}",
   "This snapshot no longer exists": "這個快照已不存在",
