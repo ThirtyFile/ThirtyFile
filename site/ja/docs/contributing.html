@@ -131,6 +131,7 @@ cd web &amp;&amp; pnpm format</code></pre>
           <li>サーバーのメール原文は <code>server/src/i18n/texts.rs</code>、翻訳は隣の <code>zh_tw.rs</code>、<code>zh_cn.rs</code>、<code>ja.rs</code> です。不足分は英語で送ります。<code>texts.rs</code> の <code>COMPLETE</code> や言語メニューの言語で不足する場合、または <code>{parameters}</code> が原文と違う場合、テストは失敗します。</li>
           <li>動作を変更したら <code>site/docs/</code> の対応ガイドも更新します。</li>
           <li>0.4.0 のデータ構造は固定し、既存データが使えるようにします。変更は <code>server/migrations/0002_&lt;name&gt;.sql</code> 以降の新ファイルで 0.4.0 を更新します。<code>0001_init.sql</code> と既公開 migration は編集禁止で、チェックで失敗します。</li>
+          <li>Web アプリの API の型（<code>web/src/api/types.ts</code>）は手書きです。サーバーのテストが主なレスポンスの構造を <code>web/tests/contract/shapes.json</code> に記録しており、構造が変わると失敗します。<code>server/</code> で <code>THIRTYFILE_UPDATE_SHAPES=1 cargo test api_shapes</code> を実行し、<code>pnpm typecheck</code> が通るまで型を直してください。</li>
           <li>数式、ブック保存、文字コードなど、ファイルを変更するロジックには <code>web/tests/unit/</code> の単体テストを用意します。</li>
         </ul>
         <p>PR は軽量チェックを実行します。完全テストとイメージはリリース、プレリリース前、または <strong>Actions › Build › Run workflow</strong> で実行し、手動検証では公開しません。公開前に両アーキテクチャを <code>compose.yaml</code> と前リリースのデータで起動します。CodeQL はマージ後の <code>main</code>、週次、リリース前に走ります。<code>main</code> のマージはサイトも含め何も公開しません。ガイドはインストールできる内容を示すためリリースで公開します。既公開版にも正しいガイドの修正は、<strong>Actions › Website › Run workflow</strong> で公開元に <code>main</code> を指定して手動公開できます。</p>

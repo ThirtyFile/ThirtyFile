@@ -140,6 +140,7 @@ cd web &amp;&amp; pnpm format</code></pre>
           <li>伺服器自行產生的郵件文字，以英文定義在 <code>server/src/i18n/texts.rs</code>，各語言譯文位於旁邊的檔案（<code>zh_tw.rs</code>、<code>zh_cn.rs</code>、<code>ja.rs</code>）。缺少譯文時使用英文。伺服器測試會檢查 <code>texts.rs</code> 中列入 <code>COMPLETE</code>，或語言切換器提供的語言；缺少文字或 <code>{parameters}</code> 與英文不一致時會失敗。</li>
           <li>行為改變時，同步更新 <code>site/docs/</code> 中描述該行為的指南。</li>
           <li>0.4.0 的資料庫結構已凍結，確保舊版本建立的資料繼續有效。結構修改必須新增 <code>server/migrations/0002_&lt;name&gt;.sql</code> 及後續編號的遷移檔案，以升級 0.4.0 資料庫。禁止修改 <code>0001_init.sql</code> 和此前版本已發布的遷移檔案，檢查會阻止這種修改。</li>
+          <li>網頁應用程式的 API 型別（<code>web/src/api/types.ts</code>）是手寫的。伺服器有一項測試把主要回應的結構記錄在 <code>web/tests/contract/shapes.json</code>，結構一改就會失敗：在 <code>server/</code> 執行 <code>THIRTYFILE_UPDATE_SHAPES=1 cargo test api_shapes</code>，再修改型別直到 <code>pnpm typecheck</code> 通過。</li>
           <li>會更改使用者檔案的邏輯（公式、活頁簿儲存、文字編碼）須在 <code>web/tests/unit/</code> 中新增單元測試。</li>
         </ul>
         <p>每個 Pull Request 都執行上述輕量檢查。完整測試與映像建置在正式發布和預發布前執行，也可在 <strong>Actions › Build › Run workflow</strong> 手動執行；手動驗證不發布任何內容。發布前，兩種架構的映像都會使用 <code>compose.yaml</code> 在最新已發布版本的資料上啟動。CodeQL 在合併後、每週及發布前掃描 <code>main</code>。合併到 <code>main</code> 不發布任何內容，網站也不發布：指南隨版本發布，以描述使用者實際可安裝的功能。對目前已發布版本也正確的指南修復可手動發布：在 <strong>Actions › Website › Run workflow</strong> 中選擇 <code>main</code> 為要發布的分支或標籤。</p>

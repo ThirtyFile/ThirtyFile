@@ -5,6 +5,7 @@
   // hand, with several entries per line, keep their layout with a `// oxfmt-ignore` line above them.
   "printWidth": 190,
   // The dictionaries (src/lib/i18n/<lang>/) keep one entry per line, however long: scripts/check-i18n.mjs reads them
-  // line by line. Files copied from other projects (src/vendor/) stay as they were published
-  "ignorePatterns": ["src/lib/i18n/*/**", "src/vendor/**"]
+  // line by line. Files copied from other projects (src/vendor/) stay as they were published, and the API's shapes
+  // (tests/contract/shapes.json) as the server's test writes them
+  "ignorePatterns": ["src/lib/i18n/*/**", "src/vendor/**", "tests/contract/shapes.json"]
 }

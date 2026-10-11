@@ -5,4 +5,6 @@ pub mod maintenance;
 pub mod middleware;
 pub mod routes;
 pub mod serve;
+#[cfg(test)]
+mod shapes;
 pub mod startup;
