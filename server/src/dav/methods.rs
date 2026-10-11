@@ -166,7 +166,8 @@ pub(super) fn transfer_wait() -> std::time::Duration {
     if cfg!(test) { jobs::wait() } else { std::time::Duration::from_secs(60) }
 }
 
-/// MOVE and COPY, with Destination and Overwrite (an item already at the destination goes to the trash)
+/// MOVE and COPY, with Destination and Overwrite (an item already at the destination goes to the trash, and comes
+/// back should the move or copy fail: the client is told it failed, so the destination must be as it was)
 pub(super) async fn transfer(st: &AppState, user: &User, segs: &[String], headers: &HeaderMap, moving: bool) -> AppResult<Response> {
     let dest_segs = destination(headers)?;
     let overwrite = !headers.get("overwrite").is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"F"));
@@ -199,13 +200,17 @@ pub(super) async fn transfer(st: &AppState, user: &User, segs: &[String], header
     let done = if replaced.is_some() { StatusCode::NO_CONTENT } else { StatusCode::CREATED };
     let (st, user) = (st.clone(), user.clone());
     let job = jobs::run(&st.clone(), &user.clone(), "webdav", Limit::None, transfer_wait(), move |_| async move {
-        if let Some(existing) = replaced {
-            trash(&st, &user, &existing).await?;
+        if let Some(existing) = &replaced {
+            trash(&st, &user, existing).await?;
         }
-        if moving {
-            move_to(&st, &user, &src, &dest, &name).await?;
-        } else {
-            copy_to(&st, &user, &src, &dest, &name).await?;
+        let done = if moving { move_to(&st, &user, &src, &dest, &name).await } else { copy_to(&st, &user, &src, &dest, &name).await };
+        if let Err(e) = done {
+            if let Some(existing) = &replaced
+                && let Err(back) = restore(&st, &user, existing).await
+            {
+                tracing::warn!("Couldn't take {name:?} back out of the trash after a WebDAV change failed: {}", back.message);
+            }
+            return Err(e);
         }
         Ok(Outcome::default())
     })
@@ -214,7 +219,8 @@ pub(super) async fn transfer(st: &AppState, user: &User, segs: &[String], header
     Ok(if job.running() { StatusCode::ACCEPTED } else { done }.into_response())
 }
 
-/// Moves an item into `dest` as `name`: a rename, a move, or both (in the order the names allow)
+/// Moves an item into `dest` as `name`: a rename, a move, or both (in the order the names allow). When the second step
+/// fails, the first is undone, so the item is where and as it was.
 pub(super) async fn move_to(st: &AppState, user: &User, src: &Node, dest: &Node, name: &str) -> AppResult<()> {
     let from = src.parent_id.clone().unwrap_or_default();
     if from == dest.id {
@@ -223,16 +229,34 @@ pub(super) async fn move_to(st: &AppState, user: &User, src: &Node, dest: &Node,
     if name == src.name {
         return move_into(st, user, &src.id, &dest.id).await;
     }
+    // Best effort: the step that failed is what the client hears about
+    let was_in = from.as_str();
+    let back = |moved: bool, renamed: bool| async move {
+        if moved {
+            let _ = move_into(st, user, &src.id, was_in).await;
+        }
+        if renamed {
+            let _ = rename(st, user, &src.id, &src.name).await;
+        }
+    };
     let mut c = st.db.acquire().await?;
     if !tree::name_taken(&mut c, &dest.id, &src.name).await? {
         drop(c);
         move_into(st, user, &src.id, &dest.id).await?;
-        return rename(st, user, &src.id, name).await;
+        if let Err(e) = rename(st, user, &src.id, name).await {
+            back(true, false).await;
+            return Err(e);
+        }
+        return Ok(());
     }
     if !tree::name_taken(&mut c, &from, name).await? {
         drop(c);
         rename(st, user, &src.id, name).await?;
-        return move_into(st, user, &src.id, &dest.id).await;
+        if let Err(e) = move_into(st, user, &src.id, &dest.id).await {
+            back(false, true).await;
+            return Err(e);
+        }
+        return Ok(());
     }
     // Both names are taken on the other side: pass through a name free in both folders
     let mut via = None;
@@ -246,8 +270,15 @@ pub(super) async fn move_to(st: &AppState, user: &User, src: &Node, dest: &Node,
     drop(c);
     let via = via.ok_or_else(|| AppError::conflict("Too many items with the same name"))?;
     rename(st, user, &src.id, &via).await?;
-    move_into(st, user, &src.id, &dest.id).await?;
-    rename(st, user, &src.id, name).await
+    if let Err(e) = move_into(st, user, &src.id, &dest.id).await {
+        back(false, true).await;
+        return Err(e);
+    }
+    if let Err(e) = rename(st, user, &src.id, name).await {
+        back(true, true).await;
+        return Err(e);
+    }
+    Ok(())
 }
 
 /// Copies an item into `dest` as `name`: the copy is made under that name, so nothing made there at the same time

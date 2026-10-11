@@ -393,7 +393,15 @@ async fn step(conn: &mut SqliteConnection, c: &Change, frontier: &mut Option<Vec
             let Some(trash_id) = &c.trash_id else { return Ok((0, true)) };
             restore_batch(conn, trash_id, limit).await
         }
-        ChangeKind::Purge => purge_batch(conn, &c.node_id, frontier.get_or_insert_with(VecDeque::new), limit, None, out).await,
+        ChangeKind::Purge => {
+            // Items put in the trash on their own from inside what goes are trash items of their own: they stay, at the
+            // top of their space, as they do when their folder is gone from a folder space's disk
+            let keep: Option<(String,)> = sqlx::query_as("SELECT d.root_id FROM nodes n JOIN drives d ON d.id = n.drive_id WHERE n.id = ?")
+                .bind(&c.node_id)
+                .fetch_optional(&mut *conn)
+                .await?;
+            purge_batch(conn, &c.node_id, frontier.get_or_insert_with(VecDeque::new), limit, keep.as_ref().map(|(r,)| r.as_str()), out).await
+        }
     }
 }
 
@@ -563,6 +571,38 @@ mod tests {
         .fetch_one(&env.st.db)
         .await
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn deleting_a_folder_for_good_keeps_what_was_put_in_the_trash_from_it_on_its_own() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", false).await;
+        let folder = env.folder(&amy, amy.root(), "F").await;
+        let report = env.file(&amy, &folder, "report.docx").await;
+        let other = env.file(&amy, &folder, "other.txt").await;
+        // The file first, then its folder: two items of the trash
+        let _ = nodes::trash(State(env.st.clone()), amy.clone(), req(json!({ "ids": [report] }))).await.unwrap();
+        let _ = nodes::trash(State(env.st.clone()), amy.clone(), req(json!({ "ids": [folder] }))).await.unwrap();
+        settled(&env.st).await;
+
+        let Json(job) = nodes::delete_forever(State(env.st.clone()), amy.clone(), req(json!({ "ids": [folder] }))).await.unwrap();
+        if job.running() {
+            crate::jobs::wait_for(&env.st, &job.id).await;
+        }
+        settled(&env.st).await;
+        let gone = |id: String| {
+            let st = env.st.clone();
+            async move { super::super::get_node(&mut st.db.acquire().await.unwrap(), &id).await.unwrap().is_none() }
+        };
+        assert!(gone(folder.clone()).await && gone(other.clone()).await);
+        // The file trashed on its own is still in the trash, at the top of the space, and can be restored
+        let n = super::super::get_node(&mut env.st.db.acquire().await.unwrap(), &report).await.unwrap().expect("kept");
+        assert!(n.trashed_at.is_some());
+        assert_eq!(n.parent_id.as_deref(), Some(amy.root()));
+        let _ = nodes::restore(State(env.st.clone()), amy.clone(), req(json!({ "ids": [report] }))).await.unwrap();
+        settled(&env.st).await;
+        let n = super::super::get_node(&mut env.st.db.acquire().await.unwrap(), &report).await.unwrap().unwrap();
+        assert!(n.trashed_at.is_none());
     }
 
     #[tokio::test]

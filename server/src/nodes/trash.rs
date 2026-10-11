@@ -204,7 +204,20 @@ pub async fn delete_forever(State(st): State<AppState>, user: User, Json(req): J
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
         let mut rows = Vec::new();
-        for id in &outermost(&mut tx, &req.ids()?).await? {
+        // An item put in the trash on its own stays when the folder it was in goes (tree/changes.rs): one selected
+        // with that folder is deleted itself, as are the outermost of the others
+        let ids = req.ids()?;
+        let mut selected = outermost(&mut tx, &ids).await?;
+        let own: Vec<(String,)> = sqlx::query_as("SELECT id FROM nodes WHERE id IN (SELECT value FROM json_each(?)) AND trash_root = 1")
+            .bind(serde_json::to_string(&ids).unwrap())
+            .fetch_all(&mut *tx)
+            .await?;
+        for (id,) in own {
+            if !selected.contains(&id) {
+                selected.push(id);
+            }
+        }
+        for id in &selected {
             let (node, _) = trash_root(&mut tx, &user, id, Need::Delete).await?;
             logs::record_activity(&mut tx, &user, Some(&node), "delete", "").await?;
             rows.push(changes::purge(&mut tx, &node.id).await?);

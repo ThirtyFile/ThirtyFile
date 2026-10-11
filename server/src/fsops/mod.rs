@@ -824,6 +824,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_scan_while_an_item_moves_to_another_folder_space_waits_and_keeps_it() {
+        let env = testutil::env().await;
+        let one = env.folder_space("One").await;
+        let two = env.folder_space("Two").await;
+        let admin = env.admin().await;
+        write_old(&one.dir.join("Docs/x.txt"), b"x");
+        crate::folders::scan(&env.st, &one.drive).await.unwrap();
+        let (docs, _) = env.node_at(&one.drive, "Docs").await.unwrap();
+        let (x, _) = env.node_at(&one.drive, "Docs/x.txt").await.unwrap();
+
+        // While the folder is on its way (renamed out of One, not yet in Two's index), One is scanned: the scan finds
+        // it gone, and waits for the move rather than removing it from the index
+        type Scan = tokio::task::JoinHandle<AppResult<crate::folders::ScanReport>>;
+        let scans: std::sync::Arc<crate::sync::Mutex<Vec<Scan>>> = Default::default();
+        let (st, drive, held) = (env.st.clone(), one.drive.clone(), scans.clone());
+        let _hook = hook_after_place(move || {
+            let (st, drive, held) = (st.clone(), drive.clone(), held.clone());
+            Box::pin(async move {
+                let scan = tokio::spawn(async move { crate::folders::scan(&st, &drive).await });
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                assert!(!scan.is_finished(), "the scan waits for the move");
+                held.lock().push(scan);
+            })
+        });
+        let _ = crate::nodes::move_nodes(State(env.st.clone()), admin.clone(), req(json!({ "ids": [docs], "dest_id": two.root }))).await.unwrap();
+        let scan = scans.lock().pop().expect("the move went through its content being in place");
+        let report = scan.await.unwrap().unwrap();
+        assert_eq!(report.removed, 0, "{report:?}");
+        // The items kept their ids, in the space they moved to
+        assert_eq!(env.node_at(&two.drive, "Docs/x.txt").await.unwrap().0, x);
+        assert_eq!(std::fs::read(two.dir.join("Docs/x.txt")).unwrap(), b"x");
+        assert!(env.node_at(&one.drive, "Docs").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_move_to_another_folder_space_counts_the_content_as_found_on_disk() {
+        let env = testutil::env().await;
+        let one = env.folder_space("One").await;
+        let two = env.folder_space("Two").await;
+        let admin = env.admin().await;
+        write_old(&one.dir.join("Docs/x.txt"), b"x");
+        write_old(&one.dir.join("Docs/gone.txt"), b"gone");
+        crate::folders::scan(&env.st, &one.drive).await.unwrap();
+        let (docs, _) = env.node_at(&one.drive, "Docs").await.unwrap();
+        let used = |drive: String| {
+            let db = env.st.db.clone();
+            async move { sqlx::query_as::<_, (i64,)>("SELECT used_bytes FROM drives WHERE id = ?").bind(drive).fetch_one(&db).await.unwrap().0 }
+        };
+        assert_eq!(used(one.drive.clone()).await, 5);
+        // Changed and removed on the server since the last scan
+        std::fs::write(one.dir.join("Docs/x.txt"), b"longer").unwrap();
+        std::fs::remove_file(one.dir.join("Docs/gone.txt")).unwrap();
+        let _ = crate::nodes::move_nodes(State(env.st.clone()), admin.clone(), req(json!({ "ids": [docs], "dest_id": two.root }))).await.unwrap();
+        assert_eq!(used(one.drive.clone()).await, 0);
+        assert_eq!(used(two.drive.clone()).await, 6);
+    }
+
+    #[tokio::test]
     async fn a_change_of_several_items_that_fails_halfway_puts_the_first_ones_back() {
         let env = testutil::env().await;
         let space = env.folder_space("Shared").await;

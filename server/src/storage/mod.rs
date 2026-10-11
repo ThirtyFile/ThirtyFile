@@ -283,8 +283,12 @@ impl From<std::io::Error> for crate::error::AppError {
 pub async fn attempt_of(tmp: &Path) -> io::Result<std::path::PathBuf> {
     let (from, to) = (tmp.to_path_buf(), tmp.with_extension(format!("try-{}", crate::util::new_id())));
     tokio::task::spawn_blocking(move || {
-        if std::fs::hard_link(&from, &to).is_err() {
-            std::fs::copy(&from, &to)?;
+        if std::fs::hard_link(&from, &to).is_err()
+            && let Err(e) = std::fs::copy(&from, &to)
+        {
+            // A copy cut short (a full disk, say) doesn't stay behind
+            let _ = std::fs::remove_file(&to);
+            return Err(e);
         }
         Ok(to)
     })

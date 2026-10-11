@@ -294,7 +294,7 @@ async fn move_personal_across(
         (dest, items, label)
     };
     if let Some(across) = crate::fsops::Across::new(dest, items, true)
-        && let Err(e) = across.run(st, me, progress).await
+        && let Err(e) = across.spaces_held().run(st, me, progress).await
     {
         release(st, &own.id).await;
         return Err(e);
