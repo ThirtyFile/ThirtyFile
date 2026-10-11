@@ -195,6 +195,8 @@ export default {
   "Put the cursor in the text first.": "請先把游標放在文字中。",
   "Insert page number": "插入頁碼",
   "Insert number of pages": "插入總頁數",
+  "Different first page": "第一頁不同",
+  "Different odd and even pages": "奇偶頁不同",
   "Normal": "內文",
   "Heading {n}": "標題 {n}",
   "Subtitle": "副標題",

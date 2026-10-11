@@ -572,3 +572,53 @@ test("page numbers are inserted in a footer, typed around, and shown on the page
   await page.getByRole("button", { name: "Done editing" }).click();
   await expect(page.frameLocator('iframe[title="numbers.docx"]').locator(".tf-docx-ftr").first()).toHaveText("Page 1 of 1");
 });
+
+test("a different first page and different odd and even pages get headers of their own, shown on their pages", async ({ page }) => {
+  await signIn(page);
+  const dir = await makeFolder(page, "Word page layout");
+  const pageBreak = '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
+  const body = `<w:p><w:r><w:t>One</w:t></w:r></w:p>${pageBreak}<w:p><w:r><w:t>Two</w:t></w:r></w:p>${pageBreak}<w:p><w:r><w:t>Three</w:t></w:r></w:p>`;
+  const id = await uploadFile(page, dir, "layout.docx", Buffer.from(await buildDocument(body)));
+  const { frame, text } = await openEditor(page, id, "layout.docx");
+
+  // The header for every page
+  await page.getByRole("button", { name: "Header and footer" }).click();
+  await page.getByRole("menuitem", { name: "Add header" }).click();
+  await expect(page.getByRole("button", { name: "Header", exact: true })).toBeVisible();
+  await text.click();
+  await text.pressSequentially("Every page");
+
+  // A different first page opens its header
+  await page.getByRole("button", { name: "Header", exact: true }).click();
+  await page.getByRole("menuitemcheckbox", { name: "Different first page" }).click();
+  await expect(page.getByRole("button", { name: "First page header" })).toBeVisible();
+  await expect(frame.getByText("Every page")).toBeHidden();
+  await text.click();
+  await text.pressSequentially("Cover");
+
+  // Different odd and even pages open the even-page header; the menu shows both turned on
+  await page.getByRole("button", { name: "First page header" }).click();
+  await page.getByRole("menuitemcheckbox", { name: "Different odd and even pages" }).click();
+  await expect(page.getByRole("button", { name: "Even page header" })).toBeVisible();
+  await text.click();
+  await text.pressSequentially("Even");
+  await page.getByRole("button", { name: "Even page header" }).click();
+  await expect(page.getByRole("menuitemcheckbox", { name: "Different first page" })).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("menuitemcheckbox", { name: "Different odd and even pages" })).toHaveAttribute("aria-checked", "true");
+  await page.getByRole("menu").press("Escape");
+  await expect(page.getByRole("menu")).toBeHidden();
+
+  const save = saving(page, id);
+  await page.getByRole("button", { name: "Save" }).click();
+  expect((await save).ok()).toBe(true);
+  const { zip, xml } = await savedXml(page, id);
+  expect(xml).toMatch(
+    /<w:sectPr><w:headerReference w:type="default" r:id="rId\d+"\/><w:headerReference w:type="first" r:id="rId\d+"\/><w:footerReference w:type="first" r:id="rId\d+"\/><w:headerReference w:type="even" r:id="rId\d+"\/><w:footerReference w:type="even" r:id="rId\d+"\/><w:pgSz [^>]*\/><w:pgMar [^>]*\/><w:titlePg\/><\/w:sectPr>/,
+  );
+  expect(await zip.file("word/settings.xml")!.async("string")).toContain("<w:evenAndOddHeaders/>");
+
+  // The pages: the first page's header, the even page's, then the one for every page
+  await page.getByRole("button", { name: "Done editing" }).click();
+  const preview = page.frameLocator('iframe[title="layout.docx"]');
+  await expect(preview.locator(".tf-docx-page .tf-docx-hdr")).toHaveText(["Cover", "Even", "Every page"]);
+});

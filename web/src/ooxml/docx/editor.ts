@@ -32,7 +32,7 @@ import { originalPieces, planEdits, readAllEdits, readParagraph, samePieces, sav
 import { formatRange, insertField, MARK_END, MARK_START, type FieldKind, type Fmt, type RangeFormat } from "./formatOps";
 import { formatList, listKind, type ListFormat, type ListKind } from "./listOps";
 import { hasCjk } from "./fonts";
-import { addStory, listStories, type Story, type StoryKind } from "./hfOps";
+import { addStory, listStories, setEvenOdd, setFirstPage, type StoryParts, type Story, type StoryKind } from "./hfOps";
 import { cellRange, changeTable, type BorderKind, type TableOp } from "./tableOps";
 import { loadDocx, normalStyle } from "./index";
 import { contentWidth, parseSection, type Section } from "./section";
@@ -172,6 +172,13 @@ export interface DocxEditor {
    * the content types), and the new part's path; undefined when the first section has one
    */
   addStory(kind: StoryKind): Promise<{ parts: Record<string, string>; path: string } | undefined>;
+  /** Whether the section of the part open (the first, for the body) has a different first page, and the document different odd and even pages */
+  layout: { firstPage: boolean; evenOdd: boolean };
+  /**
+   * The parts turning a different first page (for that section) or different odd and even pages on or off makes, and
+   * the header or footer to open (one made of the open one's kind, or null to keep the one open); undefined when it can't
+   */
+  setLayout(change: { firstPage: boolean } | { evenOdd: boolean }): Promise<{ parts: Record<string, string>; open: string | null } | undefined>;
   /**
    * The parts a list change (bulleted, numbered, a level in or out) makes of the paragraphs the selection touches:
    * document.xml, and the numbering part with its relationship and content type when they change; and where to put
@@ -229,7 +236,7 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
   sectPrs.forEach((sp, i) => sections.push(parseSection(sp, i ? sections[i - 1] : null)));
 
   // ── The part edited: the body, or a header or footer the document has ──
-  const stories = listStories(sections, docRels, (path) => !!loaded.parts.get(path));
+  const stories = listStories(sections, docRels, (path) => !!loaded.parts.get(path), doc.settings.evenAndOdd);
   const story = stories.find((x) => x.path === opts.story) ?? null;
   const storyPath = story?.path ?? loaded.docPath;
   const plan = planEdits(story ? (loaded.parts.get(story.path) ?? null) : docXml);
@@ -374,6 +381,7 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
   const numberingPath = docRels.find((r) => r.type.endsWith("/numbering") && !r.external)?.target ?? loaded.docPath.replace(/[^/]*$/, "numbering.xml");
   const relsPath = loaded.docPath.replace(/([^/]*)$/, "_rels/$1.rels");
   const stylesPath = docRels.find((r) => r.type.endsWith("/styles") && !r.external)?.target ?? null;
+  const settingsPath = docRels.find((r) => r.type.endsWith("/settings") && !r.external)?.target ?? null;
   const numbering = await pkg.xml(numberingPath);
 
   // A view narrower than the page shows the page smaller
@@ -627,6 +635,21 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
   };
   const emptyRels = () => new DOMParser().parseFromString('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>', "application/xml");
 
+  /** Copies of the parts a change of the headers and footers reads and changes, document.xml with the view's edits when it shows the body */
+  const storyParts = async (): Promise<StoryParts> => {
+    const text = (!story && saveEdits(plan, readAllEdits(editable, fmtOf), shown)) || writeXml(docXml);
+    const given = opts.parts ?? {};
+    return {
+      doc: new DOMParser().parseFromString(text, "application/xml"),
+      rels: (await copy(relsPath)) ?? emptyRels(),
+      types: await copy("[Content_Types].xml"),
+      styles: stylesPath ? await pkg.xml(stylesPath) : null,
+      settings: await copy(settingsPath),
+      docPath: loaded.docPath,
+      taken: (path) => pkg.has(path) || path in given,
+    };
+  };
+
   const markSelection = (word: boolean): { doc: Document; caret: Caret | null } | undefined => {
     restoreSelection();
     const sel = getSelection();
@@ -743,20 +766,27 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
       return { parts, caret: marked.caret };
     },
     async addStory(kind) {
-      // The document as edited: with the view's edits when it shows the body
-      const text = (!story && saveEdits(plan, readAllEdits(editable, fmtOf), shown)) || writeXml(docXml);
-      const docCopy = new DOMParser().parseFromString(text, "application/xml");
-      const rels = (await copy(relsPath)) ?? emptyRels();
-      const types = await copy("[Content_Types].xml");
-      const given = opts.parts ?? {};
-      const added = addStory(
-        { doc: docCopy, rels, types, styles: stylesPath ? await pkg.xml(stylesPath) : null, docPath: loaded.docPath, taken: (path) => pkg.has(path) || path in given },
-        kind,
-      );
+      const sp = await storyParts();
+      const added = addStory(sp, kind);
       if (!added) return undefined;
-      const parts: Record<string, string> = { [loaded.docPath]: writeXml(docCopy), [relsPath]: writeXml(rels), [added.path]: writeXml(added.part) };
-      if (added.typesChanged && types) parts["[Content_Types].xml"] = writeXml(types);
+      const parts: Record<string, string> = { [loaded.docPath]: writeXml(sp.doc), [relsPath]: writeXml(sp.rels), [added.path]: writeXml(added.part) };
+      if (added.typesChanged && sp.types) parts["[Content_Types].xml"] = writeXml(sp.types);
       return { parts, path: added.path };
+    },
+    layout: { firstPage: !!first.titlePg, evenOdd: doc.settings.evenAndOdd },
+    async setLayout(change) {
+      const sp = await storyParts();
+      const result = "firstPage" in change ? setFirstPage(sp, story?.section ?? 0, change.firstPage) : setEvenOdd(sp, change.evenOdd);
+      if (!result) return undefined;
+      const parts: Record<string, string> = { [loaded.docPath]: writeXml(sp.doc) };
+      for (const m of result.made) parts[m.path] = writeXml(m.part);
+      if (result.relsChanged) parts[relsPath] = writeXml(sp.rels);
+      if (result.typesChanged && sp.types) parts["[Content_Types].xml"] = writeXml(sp.types);
+      const settingsAt = result.settingsPath ?? settingsPath;
+      if (result.settings && settingsAt) parts[settingsAt] = writeXml(result.settings);
+      // The new first-page or even-page one of the kind open (a header, when the body is)
+      const open = result.made.find((m) => m.kind === (story?.kind ?? "header"))?.path ?? null;
+      return { parts, open };
     },
     path: storyPath,
     stories,

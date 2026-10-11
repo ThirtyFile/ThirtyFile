@@ -61,8 +61,11 @@ type FormatMessage = {
   /** A field to insert at the caret: the page number, or the number of pages */
   field?: string;
 };
-/** Word editing: open a header or footer the document has (`path`; null: the body), or add one (`add`) and open it */
-type StoryMessage = { type: "story"; path?: string | null; add?: string };
+/**
+ * Word editing: open a header or footer the document has (`path`; null: the body), add one (`add`) and open it, or turn
+ * a different first page (for the open one's section) or different odd and even pages on or off
+ */
+type StoryMessage = { type: "story"; path?: string | null; add?: string; firstPage?: boolean; evenOdd?: boolean };
 type Message = RenderMessage | LoadXlsxMessage | DrawingsMessage | ScrollMessage | EditMessage | CollectMessage | TableMessage | FormatMessage | StoryMessage;
 
 const root = document.getElementById("root")!;
@@ -195,7 +198,7 @@ async function openEditor(parts: Parts, caret: Caret | null | undefined, scroll:
   // The host's lists follow the part open: its styles, the headers and footers, and which one is open
   e.story = opened.story;
   reply({ type: "styles", styles: opened.styles, fonts: opened.fonts });
-  reply({ type: "stories", stories: opened.stories, story: opened.story, canAdd: opened.canAdd });
+  reply({ type: "stories", stories: opened.stories, story: opened.story, canAdd: opened.canAdd, layout: opened.layout });
   return opened;
 }
 
@@ -350,6 +353,18 @@ async function changeStory(msg: StoryMessage) {
     editing.undo.push({ parts: before.parts, caret: before.caret, story: editing.story });
     editing.story = added.path;
     await reopen({ ...before.parts, ...added.parts }, null);
+    return;
+  }
+  if (typeof msg.firstPage === "boolean" || typeof msg.evenOdd === "boolean") {
+    const changed = await editor.setLayout(typeof msg.firstPage === "boolean" ? { firstPage: msg.firstPage } : { evenOdd: !!msg.evenOdd });
+    if (!changed) {
+      reply({ type: "story-refused" });
+      return;
+    }
+    editing.undo.push({ parts: before.parts, caret: before.caret, story: editing.story });
+    // A first-page or even-page one made opens; one turned off isn't listed any more, and the body opens instead
+    if (changed.open) editing.story = changed.open;
+    await reopen({ ...before.parts, ...changed.parts }, null);
     return;
   }
   const path = msg.path ?? null;
