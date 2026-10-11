@@ -33,8 +33,11 @@ const XML_NS = "http://www.w3.org/XML/1998/namespace";
 const TEXT_KIDS = new Set(["rPr", "t", "tab", "br", "cr", "softHyphen", "noBreakHyphen", "lastRenderedPageBreak"]);
 /** Markers without text that may sit between runs: bookmarks are kept with the run after them, spelling marks are dropped */
 const MARKERS = new Set(["bookmarkStart", "bookmarkEnd", "proofErr"]);
-/** Paragraph-mark formatting that is about tracked changes, not looks: not given to text typed into an empty paragraph */
-const TRACKING = new Set(["ins", "del", "moveFrom", "moveTo", "rPrChange"]);
+/**
+ * Paragraph-mark formatting not given to text typed into an empty paragraph: tracked changes (not looks), hidden text,
+ * and highlight and shading, which the view doesn't show there (the typed text would get looks the person never saw)
+ */
+const NOT_TYPED = new Set(["ins", "del", "moveFrom", "moveTo", "rPrChange", "vanish", "specVanish", "webHidden", "highlight", "shd"]);
 /** The characters the view shows for w:softHyphen and w:noBreakHyphen (as the preview does) */
 const SOFT_HYPHEN = String.fromCharCode(0xad);
 const NON_BREAKING_HYPHEN = String.fromCharCode(0x2011);
@@ -84,6 +87,13 @@ export interface EditPlan {
   /** Bookmarks before a run or a field, and those at the end of each editable paragraph */
   before: Map<Element, Element[]>;
   after: Map<number, Element[]>;
+  /**
+   * The runs and fields with bookmarks before them, of each editable paragraph in order; and, for every run and field,
+   * the last of those up to it. A run deleted in the view leaves its bookmarks to the next one written (or the
+   * paragraph's end).
+   */
+  anchors: Map<number, Element[]>;
+  anchorAt: Map<Element, { block: number; index: number }>;
   /** The fields of the editable paragraphs, each the elements it is made of, by id; and the id of each one's first element */
   atoms: Element[][];
   atomIds: Map<Element, number>;
@@ -238,6 +248,8 @@ export function planEdits(doc: Document | null): EditPlan | null {
     runIds: new Map(),
     before: new Map(),
     after: new Map(),
+    anchors: new Map(),
+    anchorAt: new Map(),
     atoms: [],
     atomIds: new Map(),
   };
@@ -254,6 +266,16 @@ export function planEdits(doc: Document | null): EditPlan | null {
     plan.editable.push(editable);
     if (!editable) return;
     let pending: Element[] = [];
+    const anchored: Element[] = [];
+    // Every run and field knows how many of the paragraph's bookmarked ones come up to it (itself included)
+    const markers = (el: Element) => {
+      if (pending.length) {
+        plan.before.set(el, pending);
+        anchored.push(el);
+        pending = [];
+      }
+      plan.anchorAt.set(el, { block: i, index: anchored.length - 1 });
+    };
     const fields = fieldsOf(b) ?? [];
     const starts = new Map(fields.map((f) => [f[0], f]));
     const inField = new Set(fields.flat());
@@ -262,14 +284,12 @@ export function planEdits(doc: Document | null): EditPlan | null {
       if (field) {
         plan.atomIds.set(el, plan.atoms.length);
         plan.atoms.push(field);
-        if (pending.length) plan.before.set(el, pending);
-        pending = [];
+        markers(el);
       } else if (inField.has(el)) return;
       else if (el.localName === "r") {
         plan.runIds.set(el, plan.runs.length);
         plan.runs.push(el);
-        if (pending.length) plan.before.set(el, pending);
-        pending = [];
+        markers(el);
       } else if (el.localName === "bookmarkStart" || el.localName === "bookmarkEnd") pending.push(el);
     };
     for (const c of Array.from(b.children)) {
@@ -277,6 +297,7 @@ export function planEdits(doc: Document | null): EditPlan | null {
       else add(c);
     }
     if (pending.length) plan.after.set(i, pending);
+    if (anchored.length) plan.anchors.set(i, anchored);
   });
   return plan;
 }
@@ -353,6 +374,11 @@ function finish(tokens: Token[]): Piece[] {
  * may leave them there) split it into several paragraphs.
  */
 function readBlock(el: HTMLElement, source: number | null, out: EditedBlock[], fmtOf?: FmtOf) {
+  readNodes(Array.from(el.childNodes), el, source, out, fmtOf);
+}
+
+/** `readBlock` for nodes where they are (`stop`: the element the run ids are looked for up to) */
+function readNodes(nodes: Node[], el: HTMLElement, source: number | null, out: EditedBlock[], fmtOf?: FmtOf) {
   let tokens: Token[] = [];
   let lastRun: number | null = null;
   let produced = false;
@@ -405,7 +431,7 @@ function readBlock(el: HTMLElement, source: number | null, out: EditedBlock[], f
     }
     for (const c of Array.from(n.childNodes)) walk(c);
   };
-  for (const c of Array.from(el.childNodes)) walk(c);
+  for (const c of nodes) walk(c);
   close(!produced);
 }
 
@@ -423,10 +449,11 @@ export function readParagraph(el: HTMLElement, fmtOf?: FmtOf): Piece[] {
  */
 export function readEdits(root: HTMLElement, fmtOf?: FmtOf): EditedBlock[] {
   const out: EditedBlock[] = [];
-  let loose: HTMLElement | null = null;
+  // Inline content straight in the view, read where it is (its formatting is what the view shows there)
+  let loose: Node[] = [];
   const flush = () => {
-    if (loose) readBlock(loose, null, out);
-    loose = null;
+    if (loose.length) readNodes(loose, root, null, out, fmtOf);
+    loose = [];
   };
   for (const n of Array.from(root.childNodes)) {
     if (keptBlock(n)) {
@@ -439,8 +466,7 @@ export function readEdits(root: HTMLElement, fmtOf?: FmtOf): EditedBlock[] {
     } else if (n.nodeType === 3 || isElement(n)) {
       // Inline content straight in the view: one paragraph for each run of it
       if (n.nodeType === 3 && !(n.nodeValue ?? "")) continue;
-      loose ??= root.ownerDocument.createElement("p");
-      loose.append(n.cloneNode(true));
+      loose.push(n);
     }
   }
   flush();
@@ -466,7 +492,11 @@ export function readAllEdits(root: HTMLElement, fmtOf?: FmtOf): Map<number, Edit
 // ───────────── Writing the edits back ─────────────
 
 class Writer {
+  /** Runs and fields whose bookmarks were written, and fields written */
   private readonly anchored = new Set<Element>();
+  private readonly written = new Set<Element>();
+  /** Runs and fields the edited view still has (their bookmarks wait for them) */
+  private readonly present = new Set<Element>();
   readonly x: WordXml;
   constructor(private plan: EditPlan) {
     this.x = new WordXml(plan.doc, plan.body);
@@ -477,12 +507,46 @@ class Writer {
     return doc.createElementNS(ns, prefix ? `${prefix}:${name}` : name);
   }
 
+  /** Notes the runs and fields an edited view still has */
+  see(edited: EditedBlock[]) {
+    for (const e of edited) {
+      if (e.kind !== "para") continue;
+      for (const piece of e.pieces) {
+        const el = piece.atom !== undefined ? this.plan.atoms[piece.atom]?.[0] : piece.run !== null ? this.plan.runs[piece.run] : undefined;
+        if (el) this.present.add(el);
+      }
+    }
+  }
+
+  /**
+   * Writes into `host` the bookmarks before `key` (a run or field), and those before the runs and fields ahead of it in
+   * its paragraph that the view no longer has (deleted), in their order; each once
+   */
+  private markersUpTo(host: Element, key: Element) {
+    const { plan } = this;
+    const at = plan.anchorAt.get(key);
+    if (!at) return;
+    const keys = plan.anchors.get(at.block) ?? [];
+    for (const k of keys.slice(0, at.index + 1)) if (k === key || !this.present.has(k)) this.markersOf(host, k);
+  }
+
+  /** The bookmarks of paragraph `block` not written yet, at its end */
+  private markersLeft(host: Element, block: number) {
+    for (const k of this.plan.anchors.get(block) ?? []) this.markersOf(host, k);
+  }
+
+  private markersOf(host: Element, key: Element) {
+    if (this.anchored.has(key)) return;
+    this.anchored.add(key);
+    for (const m of this.plan.before.get(key) ?? []) host.append(m.cloneNode(true));
+  }
+
   /** The paragraph mark's formatting, for text typed into an empty paragraph */
   private markRPr(pPr: Element | null): Element | null {
     const rPr = kid(pPr, "rPr");
     if (!rPr) return null;
     const copy = rPr.cloneNode(true) as Element;
-    for (const c of Array.from(copy.children)) if (TRACKING.has(c.localName)) c.remove();
+    for (const c of Array.from(copy.children)) if (NOT_TYPED.has(c.localName)) c.remove();
     return copy.children.length ? copy : null;
   }
 
@@ -543,11 +607,11 @@ class Writer {
       if (piece.atom !== undefined) {
         // A field goes in as it was, once, in the paragraph itself (never in a link)
         const field = plan.atoms[piece.atom];
-        if (!field || this.anchored.has(field[0])) continue;
-        this.anchored.add(field[0]);
+        if (!field || this.written.has(field[0])) continue;
+        this.written.add(field[0]);
         link = null;
         host = p;
-        for (const m of plan.before.get(field[0]) ?? []) p.append(m.cloneNode(true));
+        this.markersUpTo(p, field[0]);
         for (const el of field) p.append(el.cloneNode(true));
         continue;
       }
@@ -558,13 +622,13 @@ class Writer {
         link = hl;
         host = hl ? p.appendChild(hl.cloneNode(false) as Element) : p;
       }
-      if (r && !this.anchored.has(r)) {
-        this.anchored.add(r);
-        for (const m of plan.before.get(r) ?? []) host.append(m.cloneNode(true));
-      }
+      if (r) this.markersUpTo(host, r);
       host.append(this.run(r, piece.text, pPr, piece.fmt));
     }
-    if (last && source !== null) for (const m of plan.after.get(source) ?? []) p.append(m.cloneNode(true));
+    if (last && source !== null) {
+      this.markersLeft(p, source);
+      for (const m of plan.after.get(source) ?? []) p.append(m.cloneNode(true));
+    }
     return p;
   }
 
@@ -590,6 +654,7 @@ class Writer {
  * the blocks the view showed: the others (a paragraph holding only a section break, say) stay where they were.
  */
 export function editedBlocks(plan: EditPlan, edited: EditedBlock[], shown: ReadonlySet<number>, container = 0, w = new Writer(plan)): Element[] | null {
+  w.see(edited);
   const own = plan.containers[container]?.blocks ?? [];
   const n = own.length;
   const at = new Map(own.map((b, i) => [b, i]));

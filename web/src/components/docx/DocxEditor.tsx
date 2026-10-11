@@ -65,7 +65,7 @@ import { shortcut } from "@/lib/keys";
 import { cancellable } from "@/lib/cancellable";
 import { officeErrorMessage } from "@/lib/officeErrors";
 import { FONT_NAME, type Caret, type CaretFormat, type FontChoice, type ParagraphStyle } from "@/ooxml/docx/editor";
-import { HIGHLIGHTS } from "@/ooxml/docx/formatOps";
+import { AUTO_COLOR, HIGHLIGHTS } from "@/ooxml/docx/formatOps";
 import type { Story, StoryKind } from "@/ooxml/docx/hfOps";
 import { MAX_SPLIT, type BorderKind, type TableOp } from "@/ooxml/docx/tableOps";
 import { TOO_LARGE } from "@/ooxml/core/package";
@@ -606,7 +606,7 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
           icon={<BaselineIcon className="size-4" />}
           noneLabel={t("Automatic")}
           disabled={formatOff}
-          onPick={(c) => format({ cmd: "foreColor", value: c ?? "#000000" })}
+          onPick={(c) => format({ cmd: "foreColor", value: c ?? `#${AUTO_COLOR}` })}
         />
         <ColorMenu
           label={t("Highlight")}

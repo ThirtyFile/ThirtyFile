@@ -23,11 +23,25 @@ export interface Fmt {
   hl?: string | null;
 }
 
-/** The characters the editor marks a selection's start and end with (Unicode private use, so never in a document's text) */
-export const MARK_START = String.fromCharCode(0xe000);
-export const MARK_END = String.fromCharCode(0xe001);
+/**
+ * The characters the editor marks a selection's start and end with: Unicode noncharacters, kept for a program's own
+ * use, so never in a document's text (private-use characters such as U+E000 are: Windows gives them to characters
+ * people make themselves, common in names). The editor refuses them in pasted text, and refuses a change to a document
+ * that has them anyway (`hasMarks`).
+ */
+export const MARK_START = String.fromCharCode(0xfdd0);
+export const MARK_END = String.fromCharCode(0xfdd1);
 const MARKS = new RegExp(`[${MARK_START}${MARK_END}]`, "g");
 const HAS_MARK = new RegExp(`[${MARK_START}${MARK_END}]`);
+
+/** Whether a text holds the editor's marks (a document can't be changed between marks then: they couldn't be told apart) */
+export const hasMarks = (text: string) => HAS_MARK.test(text);
+
+/**
+ * The color the view gives text set to Word's automatic color (black on light shading, white on dark): one the
+ * palette doesn't have, written as "auto"
+ */
+export const AUTO_COLOR = "000001";
 
 /** Word's highlight colors (w:highlight), by their hex color */
 export const HIGHLIGHTS: Record<string, string> = {
@@ -169,7 +183,7 @@ export function applyFmt(x: WordXml, rPr: Element, fmt: Fmt) {
     kid(rPr, "dstrike")?.remove();
   }
   if (fmt.u !== undefined) x.set(prop(x, rPr, "u", RPR), "val", fmt.u ? "single" : "none");
-  if (fmt.color !== undefined) x.set(prop(x, rPr, "color", RPR), "val", fmt.color.toUpperCase());
+  if (fmt.color !== undefined) x.set(prop(x, rPr, "color", RPR), "val", fmt.color.toUpperCase() === AUTO_COLOR ? "auto" : fmt.color.toUpperCase());
   if (fmt.hl !== undefined) {
     const hex = fmt.hl?.toUpperCase() ?? null;
     const name = hex ? HIGHLIGHTS[hex] : "none";

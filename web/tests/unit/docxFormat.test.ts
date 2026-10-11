@@ -73,7 +73,8 @@ describe("formatting between the marks", () => {
     expect(runs.map(text)).toEqual(["ab", "cd", "ef", "gh"]);
     expect(runs.map((r) => attr(find(r, "sz")[0], "val"))).toEqual([null, "28", "28", null]);
     expect(kidsOf(find(runs[1], "rPr")[0])).toEqual(["b", "sz=28", "szCs=28"]);
-    expect(text(d.documentElement)).not.toMatch(/[]/);
+    expect(text(d.documentElement)).not.toContain(MARK_START);
+    expect(text(d.documentElement)).not.toContain(MARK_END);
   });
 
   test("a style or alignment goes to every paragraph the marks touch", () => {

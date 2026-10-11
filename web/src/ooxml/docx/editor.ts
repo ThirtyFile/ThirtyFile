@@ -29,7 +29,7 @@ import { BlockWriter, type BlockItem } from "./blocks";
 import type { Flow, PageFloat } from "./context";
 import { DOCX_CSS } from "./css";
 import { originalPieces, planEdits, readAllEdits, readParagraph, samePieces, saveEdits, writeXml, type EditPlan, type FmtOf } from "./edit";
-import { formatRange, insertField, MARK_END, MARK_START, type FieldKind, type Fmt, type RangeFormat } from "./formatOps";
+import { formatRange, hasMarks, insertField, MARK_END, MARK_START, type FieldKind, type Fmt, type RangeFormat } from "./formatOps";
 import { formatList, listKind, type ListFormat, type ListKind } from "./listOps";
 import { hasCjk } from "./fonts";
 import { addStory, listStories, setEvenOdd, setFirstPage, type StoryParts, type Story, type StoryKind } from "./hfOps";
@@ -211,9 +211,12 @@ const REFUSED = new Set(["insertFromDrop", "deleteByDrag", "insertOrderedList", 
 /** Formatting the view can write back (formatOps.ts); other formatting commands are refused */
 const FORMATS = new Set(["formatBold", "formatItalic", "formatUnderline", "formatStrikeThrough", "formatFontColor", "formatBackColor"]);
 
-/** Characters XML can't hold (a pasted control character would make the file unreadable) */
+/**
+ * Characters XML can't hold (a pasted control character would make the file unreadable), and the noncharacters the
+ * editor marks selections with (formatOps.ts)
+ */
 // oxlint-disable-next-line no-control-regex -- control characters are removed on purpose
-const CONTROL = /[\u{0}-\u{8}\u{b}\u{c}\u{e}-\u{1f}\u{fffe}\u{ffff}]/gu;
+const CONTROL = /[\u{0}-\u{8}\u{b}\u{c}\u{e}-\u{1f}\u{fdd0}-\u{fdef}\u{fffe}\u{ffff}]/gu;
 
 export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts: EditorOptions): Promise<DocxEditor> {
   pkg.useParts(opts.parts ?? {});
@@ -654,10 +657,9 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
     restoreSelection();
     const sel = getSelection();
     if (!sel?.rangeCount || !editable.contains(sel.anchorNode)) return undefined;
-    if (word && sel.isCollapsed) {
-      sel.modify("move", "backward", "word");
-      sel.modify("extend", "forward", "word");
-    }
+    // A part that has the marks' characters already (it can't come from this editor) isn't changed between marks
+    if (hasMarks(plan.body.textContent ?? "") || hasMarks(editable.textContent ?? "")) return undefined;
+    if (word && sel.isCollapsed) selectWordAt(editable, sel);
     const caret = caretOf(editable);
     const range = sel.getRangeAt(0);
     const start = document.createTextNode(MARK_START);
@@ -755,7 +757,14 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
       // Copies of the parts a list may change (the numbering part is the document's, whichever part is open)
       const rels = (await copy(relsPath)) ?? emptyRels();
       const result = formatList(
-        { doc: marked.doc, numbering: await copy(numberingPath), styles: stylesPath ? await pkg.xml(stylesPath) : null, rels, types: await copy("[Content_Types].xml") },
+        {
+          doc: marked.doc,
+          numbering: await copy(numberingPath),
+          styles: stylesPath ? await pkg.xml(stylesPath) : null,
+          rels,
+          types: await copy("[Content_Types].xml"),
+          numberingPath,
+        },
         f,
       );
       if (!result) return undefined;
@@ -906,6 +915,52 @@ function atEdge(p: HTMLElement, caret: Range, start: boolean): boolean {
   return !text && breaks <= (start ? 0 : 1);
 }
 
+/** What a word is made of (letters, digits, marks, apostrophes and hyphens), at the end and at the start of a text */
+const WORD_END = /[\p{L}\p{N}\p{M}_'’-]*$/u;
+const WORD_START = /^[\p{L}\p{N}\p{M}_'’-]*/u;
+
+/**
+ * Selects the word the caret is in or next to, as Word does for a font or size without a selection: not the space
+ * after it, and never a word of the paragraph before. Between spaces, or in an empty paragraph, the caret stays (the
+ * change then goes to the paragraph mark).
+ */
+function selectWordAt(editable: HTMLElement, sel: Selection) {
+  const p = blockOf(editable, sel.anchorNode);
+  if (!p || !sel.rangeCount) return;
+  const caret = sel.getRangeAt(0);
+  const before = document.createRange();
+  before.selectNodeContents(p);
+  before.setEnd(caret.startContainer, caret.startOffset);
+  const after = document.createRange();
+  after.selectNodeContents(p);
+  after.setStart(caret.endContainer, caret.endOffset);
+  const left = rangeText(before).text;
+  const right = rangeText(after).text;
+  const back = left.length - (left.match(WORD_END)?.[0].length ?? 0);
+  const ahead = right.match(WORD_START)?.[0].length ?? 0;
+  if (back === left.length && ahead === 0) return;
+  const start = positionAt(p, back);
+  const end = positionAt(p, left.length + ahead);
+  if (!start || !end) return;
+  sel.setBaseAndExtent(start.node, start.offset, end.node, end.offset);
+}
+
+/** The text node and offset `offset` characters into a paragraph's text (list numbers and fields left out) */
+function positionAt(p: HTMLElement, offset: number): { node: Node; offset: number } | null {
+  const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => (n.parentElement?.closest("[data-ro]") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) as number,
+  });
+  let left = offset;
+  let last: Node | null = null;
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const len = n.nodeValue?.length ?? 0;
+    if (left <= len) return { node: n, offset: left };
+    left -= len;
+    last = n;
+  }
+  return last ? { node: last, offset: last.nodeValue?.length ?? 0 } : null;
+}
+
 function caretOf(editable: HTMLElement): Caret | null {
   const sel = getSelection();
   if (!sel?.rangeCount) return null;
@@ -1000,7 +1055,8 @@ function shownAt(text: Node): Shown | null {
 /** What a paragraph shows for text typed into it without a run (the paragraph mark's looks) */
 function shownOfBlock(block: HTMLElement): Shown {
   const cs = getComputedStyle(block);
-  return { b: Number(cs.fontWeight) >= 600, i: cs.fontStyle !== "normal", u: false, s: false, color: hexOf(cs.color) ?? "000000", hl: null };
+  const lines = cs.textDecorationLine ?? "";
+  return { b: Number(cs.fontWeight) >= 600, i: cs.fontStyle !== "normal", u: lines.includes("underline"), s: lines.includes("line-through"), color: hexOf(cs.color) ?? "000000", hl: null };
 }
 
 /** The formatting where the caret is */
