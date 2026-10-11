@@ -25,8 +25,9 @@ type LoadXlsxMessage = { type: "load"; kind: "xlsx"; buffer: ArrayBuffer };
 type DrawingsMessage = { type: "render"; kind: "xlsx-drawings"; sheet: string; cols: Float64Array; rows: Float64Array; frozen?: { rows: number; cols: number } };
 type ScrollMessage = { type: "scroll"; x: number; y: number };
 /**
- * Word editing: open the document for editing (`xml`: its edited document.xml not saved yet). The frame then says
- * "input" when the text changes and "save" for Ctrl+S, and answers "collect" with the edited document.xml
+ * Word editing: open the document for editing (`parts`: its edited parts not saved yet). The frame then says "input"
+ * when the text changes and "save" for Ctrl+S, answers "collect" with the edited parts, and tells the part open and the
+ * headers and footers the document has ("stories") each time the view is opened
  */
 type EditMessage = { type: "edit"; kind: "docx"; buffer: ArrayBuffer; parts?: Parts; texts: EditorTexts; caret?: Caret | null; scroll?: number };
 /** Edited parts by path (document.xml, a numbering part a list made…); the others are the archive's */
@@ -58,7 +59,9 @@ type FormatMessage = {
   spaceBefore?: boolean;
   spaceAfter?: boolean;
 };
-type Message = RenderMessage | LoadXlsxMessage | DrawingsMessage | ScrollMessage | EditMessage | CollectMessage | TableMessage | FormatMessage;
+/** Word editing: open a header or footer the document has (`path`; null: the body), or add one (`add`) and open it */
+type StoryMessage = { type: "story"; path?: string | null; add?: string };
+type Message = RenderMessage | LoadXlsxMessage | DrawingsMessage | ScrollMessage | EditMessage | CollectMessage | TableMessage | FormatMessage | StoryMessage;
 
 const root = document.getElementById("root")!;
 /**
@@ -102,11 +105,18 @@ const ALIGNMENTS = new Set<string>(["left", "center", "right", "both"]);
 const COLOR = /^(#[0-9a-f]{6}|transparent)$/i;
 
 /**
- * The document being edited. `base` is the document.xml the view was last opened on (null: the archive's): a change of
- * a table's shape opens the view again on the changed document, keeping the one before it in `undo`, for Ctrl+Z right
- * after (`typed` says whether anything was typed since)
+ * The document being edited. `base` are the edited parts the view was last opened on: a change of a table's shape opens
+ * the view again on the changed document, keeping the one before it in `undo`, for Ctrl+Z right after (`typed` says
+ * whether anything was typed since). `story` is the header or footer open in the view (null: the body)
  */
-let editing: { pkg: OoxmlPackage; texts: EditorTexts; base: Parts; undo: { parts: Parts; caret: Caret | null }[]; typed: boolean } | null = null;
+let editing: {
+  pkg: OoxmlPackage;
+  texts: EditorTexts;
+  base: Parts;
+  undo: { parts: Parts; caret: Caret | null; story: string | null }[];
+  typed: boolean;
+  story: string | null;
+} | null = null;
 let changedTimer = 0;
 
 /** The edited parts (none: the archive as it is), with the caret and scroll */
@@ -114,6 +124,12 @@ function edited(): { parts: Parts; caret: Caret | null; scroll: number } {
   if (!editor || !editing) throw new Error("The document isn't open for editing");
   const c = editor.collect();
   return { parts: c.xml ? { ...editing.base, [c.path]: c.xml } : editing.base, caret: c.caret, scroll: c.scroll };
+}
+
+/** What the host keeps of the edits: the parts, and the caret and scroll only while the body is open (they are the body's) */
+function forHost() {
+  const e = edited();
+  return editing?.story ? { parts: e.parts, caret: null, scroll: 0 } : e;
 }
 
 /** Only parts with text, from a message */
@@ -128,7 +144,7 @@ function sendChanged() {
   changedTimer = 0;
   if (!editor) return;
   try {
-    reply({ type: "changed", ...edited() });
+    reply({ type: "changed", ...forHost() });
   } catch (err) {
     console.warn("docx edit", err);
   }
@@ -145,6 +161,7 @@ async function openEditor(parts: Parts, caret: Caret | null | undefined, scroll:
   const opened = await openDocxEditor(e.pkg, root, {
     parts,
     texts: e.texts,
+    story: e.story,
     caret,
     scroll,
     onInput: () => {
@@ -158,6 +175,7 @@ async function openEditor(parts: Parts, caret: Caret | null | undefined, scroll:
       const last = e.undo[e.undo.length - 1];
       if (!last || e.typed) return false;
       e.undo.pop();
+      e.story = last.story;
       queue = queue.then(() => reopen(last.parts, last.caret)).catch((err: unknown) => reply({ type: "error", message: err instanceof Error ? err.message : String(err) }));
       return true;
     },
@@ -172,6 +190,10 @@ async function openEditor(parts: Parts, caret: Caret | null | undefined, scroll:
     },
   });
   editor = opened;
+  // The host's lists follow the part open: its styles, the headers and footers, and which one is open
+  e.story = opened.story;
+  reply({ type: "styles", styles: opened.styles, fonts: opened.fonts });
+  reply({ type: "stories", stories: opened.stories, story: opened.story, canAdd: opened.canAdd });
   return opened;
 }
 
@@ -191,10 +213,9 @@ async function edit({ buffer, parts: given, texts, caret, scroll }: EditMessage)
   editor = null;
   root.replaceChildren();
   const pkg = await OoxmlPackage.open(buffer);
-  editing = { pkg, texts, base: parts, undo: [], typed: false };
+  editing = { pkg, texts, base: parts, undo: [], typed: false, story: null };
   try {
-    const opened = await openEditor(parts, caret, scroll);
-    reply({ type: "styles", styles: opened.styles, fonts: opened.fonts });
+    await openEditor(parts, caret, scroll);
     dispose = () => {
       editor?.dispose();
       pkg.dispose();
@@ -231,7 +252,7 @@ async function changeTable(op: TableOp, change: TableChange) {
     reply({ type: "table-refused" });
     return;
   }
-  editing.undo.push({ parts: before.parts, caret: before.caret });
+  editing.undo.push({ parts: before.parts, caret: before.caret, story: editing.story });
   await reopen({ ...before.parts, [editor.path]: changed.xml }, changed.cell !== null ? { block: -1, offset: 0, cell: changed.cell, pick: changed.pick } : before.caret);
 }
 
@@ -274,7 +295,7 @@ function format(msg: FormatMessage) {
         reply({ type: "format-refused" });
         return;
       }
-      editing.undo.push({ parts: before.parts, caret: before.caret });
+      editing.undo.push({ parts: before.parts, caret: before.caret, story: editing.story });
       await reopen({ ...before.parts, [editor.path]: changed.xml }, changed.caret);
     })
     .catch((err: unknown) => reply({ type: "error", message: err instanceof Error ? err.message : String(err) }));
@@ -289,13 +310,41 @@ async function changeList(f: ListFormat) {
     reply({ type: "format-refused" });
     return;
   }
-  editing.undo.push({ parts: before.parts, caret: before.caret });
+  editing.undo.push({ parts: before.parts, caret: before.caret, story: editing.story });
   await reopen({ ...before.parts, ...changed.parts }, changed.caret);
+}
+
+/**
+ * Another part in the view: a header or footer the document has, or the body (the edits so far are kept, and Ctrl+Z
+ * right after no longer undoes a change made in the other one); or a header or footer added to the first section
+ */
+async function changeStory(msg: StoryMessage) {
+  if (!editor || !editing) return;
+  const before = edited();
+  if (msg.add === "header" || msg.add === "footer") {
+    const added = await editor.addStory(msg.add);
+    if (!added) {
+      reply({ type: "story-refused" });
+      return;
+    }
+    editing.undo.push({ parts: before.parts, caret: before.caret, story: editing.story });
+    editing.story = added.path;
+    await reopen({ ...before.parts, ...added.parts }, null);
+    return;
+  }
+  const path = msg.path ?? null;
+  if (path !== null && !editor.stories.some((x) => x.path === path)) return;
+  if (path === editing.story) return;
+  editing.undo = [];
+  editing.story = path;
+  const scroll = root.scrollTop;
+  await openEditor(before.parts, null, path ? 0 : scroll);
+  editing.typed = false;
 }
 
 function collect({ id }: CollectMessage) {
   try {
-    reply({ type: "collected", id, ...edited() });
+    reply({ type: "collected", id, ...forHost() });
   } catch (err) {
     reply({ type: "collect-error", id, message: err instanceof Error ? err.message : String(err) });
   }
@@ -411,6 +460,7 @@ window.addEventListener("message", (e: MessageEvent) => {
   let job: () => Promise<void>;
   if (msg?.type === "edit" && msg.kind === "docx" && msg.buffer instanceof ArrayBuffer && msg.texts && typeof msg.texts === "object") job = () => edit(msg);
   else if (msg?.type === "table" && TABLE_OPS.has(msg.op)) job = () => tableOp(msg);
+  else if (msg?.type === "story") job = () => changeStory(msg);
   else if (msg?.type === "render" && (msg.kind === "docx" || msg.kind === "pptx") && msg.buffer instanceof ArrayBuffer) job = () => render(msg);
   else if (msg?.type === "load" && msg.kind === "xlsx" && msg.buffer instanceof ArrayBuffer) job = () => loadXlsx(msg);
   else if (msg?.type === "render" && msg.kind === "xlsx-drawings" && typeof msg.sheet === "string" && msg.cols instanceof Float64Array && msg.rows instanceof Float64Array) {

@@ -28,6 +28,7 @@ import {
   Loader2Icon,
   PaintBucketIcon,
   PanelBottomIcon,
+  PanelsTopBottomIcon,
   Rows3Icon,
   SaveIcon,
   SquareDashedIcon,
@@ -64,6 +65,7 @@ import { cancellable } from "@/lib/cancellable";
 import { officeErrorMessage } from "@/lib/officeErrors";
 import { FONT_NAME, type Caret, type CaretFormat, type FontChoice, type ParagraphStyle } from "@/ooxml/docx/editor";
 import { HIGHLIGHTS } from "@/ooxml/docx/formatOps";
+import type { Story, StoryKind } from "@/ooxml/docx/hfOps";
 import { MAX_SPLIT, type BorderKind, type TableOp } from "@/ooxml/docx/tableOps";
 import { TOO_LARGE } from "@/ooxml/core/package";
 import { dropSession, isDirty, keepSession, openSession, releaseIfClean, reusableSession, saveSession, type DocxSession, type Parts } from "./session";
@@ -90,6 +92,16 @@ const LINE_SPACINGS: [number, string][] = [
   [720, "3.0"],
 ];
 
+/** A header's or footer's name, as Word names them; with its section's number after the first section */
+function storyLabel(s: Story): string {
+  const names: Record<StoryKind, Record<Story["type"], string>> = {
+    header: { default: t("Header"), first: t("First page header"), even: t("Even page header") },
+    footer: { default: t("Footer"), first: t("First page footer"), even: t("Even page footer") },
+  };
+  const name = names[s.kind][s.type];
+  return s.section > 0 ? t("{name} (section {n})", { name, n: s.section + 1 }) : name;
+}
+
 /** Word's highlight colors, as Word lists them */
 const HIGHLIGHT_COLORS = Object.keys(HIGHLIGHTS).map((hex) => `#${hex}`);
 
@@ -105,6 +117,8 @@ function styleLabel(name: string): string {
     quote: t("Quote"),
     "list paragraph": t("List paragraph"),
     "no spacing": t("No spacing"),
+    header: t("Header"),
+    footer: t("Footer"),
   };
   return known[n] ?? name;
 }
@@ -212,6 +226,10 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
   const [styles, setStyles] = useState<ParagraphStyle[]>([]);
   /** The fonts to choose from: the common ones and those the document's font table names */
   const [fonts, setFonts] = useState<FontChoice[]>(FONTS);
+  /** The headers and footers the document has, the one open in the view (null: the body), and those that can be added */
+  const [stories, setStories] = useState<Story[]>([]);
+  const [story, setStory] = useState<string | null>(null);
+  const [canAdd, setCanAdd] = useState<Record<StoryKind, boolean>>({ header: false, footer: false });
   const waiting = useRef(new Map<number, { resolve(c: Collected): void; reject(e: Error): void }>());
   const nextId = useRef(0);
 
@@ -290,6 +308,12 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
     frame.current?.contentWindow?.postMessage({ type: "format", ...change }, "*");
     frame.current?.focus();
   };
+  /** A header or footer in the view (null: the body), or one added to the first section and opened */
+  const openStory = (change: { path?: string | null; add?: StoryKind }) => {
+    frame.current?.contentWindow?.postMessage({ type: "story", ...change }, "*");
+    frame.current?.focus();
+  };
+  const current = stories.find((x) => x.path === story) ?? null;
   const formatOff = !fmt || loading || !!error;
   const tableOff = !inCell || loading || !!error;
 
@@ -332,6 +356,19 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
         setFonts([...byName.values()].sort((a, b) => Number(a.eastAsia) - Number(b.eastAsia) || a.name.localeCompare(b.name)));
         break;
       }
+      case "stories": {
+        const m = msg as { stories?: Story[]; story?: unknown; canAdd?: Partial<Record<StoryKind, unknown>> };
+        const list = (m.stories ?? []).filter(
+          (x) => typeof x?.path === "string" && (x.kind === "header" || x.kind === "footer") && ["default", "first", "even"].includes(x.type) && Number.isInteger(x.section),
+        );
+        setStories(list);
+        setStory(typeof m.story === "string" && list.some((x) => x.path === m.story) ? m.story : null);
+        setCanAdd({ header: !!m.canAdd?.header, footer: !!m.canAdd?.footer });
+        break;
+      }
+      case "story-refused":
+        toast.error(t("This can't be added here."));
+        break;
       case "format-refused":
         toast.error(t("Select some text first."));
         break;
@@ -427,9 +464,41 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
   return (
     <div className="flex size-full flex-col bg-background text-foreground">
       <div className="flex min-h-11 shrink-0 flex-wrap items-center gap-2 border-b px-2 py-1">
-        <p className="min-w-0 flex-1 text-xs text-muted-foreground">{t("Text, its formatting and tables can be changed here. Pictures and other parts are kept as they are.")}</p>
+        <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+          {current
+            ? t("{name}: it shows on every page that uses it. Its text, formatting and tables can be changed here.", { name: storyLabel(current) })
+            : t("Text, its formatting and tables can be changed here. Pictures and other parts are kept as they are.")}
+        </p>
         {dirty && <span className="shrink-0 text-xs text-amber-600 dark:text-amber-400">{t("Unsaved changes")}</span>}
         <div className="flex shrink-0 items-center gap-1">
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={<Button variant={current ? "secondary" : "ghost"} size="sm" className="gap-1" disabled={loading || !!error} onMouseDown={(e) => e.preventDefault()} />}
+            >
+              <PanelsTopBottomIcon /> {current ? storyLabel(current) : t("Header and footer")}
+              <ChevronDownIcon className="opacity-60" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-auto">
+              <DropdownMenuRadioGroup value={story ?? ""} onValueChange={(v) => openStory({ path: v || null })}>
+                <DropdownMenuRadioItem value="" closeOnClick>
+                  {t("Document body")}
+                </DropdownMenuRadioItem>
+                {stories.map((x) => (
+                  <DropdownMenuRadioItem key={x.path} value={x.path} closeOnClick>
+                    {storyLabel(x)}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+              {(canAdd.header || canAdd.footer) && <DropdownMenuSeparator />}
+              {canAdd.header && <DropdownMenuItem onClick={() => openStory({ add: "header" })}>{t("Add header")}</DropdownMenuItem>}
+              {canAdd.footer && <DropdownMenuItem onClick={() => openStory({ add: "footer" })}>{t("Add footer")}</DropdownMenuItem>}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {current && (
+            <Button variant="outline" size="sm" disabled={loading || !!error} onClick={() => openStory({ path: null })}>
+              {t("Back to document")}
+            </Button>
+          )}
           <Button size="sm" disabled={!dirty || saving || loading || !!error} onClick={() => void save()}>
             {saving ? <Loader2Icon className="animate-spin" /> : <SaveIcon />}
             {t("Save")}

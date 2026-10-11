@@ -48,3 +48,11 @@ export function placeIn(parent: Element, child: Element, order: string[]): Eleme
   else parent.append(child);
   return child;
 }
+
+/** Where a part's blocks are: document.xml's body, or a header's or footer's root */
+export function storyRoot(doc: Document | null): Element | null {
+  const root = doc?.documentElement;
+  if (!root) return null;
+  if (root.localName === "hdr" || root.localName === "ftr") return root;
+  return Array.from(root.children).find((c) => c.localName === "body") ?? null;
+}
