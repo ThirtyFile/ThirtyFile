@@ -794,9 +794,16 @@ export function renderParagraph(p: Element, f: Flow): ParaResult {
   };
   const shade = shadeColor(props.shd, theme);
 
+  // Editing a paragraph without text: what is typed there takes the paragraph mark's formatting (edit.ts), so the view
+  // shows its looks
+  const empty = !!f.edit && !inl.hasContent;
   const base$: Record<string, string | undefined> = {
     "font-family": strut.family,
     "font-size": strut.css["font-size"],
+    "font-weight": empty ? markStyle.css["font-weight"] : undefined,
+    "font-style": empty ? markStyle.css["font-style"] : undefined,
+    "text-decoration-line": empty ? markStyle.css["text-decoration-line"] : undefined,
+    color: empty ? markStyle.css.color : undefined,
     "line-height": lineHeight,
     "text-align": align[jc] ?? (bidi ? "right" : "left"),
     "text-align-last": jc === "distribute" ? "justify" : undefined,

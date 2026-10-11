@@ -28,6 +28,8 @@ export interface ListParts {
   /** The document's relationships and the package's content types: changed only when the numbering part is made */
   rels: Document | null;
   types: Document | null;
+  /** Where a numbering part made goes (next to document.xml): word/numbering.xml when not given */
+  numberingPath?: string;
 }
 
 /** What a list change made: the numbering part when there was none (with its relationship and content type) */
@@ -40,7 +42,10 @@ export interface ListResult {
 }
 
 const RELS = "http://schemas.openxmlformats.org/package/2006/relationships";
+/** The numbering part's relationship type, in a transitional or a strict document */
 const NUMBERING_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering";
+const NUMBERING_REL_STRICT = "http://purl.oclc.org/ooxml/officeDocument/relationships/numbering";
+const STRICT = "http://purl.oclc.org/ooxml/wordprocessingml/main";
 const NUMBERING_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml";
 /** Word's half inch, the indent of each level (twips) */
 const STEP = 720;
@@ -143,6 +148,7 @@ class Lists {
   private root(): Element {
     if (this.numbering?.documentElement) return this.numbering.documentElement;
     const { ns, prefix } = this.x;
+    const path = this.parts.numberingPath ?? "word/numbering.xml";
     const name = prefix ? `${prefix}:numbering` : "numbering";
     const doc = new DOMParser().parseFromString(`<${name} ${prefix ? `xmlns:${prefix}` : "xmlns"}="${ns}"/>`, "application/xml");
     this.numbering = doc;
@@ -154,15 +160,15 @@ class Lists {
       while (ids.has(`rId${n}`)) n++;
       const rel = this.parts.rels!.createElementNS(RELS, "Relationship");
       rel.setAttribute("Id", `rId${n}`);
-      rel.setAttribute("Type", NUMBERING_REL);
-      rel.setAttribute("Target", "numbering.xml");
+      rel.setAttribute("Type", ns === STRICT ? NUMBERING_REL_STRICT : NUMBERING_REL);
+      rel.setAttribute("Target", path.slice(path.lastIndexOf("/") + 1));
       rels.append(rel);
       this.changed.rels = true;
     }
     const types = this.parts.types?.documentElement;
-    if (types && !kids(types, "Override").some((o) => attr(o, "PartName") === "/word/numbering.xml")) {
+    if (types && !kids(types, "Override").some((o) => attr(o, "PartName") === `/${path}`)) {
       const over = this.parts.types!.createElementNS(types.namespaceURI, "Override");
-      over.setAttribute("PartName", "/word/numbering.xml");
+      over.setAttribute("PartName", `/${path}`);
       over.setAttribute("ContentType", NUMBERING_TYPE);
       types.append(over);
       this.changed.types = true;

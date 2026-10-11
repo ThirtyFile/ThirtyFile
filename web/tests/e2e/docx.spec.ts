@@ -429,7 +429,7 @@ test("fonts and line spacing are changed from the toolbar, and the file gets the
   const dir = await makeFolder(page, "Word fonts");
   const body = "<w:p><w:r><w:t>Hello world</w:t></w:r></w:p><w:p><w:r><w:t>Second</w:t></w:r></w:p><w:p><w:r><w:t>Third</w:t></w:r></w:p>";
   const id = await uploadFile(page, dir, "fonts.docx", Buffer.from(await buildDocument(body)));
-  const { frame } = await openEditor(page, id, "fonts.docx");
+  const { frame, text } = await openEditor(page, id, "fonts.docx");
   const font = page.getByLabel("Font", { exact: true });
   const spacing = page.getByRole("button", { name: "Line and paragraph spacing" });
 
@@ -455,12 +455,21 @@ test("fonts and line spacing are changed from the toolbar, and the file gets the
   await page.getByRole("menu").press("Escape");
   await expect(page.getByRole("menu")).toBeHidden();
 
+  // A size with the caret at the start of "world": that word, not the word or the space before it
+  await frame.getByText("Hello world").click();
+  await text.press("End");
+  await text.press("ControlOrMeta+ArrowLeft");
+  await page.getByLabel("Font size").selectOption("14");
+  await expect(frame.getByText("world", { exact: true })).toBeVisible();
+
   const save = saving(page, id);
   await page.getByRole("button", { name: "Save" }).click();
   expect((await save).ok()).toBe(true);
   const { xml } = await savedXml(page, id);
   const paragraphs = [...xml.matchAll(/<w:p>(.*?)<\/w:p>/g)].map((m) => m[1]);
-  expect(paragraphs.find((p) => p.includes("Hello"))).toMatch(/<w:pPr><w:spacing w:line="360" w:lineRule="auto" w:before="240"\/><\/w:pPr><w:r><w:t>Hello world<\/w:t>/);
+  expect(paragraphs.find((p) => p.includes("Hello"))).toMatch(
+    /<w:pPr><w:spacing w:line="360" w:lineRule="auto" w:before="240"\/><\/w:pPr><w:r><w:t xml:space="preserve">Hello <\/w:t><\/w:r><w:r><w:rPr><w:sz w:val="28"\/><w:szCs w:val="28"\/><\/w:rPr><w:t>world<\/w:t><\/w:r>/,
+  );
   expect(paragraphs.find((p) => p.includes("Second"))).toContain('<w:rPr><w:rFonts w:ascii="Georgia" w:hAnsi="Georgia" w:cs="Georgia"/></w:rPr><w:t>Second</w:t>');
   expect(paragraphs.find((p) => p.includes("Third"))).toContain('<w:rFonts w:ascii="Microsoft JhengHei" w:hAnsi="Microsoft JhengHei" w:eastAsia="Microsoft JhengHei"/>');
 });
