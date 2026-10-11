@@ -11,8 +11,10 @@
  *   only be deleted as a whole, by selecting across it. A section break is never lost: a deleted paragraph that ended a
  *   section leaves an empty one with its settings.
  *
- * Paragraphs are editable when they only hold runs of text (with tabs and line breaks), links around such runs, and
- * bookmarks. Anything else in a paragraph makes the whole paragraph a block that is kept as it is.
+ * Paragraphs are editable when they only hold runs of text (with tabs and line breaks), links around such runs,
+ * bookmarks, and fields (page numbers, dates…). A field is kept as it is, as one piece the view shows but doesn't let
+ * anyone type into: it can only be deleted as a whole. Anything else in a paragraph makes the whole paragraph a block
+ * that is kept as it is.
  *
  * Table cells hold blocks of their own (each cell is a container, like the body): their paragraphs are edited the same
  * way, while the table's rows, columns and settings stay as they are. A cell always keeps a paragraph, as Word needs.
@@ -46,6 +48,8 @@ export interface Piece {
   text: string;
   /** Character formatting the view gave this text, differing from what its run had */
   fmt?: Fmt;
+  /** A field kept as it is (its index in the plan's `atoms`), in place of text */
+  atom?: number;
 }
 
 /** The formatting the view gives a text node of run `run`, differing from what the run had (editor.ts works it out from what is shown) */
@@ -77,9 +81,12 @@ export interface EditPlan {
   /** Every run of the editable paragraphs, by id */
   runs: Element[];
   runIds: Map<Element, number>;
-  /** Bookmarks before a run, and those at the end of each editable paragraph */
+  /** Bookmarks before a run or a field, and those at the end of each editable paragraph */
   before: Map<Element, Element[]>;
   after: Map<number, Element[]>;
+  /** The fields of the editable paragraphs, each the elements it is made of, by id; and the id of each one's first element */
+  atoms: Element[][];
+  atomIds: Map<Element, number>;
 }
 
 const sectPrOf = (p: Element | null | undefined) => kid(kid(p, "pPr"), "sectPr");
@@ -101,9 +108,58 @@ function isTextRun(r: Element): boolean {
   return true;
 }
 
+/** How many fields a run starts and ends (+1 for each start, -1 for each end) */
+function fieldDepth(r: Element): number {
+  let d = 0;
+  for (const c of Array.from(r.children)) {
+    if (c.localName !== "fldChar") continue;
+    const t = attr(c, "fldCharType");
+    if (t === "begin") d++;
+    else if (t === "end") d--;
+  }
+  return d;
+}
+
+/** Whether a run only holds field marks and field code (the start or the end of a field, nothing shown) */
+const isFieldMarkRun = (r: Element) => r.localName === "r" && Array.from(r.children).every((c) => c.localName === "rPr" || c.localName === "fldChar" || c.localName === "instrText");
+
+/**
+ * A paragraph's fields: each w:fldSimple, and the elements from a run starting a field to the run ending it (with
+ * whatever is between, nested fields too). Null when a field isn't whole in the paragraph, or starts or ends in a run
+ * that also holds text.
+ */
+export function fieldsOf(p: Element): Element[][] | null {
+  const out: Element[][] = [];
+  let open: Element[] | null = null;
+  let depth = 0;
+  for (const c of Array.from(p.children)) {
+    if (open) {
+      open.push(c);
+      if (c.localName === "r") depth += fieldDepth(c);
+      if (depth <= 0) {
+        if (!isFieldMarkRun(c)) return null;
+        out.push(open);
+        open = null;
+      }
+      continue;
+    }
+    if (c.localName === "fldSimple") out.push([c]);
+    else if (c.localName === "r" && fieldDepth(c) !== 0 && Array.from(c.children).some((k) => k.localName === "fldChar")) {
+      depth = fieldDepth(c);
+      if (depth < 0 || !isFieldMarkRun(c)) return null;
+      open = [c];
+    }
+  }
+  return open ? null : out;
+}
+
 /** Whether a body paragraph can be edited (see the module notes) */
 export function isEditableParagraph(p: Element): boolean {
+  const fields = fieldsOf(p);
+  if (!fields) return false;
+  const inField = new Set(fields.flat());
   for (const c of Array.from(p.children)) {
+    if (inField.has(c)) continue;
     switch (c.localName) {
       case "pPr": {
         // A paragraph mark deleted in a tracked change joins it with the next one: joining or splitting it here would mix them up
@@ -182,6 +238,8 @@ export function planEdits(doc: Document | null): EditPlan | null {
     runIds: new Map(),
     before: new Map(),
     after: new Map(),
+    atoms: [],
+    atomIds: new Map(),
   };
   // The body, then every table cell in it (tables inside cells too), in document order
   const cells = Array.from(body.querySelectorAll("*")).filter((e) => e.localName === "tc");
@@ -196,8 +254,18 @@ export function planEdits(doc: Document | null): EditPlan | null {
     plan.editable.push(editable);
     if (!editable) return;
     let pending: Element[] = [];
+    const fields = fieldsOf(b) ?? [];
+    const starts = new Map(fields.map((f) => [f[0], f]));
+    const inField = new Set(fields.flat());
     const add = (el: Element) => {
-      if (el.localName === "r") {
+      const field = starts.get(el);
+      if (field) {
+        plan.atomIds.set(el, plan.atoms.length);
+        plan.atoms.push(field);
+        if (pending.length) plan.before.set(el, pending);
+        pending = [];
+      } else if (inField.has(el)) return;
+      else if (el.localName === "r") {
         plan.runIds.set(el, plan.runs.length);
         plan.runs.push(el);
         if (pending.length) plan.before.set(el, pending);
@@ -213,7 +281,7 @@ export function planEdits(doc: Document | null): EditPlan | null {
   return plan;
 }
 
-/** The runs of a paragraph that show text, as pieces (what the editor shows for it before any change) */
+/** The runs of a paragraph that show text, and its fields, as pieces (what the editor shows for it before any change) */
 export function originalPieces(plan: EditPlan, block: number): Piece[] {
   const out: Piece[] = [];
   const add = (r: Element) => {
@@ -221,25 +289,28 @@ export function originalPieces(plan: EditPlan, block: number): Piece[] {
     if (text) out.push({ run: plan.runIds.get(r) ?? null, text });
   };
   for (const c of Array.from(plan.blocks[block].children)) {
-    if (c.localName === "r") add(c);
+    const atom = plan.atomIds.get(c);
+    if (atom !== undefined) out.push({ run: null, text: "", atom });
+    else if (c.localName === "r" && plan.runIds.has(c)) add(c);
     else if (c.localName === "hyperlink") for (const r of Array.from(c.children)) if (r.localName === "r") add(r);
   }
   return out;
 }
 
-/** Joins consecutive pieces of the same run, and drops empty ones */
+/** Joins consecutive pieces of the same run, and drops empty ones (a field is a piece of its own) */
 export function mergePieces(pieces: Piece[]): Piece[] {
   const out: Piece[] = [];
   for (const p of pieces) {
-    if (!p.text) continue;
+    if (!p.text && p.atom === undefined) continue;
     const last = out[out.length - 1];
-    if (last && last.run === p.run && fmtKey(last.fmt) === fmtKey(p.fmt)) last.text += p.text;
+    if (last && last.atom === undefined && p.atom === undefined && last.run === p.run && fmtKey(last.fmt) === fmtKey(p.fmt)) last.text += p.text;
     else out.push({ ...p });
   }
   return out;
 }
 
-export const samePieces = (a: Piece[], b: Piece[]) => a.length === b.length && a.every((p, i) => p.run === b[i].run && p.text === b[i].text && fmtKey(p.fmt) === fmtKey(b[i].fmt));
+export const samePieces = (a: Piece[], b: Piece[]) =>
+  a.length === b.length && a.every((p, i) => p.run === b[i].run && p.text === b[i].text && p.atom === b[i].atom && fmtKey(p.fmt) === fmtKey(b[i].fmt));
 
 // ───────────── Reading the edited view back ─────────────
 
@@ -272,9 +343,9 @@ function finish(tokens: Token[]): Piece[] {
   const first = kept.find((t) => t.run !== null)?.run ?? null;
   for (const t of kept) {
     if (t.run !== null) break;
-    t.run = first;
+    if (t.atom === undefined) t.run = first;
   }
-  return mergePieces(kept.map(({ run, text, fmt }) => (fmt ? { run, text, fmt } : { run, text })));
+  return mergePieces(kept.map(({ run, text, fmt, atom }) => (atom !== undefined ? { run: null, text: "", atom } : fmt ? { run, text, fmt } : { run, text })));
 }
 
 /**
@@ -303,6 +374,11 @@ function readBlock(el: HTMLElement, source: number | null, out: EditedBlock[], f
       return;
     }
     if (!isElement(n)) return;
+    // A field, kept as it is
+    if (n.dataset.atom !== undefined) {
+      tokens.push({ run: null, text: "", atom: Number(n.dataset.atom) });
+      return;
+    }
     // List numbers and other parts of the view that aren't the paragraph's text
     if (n.dataset.ro !== undefined) return;
     if (keptBlock(n)) {
@@ -464,6 +540,17 @@ class Writer {
     let host: Element = p;
     let link: Element | null = null;
     for (const piece of pieces) {
+      if (piece.atom !== undefined) {
+        // A field goes in as it was, once, in the paragraph itself (never in a link)
+        const field = plan.atoms[piece.atom];
+        if (!field || this.anchored.has(field[0])) continue;
+        this.anchored.add(field[0]);
+        link = null;
+        host = p;
+        for (const m of plan.before.get(field[0]) ?? []) p.append(m.cloneNode(true));
+        for (const el of field) p.append(el.cloneNode(true));
+        continue;
+      }
       const r = piece.run !== null ? (plan.runs[piece.run] ?? null) : null;
       const parent = r?.parentElement ?? null;
       const hl = parent?.localName === "hyperlink" ? parent : null;

@@ -141,6 +141,8 @@ export interface Flow {
    */
   edit?: {
     runId(r: Element): number | undefined;
+    /** A field of an editable paragraph starting at `el` (a w:fldSimple, or the run starting it): its id, and its last element */
+    atom?(el: Element): { id: number; last: Element } | undefined;
     /**
      * Fills a table cell (`tc`) into `host` for editing, instead of the plain rendering (`content` is what it holds,
      * `f` its flow); false leaves it to the plain rendering

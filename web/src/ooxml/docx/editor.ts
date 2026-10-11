@@ -29,7 +29,7 @@ import { BlockWriter, type BlockItem } from "./blocks";
 import type { Flow, PageFloat } from "./context";
 import { DOCX_CSS } from "./css";
 import { originalPieces, planEdits, readAllEdits, readParagraph, samePieces, saveEdits, writeXml, type EditPlan, type FmtOf } from "./edit";
-import { formatRange, MARK_END, MARK_START, type Fmt, type RangeFormat } from "./formatOps";
+import { formatRange, insertField, MARK_END, MARK_START, type FieldKind, type Fmt, type RangeFormat } from "./formatOps";
 import { formatList, listKind, type ListFormat, type ListKind } from "./listOps";
 import { hasCjk } from "./fonts";
 import { addStory, listStories, type Story, type StoryKind } from "./hfOps";
@@ -57,6 +57,8 @@ export interface Caret {
   cell?: number;
   /** Cells selected together (their corners' containers), selected again once the view is opened */
   pick?: [number, number];
+  /** Just after the field there (fields aren't counted in `offset`) */
+  atom?: boolean;
 }
 
 /** What a change of a table needs besides the caret's cell: the split's numbers, the borders, the shading, a column's move */
@@ -153,6 +155,8 @@ export interface DocxEditor {
    * it is opened again; undefined when there is no selection to change
    */
   formatRange(f: RangeFormat): { xml: string; caret: Caret | null } | undefined;
+  /** The part open with a field inserted at the caret (after the selection), and the caret just after it; undefined when it can't go there */
+  insertField(kind: FieldKind): { xml: string; caret: Caret | null } | undefined;
   /** The paragraph styles the document defines (shown in its own style list) */
   styles: ParagraphStyle[];
   /** The fonts the document names in its font table */
@@ -185,6 +189,7 @@ const EDIT_CSS = `
 .tf-docx-ro{position:relative;cursor:default}
 .tf-docx-ro:hover{outline:1px dashed #94a3b8;outline-offset:2px}
 .tf-docx-editable [data-ro]{user-select:none}
+.tf-docx-editable [data-atom]{background:#e5e7eb;border-radius:2px;cursor:default}
 .tf-docx-editable .tf-docx-p{tab-size:48px}
 .tf-docx-ro:has([data-cell]):hover{outline:none}
 .tf-docx-editable [data-cell]{outline:none;cursor:text}
@@ -268,6 +273,10 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
   const shared = { fields: [] as Flow["fields"], comments: new Set<string>() };
   const edit: NonNullable<Flow["edit"]> = {
     runId: (r) => plan.runIds.get(r),
+    atom: (el) => {
+      const id = plan.atomIds.get(el);
+      return id === undefined ? undefined : { id, last: plan.atoms[id][plan.atoms[id].length - 1] };
+    },
     // A table cell: its blocks, each an editable paragraph or kept as it is, in an editable place of its own
     cell(tc, host, _content, f) {
       const c = plan.containerOf.get(tc);
@@ -710,6 +719,13 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
       if (!formatRange(marked.doc, f)) return undefined;
       return { xml: writeXml(marked.doc), caret: marked.caret };
     },
+    insertField(kind) {
+      restoreSelection();
+      getSelection()?.collapseToEnd();
+      const marked = markSelection(false);
+      if (!marked || !insertField(marked.doc, kind)) return undefined;
+      return { xml: writeXml(marked.doc), caret: marked.caret && marked.caret.cell === undefined ? { ...marked.caret, atom: true } : marked.caret };
+    },
     async formatList(f) {
       const marked = markSelection(false);
       if (!marked) return undefined;
@@ -884,12 +900,28 @@ function placeCaret(editable: HTMLElement, caret: Caret) {
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
     const len = n.nodeValue?.length ?? 0;
     if (left <= len) {
+      // At the end of a text the field follows: just after the field
+      if (caret.atom && left === len && afterAtom(p, n)) return;
       getSelection()?.collapse(n, left);
       return;
     }
     left -= len;
   }
-  getSelection()?.collapse(p, p.childNodes.length);
+  // No text after the caret: after the paragraph's last field, or at its end
+  const atoms = p.querySelectorAll("[data-atom]");
+  const last = caret.atom ? atoms[atoms.length - 1] : null;
+  if (last?.parentNode) getSelection()?.collapse(last.parentNode, Array.prototype.indexOf.call(last.parentNode.childNodes, last) + 1);
+  else getSelection()?.collapse(p, p.childNodes.length);
+}
+
+/** Puts the caret just after the field right after `n` (within paragraph `p`), if there is one there */
+function afterAtom(p: HTMLElement, n: Node): boolean {
+  let e: Node | null = n;
+  while (e && e !== p && !e.nextSibling) e = e.parentNode;
+  const next = e && e !== p ? e.nextSibling : null;
+  if (!(next instanceof HTMLElement) || next.dataset.atom === undefined || !next.parentNode) return false;
+  getSelection()?.collapse(next.parentNode, Array.prototype.indexOf.call(next.parentNode.childNodes, next) + 1);
+  return true;
 }
 
 // ───────────── Formatting shown ─────────────

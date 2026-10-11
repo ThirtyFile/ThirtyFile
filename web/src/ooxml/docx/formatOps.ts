@@ -241,8 +241,11 @@ function splitAt(x: WordXml, t: Element, k: number): Element | null {
     rest.append(n);
     n = next;
   }
-  if (before) t.textContent = before;
-  else t.remove();
+  if (before) {
+    t.textContent = before;
+    // Spaces at an edge the split made are kept only when the text says so
+    if (/^\s|\s$/.test(before)) t.setAttributeNS("http://www.w3.org/XML/1998/namespace", "xml:space", "preserve");
+  } else t.remove();
   const hasContent = Array.from(rest.children).some((c) => c.localName !== "rPr");
   if (!hasContent) return null;
   r.after(rest);
@@ -350,5 +353,40 @@ export function formatRange(doc: Document, f: RangeFormat): boolean {
   }
   const half = String(Math.round(f.size * 2));
   for (const rPr of targets) for (const n of ["sz", "szCs"]) x.set(prop(x, rPr, n, RPR), "val", half);
+  return true;
+}
+
+/** The fields the editor inserts: the page number, and the number of pages */
+export type FieldKind = "PAGE" | "NUMPAGES";
+
+/**
+ * Inserts a field where the start mark is (the end mark, at the same place, goes too), formatted as the text there, as
+ * Word does: a w:fldSimple whose result Word works out again. False when the mark isn't there, or is in a link.
+ */
+export function insertField(doc: Document, kind: FieldKind): boolean {
+  const body = storyRoot(doc);
+  if (!body) return false;
+  const texts = byName(body, "t");
+  for (const t of texts) if ((t.textContent ?? "").includes(MARK_END)) t.textContent = (t.textContent ?? "").replace(MARK_END, "");
+  const t = texts.find((e) => (e.textContent ?? "").includes(MARK_START));
+  const r = t?.parentElement;
+  if (!t || !r || r.localName !== "r" || r.parentElement?.localName !== "p") {
+    for (const e of texts) if (HAS_MARK.test(e.textContent ?? "")) e.textContent = (e.textContent ?? "").replace(MARKS, "");
+    return false;
+  }
+  const x = new WordXml(doc, body);
+  const field = x.el("fldSimple");
+  x.set(field, "instr", ` ${kind} `);
+  const run = x.el("r");
+  const rPr = kid(r, "rPr");
+  if (rPr) run.append(rPr.cloneNode(true));
+  const result = x.el("t");
+  result.textContent = "1";
+  run.append(result);
+  field.append(run);
+  // The run is split at the mark: the field goes between its halves (a half left without text goes)
+  splitAt(x, t, (t.textContent ?? "").indexOf(MARK_START));
+  r.after(field);
+  if (!Array.from(r.children).some((c) => c.localName !== "rPr")) r.remove();
   return true;
 }
