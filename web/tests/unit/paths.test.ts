@@ -58,6 +58,8 @@ describe("urlOf and appLink", () => {
     for (const item of CONTROL_PANEL_ITEMS) {
       expect(controlPanelPath(`/admin/${item.key}`, CONTROL_PANEL_ITEMS)).toBe(item.to);
       expect(controlPanelPath(`/${root}/${item.title}`, CONTROL_PANEL_ITEMS)).toBe(item.to);
+      // By its key in any letter case, in any language ("/Control panel/Users")
+      expect(controlPanelPath(`/Control panel/${item.key[0].toUpperCase()}${item.key.slice(1)}`, CONTROL_PANEL_ITEMS)).toBe(item.to);
     }
     expect(controlPanelPath("/admin/not-a-page", CONTROL_PANEL_ITEMS)).toBeNull();
     expect(controlPanelPath("/admin/storage/anything", CONTROL_PANEL_ITEMS)).toBeNull();

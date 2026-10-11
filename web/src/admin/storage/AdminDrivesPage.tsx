@@ -97,8 +97,12 @@ export function AdminDrivesPage() {
     return of.find(moveActive) ?? of[0];
   };
   const drives = q.data ?? [];
+  // The search box finds spaces here, as it finds users on the Users page: by name or owner
+  const [search, setSearch] = useState("");
+  const shown = search.trim() ? drives.filter((d) => matches(search, driveLabel(d, true), d.name, d.owner_name)) : drives;
   const selected = drives.find((d) => d.id === selectedId) ?? null;
-  const ticked = drives.filter((d) => checked.includes(d.id));
+  // Only spaces the search shows count as ticked: one ticked before a search that hides it isn't moved unseen
+  const ticked = shown.filter((d) => checked.includes(d.id));
   /** What "Move to another location…" moves: the ticked spaces, else the selected one */
   const toMove = ticked.length ? ticked : selected ? [selected] : [];
   const toggle = (id: string, on: boolean) => setChecked((c) => (on ? [...c.filter((x) => x !== id), id] : c.filter((x) => x !== id)));
@@ -157,17 +161,14 @@ export function AdminDrivesPage() {
 
   const total = drives.reduce((s, d) => s + d.used_bytes, 0);
 
-  // The search box finds spaces here, as it finds users on the Users page: by name or owner
-  const [search, setSearch] = useState("");
-  const shown = search.trim() ? drives.filter((d) => matches(search, driveLabel(d, true), d.name, d.owner_name)) : drives;
   const columns: Column<Drive>[] = [
     {
       header: (
         <Checkbox
           aria-label={t("Select all spaces to move them")}
-          checked={drives.length > 0 && ticked.length === drives.length}
-          indeterminate={ticked.length > 0 && ticked.length < drives.length}
-          onCheckedChange={(v) => setChecked(v ? drives.map((d) => d.id) : [])}
+          checked={shown.length > 0 && ticked.length === shown.length}
+          indeterminate={ticked.length > 0 && ticked.length < shown.length}
+          onCheckedChange={(v) => setChecked(v ? shown.map((d) => d.id) : [])}
         />
       ),
       className: "w-[38px]",

@@ -87,6 +87,26 @@ describe("column settings", () => {
   });
 });
 
+describe("column settings of the Mac style, per account", () => {
+  it("start from the shared ones, then are kept apart from them and from another account's", () => {
+    resetColumns();
+    showColumn("created", true);
+    const amy = "tf-columns-mac-1";
+    const bob = "tf-columns-mac-2";
+    localStorage.removeItem(amy);
+    localStorage.removeItem(bob);
+    // Changed for one account: the shared settings and the other account's are as they were
+    setColumnWidth("size", 300, amy);
+    showColumn("type", false, amy);
+    expect(JSON.parse(localStorage.getItem(amy)!)).toEqual({ visible: { created: true, type: false }, widths: { size: 300 } });
+    expect(columnPrefs()).toEqual({ visible: { created: true }, widths: {} });
+    resetColumns(bob);
+    expect(JSON.parse(localStorage.getItem(bob)!)).toEqual({ visible: {}, widths: {} });
+    expect(JSON.parse(localStorage.getItem(amy)!).widths).toEqual({ size: 300 });
+    resetColumns();
+  });
+});
+
 describe("columnsToHide", () => {
   const width = (id: keyof typeof COLUMN_WIDTH) => COLUMN_WIDTH[id];
   const ids = ["date", "type", "size"] as const;

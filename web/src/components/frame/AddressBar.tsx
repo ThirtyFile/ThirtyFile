@@ -143,6 +143,7 @@ export function CrumbItem({ crumb: c, last, path }: { crumb: Crumb; last: boolea
 export function useGoToPath() {
   const navigate = useNavigate();
   const { openFile } = useTabActions();
+  const me = useMe();
   const [finding, setFinding] = useState(false);
   const go = async (typed: string): Promise<boolean> => {
     const link = appLink(typed, window.location.origin);
@@ -152,7 +153,8 @@ export function useGoToPath() {
     }
     setFinding(true);
     try {
-      if (isControlPanelPath(typed)) {
+      // The Control panel's names are an administrator's: anyone else reaches a space of that name instead
+      if (me.role === "admin" && isControlPanelPath(typed)) {
         const { CONTROL_PANEL_ITEMS } = await import("@/admin/controlPanel");
         const page = controlPanelPath(typed, CONTROL_PANEL_ITEMS);
         if (page) {

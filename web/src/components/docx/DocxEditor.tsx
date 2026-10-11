@@ -107,6 +107,28 @@ function storyLabel(s: Story): string {
 /** Word's highlight colors, as Word lists them */
 const HIGHLIGHT_COLORS = Object.keys(HIGHLIGHTS).map((hex) => `#${hex}`);
 
+/** Word's names of its highlight colors */
+function highlightNames(): Record<string, string> {
+  const names: Record<string, string> = {
+    yellow: t("Yellow"),
+    green: t("Bright green"),
+    cyan: t("Turquoise"),
+    magenta: t("Pink"),
+    blue: t("Blue"),
+    red: t("Red"),
+    darkBlue: t("Dark blue"),
+    darkCyan: t("Teal"),
+    darkGreen: t("Green"),
+    darkMagenta: t("Violet"),
+    darkRed: t("Dark red"),
+    darkYellow: t("Dark yellow"),
+    darkGray: t("Gray 50%"),
+    lightGray: t("Gray 25%"),
+    black: t("Black"),
+  };
+  return Object.fromEntries(Object.entries(HIGHLIGHTS).map(([hex, word]) => [`#${hex}`, names[word] ?? `#${hex}`]));
+}
+
 /** A paragraph style's name: Word's own styles in the person's language, the document's own as it names them */
 function styleLabel(name: string): string {
   const n = name.toLowerCase();
@@ -618,6 +640,7 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
           icon={<HighlighterIcon className="size-4" />}
           noneLabel={t("No highlight")}
           colors={HIGHLIGHT_COLORS}
+          names={highlightNames()}
           disabled={formatOff}
           onPick={(c) => format({ cmd: "hiliteColor", value: c ?? "transparent" })}
         />

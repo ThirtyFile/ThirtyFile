@@ -84,3 +84,36 @@ test("restoring an earlier version while the workbook is open for editing shows 
   expect(sheet).not.toMatch(/<c r="C1"/);
   await expect(page.getByText(/someone else|changed since/i)).toHaveCount(0);
 });
+
+test("an edit after a cut cancels the cut, so a paste then doesn't clear the cells", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await signIn(page);
+  const dir = await makeFolder(page, "Sheet cut");
+  const xlsx = Buffer.from(await buildWorkbook([{ name: "Budget", rows: '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1"><v>1234</v></c></row>' }], ["Rent"]));
+  const id = await uploadFile(page, dir, "cut.xlsx", xlsx);
+  await page.goto(`/view/${id}`);
+  await page.getByRole("button", { name: "Edit workbook" }).click();
+  const nameBox = page.getByLabel("Name box");
+  const goTo = async (cell: string) => {
+    await nameBox.fill(cell);
+    await nameBox.press("Enter");
+  };
+
+  // Cut B1, then type into C3: the cut is over (as in Excel), and pasting into D1 copies rather than moves
+  await goTo("B1");
+  await page.keyboard.press("ControlOrMeta+x");
+  await goTo("C3");
+  await page.keyboard.type("5");
+  await page.keyboard.press("Enter");
+  await goTo("D1");
+  await page.keyboard.press("ControlOrMeta+v");
+  const save = saving(page, id);
+  await page.keyboard.press("ControlOrMeta+s");
+  expect((await save).ok()).toBe(true);
+
+  const saved = await JSZip.loadAsync(await (await page.request.get(`/api/files/${id}/content`)).body());
+  const sheet = await saved.file("xl/worksheets/sheet1.xml")!.async("string");
+  expect(sheet).toMatch(/<c r="B1"[^>]*><v>1234<\/v><\/c>/);
+  expect(sheet).toMatch(/<c r="D1"[^>]*><v>1234<\/v><\/c>/);
+  expect(sheet).toMatch(/<c r="C3"[^>]*><v>5<\/v><\/c>/);
+});

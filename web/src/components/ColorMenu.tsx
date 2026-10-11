@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { ChevronDownIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { t } from "@/lib/i18n";
 
 // Office's common palette: the first row is base colors, followed by tints and shades from light to dark
 export const PALETTE = [
@@ -15,9 +16,46 @@ export const PALETTE = [
   ["#C00000", "#FF0000", "#FFC000", "#FFFF00", "#92D050", "#00B050", "#00B0F0", "#0070C0", "#002060", "#7030A0"],
 ];
 
+/**
+ * A palette color's name, for screen readers and the tooltip: the theme colors (the first row, with their lighter and
+ * darker variants below) and the standard colors (the last row), as Office arranges them; null for another color
+ */
+export function paletteName(color: string): string | null {
+  const at = PALETTE.findIndex((row) => row.includes(color.toUpperCase()));
+  if (at < 0) return null;
+  const col = PALETTE[at].indexOf(color.toUpperCase());
+  // The six accent colors are named by their number too, as Office does, so none shares a name with a standard color
+  const accent = (color: string, n: number) => t("{color}, accent {n}", { color, n });
+  const theme = [
+    t("Black"),
+    t("White"),
+    t("Light gray"),
+    t("Blue-gray"),
+    accent(t("Blue"), 1),
+    accent(t("Orange"), 2),
+    accent(t("Gray"), 3),
+    accent(t("Gold"), 4),
+    accent(t("Blue"), 5),
+    accent(t("Green"), 6),
+  ];
+  const standard = [t("Dark red"), t("Red"), t("Orange"), t("Yellow"), t("Light green"), t("Green"), t("Light blue"), t("Blue"), t("Dark blue"), t("Purple")];
+  if (at === 0) return theme[col];
+  if (at === PALETTE.length - 1) return standard[col];
+  return t("{color}, variant {n}", { color: theme[col], n: at });
+}
+
 /** A color chosen from Office's palette, or none: for fill and font colors (workbooks) and shading (documents) */
-/** `colors`: the colors offered, when not the whole palette (Word's highlight colors, say) */
-export function ColorMenu(props: { label: string; icon: ReactNode; value?: string; noneLabel: string; disabled?: boolean; colors?: string[]; onPick(c: string | undefined): void }) {
+/** `colors`: the colors offered, when not the whole palette (Word's highlight colors, say), with `names` for them */
+export function ColorMenu(props: {
+  label: string;
+  icon: ReactNode;
+  value?: string;
+  noneLabel: string;
+  disabled?: boolean;
+  colors?: string[];
+  names?: Record<string, string>;
+  onPick(c: string | undefined): void;
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -43,9 +81,20 @@ export function ColorMenu(props: { label: string; icon: ReactNode; value?: strin
         <DropdownMenuItem onClick={() => props.onPick(undefined)}>{props.noneLabel}</DropdownMenuItem>
         <DropdownMenuSeparator />
         <div className="grid grid-cols-10 gap-1 p-1">
-          {(props.colors ?? PALETTE.flat()).map((c) => (
-            <DropdownMenuItem key={c} title={c} aria-label={c} className="size-5 rounded-sm border border-black/15 p-0" style={{ background: c }} onClick={() => props.onPick(c)} />
-          ))}
+          {(props.colors ?? PALETTE.flat()).map((c) => {
+            // Named for screen readers; the tooltip adds the hex code
+            const name = props.names?.[c] ?? paletteName(c) ?? c;
+            return (
+              <DropdownMenuItem
+                key={c}
+                title={name === c ? c : `${name} (${c})`}
+                aria-label={name}
+                className="size-5 rounded-sm border border-black/15 p-0"
+                style={{ background: c }}
+                onClick={() => props.onPick(c)}
+              />
+            );
+          })}
         </div>
       </DropdownMenuContent>
     </DropdownMenu>

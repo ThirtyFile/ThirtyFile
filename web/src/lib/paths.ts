@@ -57,5 +57,8 @@ export function controlPanelPath(text: string, items: readonly { key: string; to
   const parts = text.trim().replace(/\/$/, "").split("/").slice(1);
   if (parts.length === 1) return "/admin";
   if (parts.length !== 2) return null;
-  return items.find((item) => (parts[0] === "admin" ? item.key === parts[1] : item.title === parts[1]))?.to ?? null;
+  // A page by its name as the interface shows it, or by its key in any letter case (which reads like its English name
+  // for most pages: "/Control panel/Users")
+  const name = parts[1].toLowerCase();
+  return items.find((item) => item.key === parts[1] || (parts[0] !== "admin" && (item.title === parts[1] || item.key.toLowerCase() === name)))?.to ?? null;
 }
