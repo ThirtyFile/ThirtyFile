@@ -267,10 +267,6 @@ function splitAt(x: WordXml, t: Element, k: number): Element | null {
 }
 
 /**
- * Applies `f` to the range between the marks in `doc`, and takes the marks out. False when the marks aren't both there
- * (nothing is changed, and any mark left is taken out).
- */
-/**
  * The paragraphs the marks are in and those between them (the paragraphs the selection touches), with the marks taken
  * out; null when the marks aren't both there (any mark left is taken out too)
  */
@@ -297,6 +293,10 @@ export function paragraphProp(x: WordXml, pPr: Element, name: string): Element {
   return prop(x, pPr, name, PPR);
 }
 
+/**
+ * Applies `f` to the range between the marks in `doc`, and takes the marks out. False when the marks aren't both there
+ * (nothing is changed, and any mark left is taken out).
+ */
 export function formatRange(doc: Document, f: RangeFormat): boolean {
   const body = storyRoot(doc);
   if (!body) return false;

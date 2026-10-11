@@ -363,8 +363,30 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
     if (f) shownFmt.set(run, f);
   }
   // A text node's formatting differing from what its run showed (text typed without a run: from its paragraph's)
+  // What each text node shows, measured once: reading the view back after every pause in typing would otherwise
+  // measure every text of the document again. A node whose element or place changes is measured again (the records
+  // are taken before each reading, so none is missed)
+  const shownCache = new WeakMap<Node, Shown | null>();
+  const forget = (n: Node) => {
+    if (n.nodeType === 3) shownCache.delete(n);
+    else n.childNodes.forEach(forget);
+  };
+  const changed = (records: MutationRecord[]) => {
+    for (const r of records) {
+      if (r.type === "attributes") forget(r.target);
+      else r.addedNodes.forEach(forget);
+    }
+  };
+  const changes = typeof MutationObserver === "undefined" ? null : new MutationObserver(changed);
+  changes?.observe(editable, { subtree: true, childList: true, attributes: true });
+  const shownOf = (text: Node) => {
+    if (changes) changed(changes.takeRecords());
+    if (!changes) return shownAt(text);
+    if (!shownCache.has(text)) shownCache.set(text, shownAt(text));
+    return shownCache.get(text) ?? null;
+  };
   const fmtOf: FmtOf = (text, run) => {
-    const now = shownAt(text);
+    const now = shownOf(text);
     const block = text.parentElement?.closest<HTMLElement>("[data-para], p, div, td, li");
     const before = run !== null ? shownFmt.get(run) : block ? shownOfBlock(block) : null;
     if (!now || !before) return undefined;
@@ -627,10 +649,6 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
   };
   focus();
 
-  /**
-   * The document as edited, with marks at the selection's ends (`word`: no selection takes the word at the caret), and
-   * where the caret was; undefined when there is no selection in the view
-   */
   /** A copy of a part, so the view's own stays as it was until it is opened again */
   const copy = async (path: string | null) => {
     const d = path ? await pkg.xml(path) : null;
@@ -653,6 +671,10 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
     };
   };
 
+  /**
+   * The document as edited, with marks at the selection's ends (`word`: no selection takes the word at the caret), and
+   * where the caret was; undefined when there is no selection in the view
+   */
   const markSelection = (word: boolean): { doc: Document; caret: Caret | null } | undefined => {
     restoreSelection();
     const sel = getSelection();
@@ -674,8 +696,11 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
     try {
       text = saveEdits(plan, readAllEdits(editable, fmtOf), shown) ?? writeXml(plan.doc);
     } finally {
+      // The texts the marks split are joined again, so the view is as it was (the browser's own undo relies on it)
+      const parents = [start.parentNode, end.parentNode];
       start.remove();
       end.remove();
+      for (const p of parents) p?.normalize();
     }
     return { doc: new DOMParser().parseFromString(text, "application/xml"), caret };
   };
@@ -806,6 +831,7 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
     focus: () => editable.focus({ preventScroll: true }),
     dispose() {
       ro?.disconnect();
+      changes?.disconnect();
       document.removeEventListener("selectionchange", onSelection);
       window.removeEventListener("blur", onWindowBlur);
       editable.removeEventListener("mousedown", onTouch, true);

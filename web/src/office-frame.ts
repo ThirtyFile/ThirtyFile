@@ -101,8 +101,11 @@ async function render({ kind, buffer }: RenderMessage) {
   dispose = result.dispose;
 }
 
-/** After typing stops, and when the frame loses focus, the edited document goes to the host, which keeps it when the tab is switched */
-const CHANGED_DELAY = 600;
+/**
+ * After typing stops, and when the frame loses focus, the edited document goes to the host, which keeps it when the tab
+ * is switched (switching takes the focus away first, so a longer pause loses nothing)
+ */
+const CHANGED_DELAY = 1500;
 const TABLE_OPS = new Set<string>(["rowAbove", "rowBelow", "colLeft", "colRight", "deleteRow", "deleteCol", "merge", "split", "border", "shade"]);
 const BORDER_KINDS = new Set<string>(["all", "outside", "inside", "thickOutside", "top", "bottom", "left", "right", "none"]);
 const FORMAT_COMMANDS = new Set<string>(["bold", "italic", "underline", "strikeThrough", "foreColor", "hiliteColor"]);
@@ -121,7 +124,13 @@ let editing: {
   undo: { parts: Parts; caret: Caret | null; story: string | null }[];
   typed: boolean;
   story: string | null;
+  /** The parts the view is being opened on, until it is open (saving meanwhile takes these) */
+  opening: Parts | null;
 } | null = null;
+/** Editing actions waiting in the queue or running (Ctrl+Z waits for them, so it undoes the latest) */
+let pendingActions = 0;
+/** Text typed while the view opens again: kept, and typed into the new view once it is open */
+let held: string | null = null;
 let changedTimer = 0;
 
 /** The edited parts (none: the archive as it is), with the caret and scroll */
@@ -158,12 +167,51 @@ window.addEventListener("blur", () => {
   if (changedTimer) sendChanged();
 });
 
+// While the view opens again, nothing typed goes into the view being replaced: text is kept for the new one, and
+// keys that would change the text (Enter, Backspace…) wait (the person presses them again)
+root.addEventListener(
+  "beforeinput",
+  (e) => {
+    if (held === null) return;
+    e.preventDefault();
+    if (e.inputType === "insertText" && e.data) held += e.data;
+  },
+  true,
+);
+
 async function openEditor(parts: Parts, caret: Caret | null | undefined, scroll: number | undefined): Promise<DocxEditor> {
   const e = editing!;
   editor?.dispose();
   editor = null;
+  e.opening = parts;
+  held ??= "";
+  let opened: DocxEditor;
+  try {
+    opened = await openView(e, parts, caret, scroll);
+  } catch (err) {
+    held = null;
+    throw err;
+  } finally {
+    e.opening = null;
+  }
   e.base = parts;
-  const opened = await openDocxEditor(e.pkg, root, {
+  editor = opened;
+  // What was typed meanwhile goes where the caret is now
+  const typed = held;
+  held = null;
+  if (typed) {
+    opened.focus();
+    document.execCommand("insertText", false, typed);
+  }
+  // The host's lists follow the part open: its styles, the headers and footers, and which one is open
+  e.story = opened.story;
+  reply({ type: "styles", styles: opened.styles, fonts: opened.fonts });
+  reply({ type: "stories", stories: opened.stories, story: opened.story, canAdd: opened.canAdd, layout: opened.layout });
+  return opened;
+}
+
+function openView(e: NonNullable<typeof editing>, parts: Parts, caret: Caret | null | undefined, scroll: number | undefined): Promise<DocxEditor> {
+  return openDocxEditor(e.pkg, root, {
     parts,
     texts: e.texts,
     story: e.story,
@@ -176,30 +224,48 @@ async function openEditor(parts: Parts, caret: Caret | null | undefined, scroll:
       changedTimer = window.setTimeout(sendChanged, CHANGED_DELAY);
     },
     onSave: () => reply({ type: "save" }),
+    // Ctrl+Z right after a change of the document's shape undoes it, also one still waiting to be made: the undo waits
+    // for it, and takes what is latest then
     onUndo: () => {
-      const last = e.undo[e.undo.length - 1];
-      if (!last || e.typed) return false;
-      e.undo.pop();
-      e.story = last.story;
-      queue = queue.then(() => reopen(last.parts, last.caret)).catch((err: unknown) => reply({ type: "error", message: err instanceof Error ? err.message : String(err) }));
+      if (pendingActions === 0 && (e.typed || !e.undo.length)) return false;
+      act(async () => {
+        const last = e.undo.pop();
+        if (!last) return;
+        e.story = last.story;
+        await reopen(last.parts, last.caret);
+      });
       return true;
     },
     onPlace: (place) => reply({ type: "place", ...place }),
     // Tab or Shift+Tab in a list item: made like the toolbar's level buttons
-    onList: (f) => {
-      queue = queue.then(() => changeList(f)).catch((err: unknown) => reply({ type: "error", message: err instanceof Error ? err.message : String(err) }));
-    },
+    onList: (f) => act(() => changeList(f)),
     // Dragging a column's border: made like the menus' changes, after what may already be waiting
-    onTable: (op, change) => {
-      queue = queue.then(() => changeTable(op, change)).catch((err: unknown) => reply({ type: "error", message: err instanceof Error ? err.message : String(err) }));
-    },
+    onTable: (op, change) => act(() => changeTable(op, change)),
   });
-  editor = opened;
-  // The host's lists follow the part open: its styles, the headers and footers, and which one is open
-  e.story = opened.story;
-  reply({ type: "styles", styles: opened.styles, fonts: opened.fonts });
-  reply({ type: "stories", stories: opened.stories, story: opened.story, canAdd: opened.canAdd, layout: opened.layout });
-  return opened;
+}
+
+/**
+ * Runs an editing action after what is already waiting. Should it fail, the host is told so (the editor stays), and a
+ * view it had closed is opened again on the document as it was before it
+ */
+function act(job: () => Promise<void>) {
+  pendingActions++;
+  queue = queue
+    .then(job)
+    .catch(async (err: unknown) => {
+      console.warn("docx edit", err);
+      reply({ type: "op-error", message: err instanceof Error ? err.message : String(err) });
+      if (editing && !editor) {
+        try {
+          await openEditor(editing.base, null, root.scrollTop);
+        } catch (again) {
+          reply({ type: "error", message: again instanceof Error ? again.message : String(again) });
+        }
+      }
+    })
+    .finally(() => {
+      pendingActions--;
+    });
 }
 
 /** The view opened again on a changed document, and the host told */
@@ -218,7 +284,7 @@ async function edit({ buffer, parts: given, texts, caret, scroll }: EditMessage)
   editor = null;
   root.replaceChildren();
   const pkg = await OoxmlPackage.open(buffer);
-  editing = { pkg, texts, base: parts, undo: [], typed: false, story: null };
+  editing = { pkg, texts, base: parts, undo: [], typed: false, story: null, opening: null };
   try {
     await openEditor(parts, caret, scroll);
     dispose = () => {
@@ -273,17 +339,17 @@ function format(msg: FormatMessage) {
   }
   if (msg.list === "bullet" || msg.list === "number" || msg.list === "none") {
     const list = msg.list;
-    queue = queue.then(() => changeList({ list })).catch((err: unknown) => reply({ type: "error", message: err instanceof Error ? err.message : String(err) }));
+    act(() => changeList({ list }));
     return;
   }
   if (msg.field === "PAGE" || msg.field === "NUMPAGES") {
     const kind = msg.field;
-    queue = queue.then(() => addField(kind)).catch((err: unknown) => reply({ type: "error", message: err instanceof Error ? err.message : String(err) }));
+    act(() => addField(kind));
     return;
   }
   if (msg.level === 1 || msg.level === -1) {
     const level = msg.level;
-    queue = queue.then(() => changeList({ level })).catch((err: unknown) => reply({ type: "error", message: err instanceof Error ? err.message : String(err) }));
+    act(() => changeList({ level }));
     return;
   }
   let f: RangeFormat | null = null;
@@ -296,19 +362,17 @@ function format(msg: FormatMessage) {
   else if (typeof msg.spaceAfter === "boolean") f = { spaceAfter: msg.spaceAfter };
   if (!f) return;
   const range = f;
-  queue = queue
-    .then(async () => {
-      if (!editor || !editing) return;
-      const before = edited();
-      const changed = editor.formatRange(range);
-      if (!changed) {
-        reply({ type: "format-refused" });
-        return;
-      }
-      editing.undo.push({ parts: before.parts, caret: before.caret, story: editing.story });
-      await reopen({ ...before.parts, [editor.path]: changed.xml }, changed.caret);
-    })
-    .catch((err: unknown) => reply({ type: "error", message: err instanceof Error ? err.message : String(err) }));
+  act(async () => {
+    if (!editor || !editing) return;
+    const before = edited();
+    const changed = editor.formatRange(range);
+    if (!changed) {
+      reply({ type: "format-refused" });
+      return;
+    }
+    editing.undo.push({ parts: before.parts, caret: before.caret, story: editing.story });
+    await reopen({ ...before.parts, [editor.path]: changed.xml }, changed.caret);
+  });
 }
 
 /** A list change (bulleted, numbered, a level in or out): the parts it changes, and the view opened again on them */
@@ -378,6 +442,11 @@ async function changeStory(msg: StoryMessage) {
 }
 
 function collect({ id }: CollectMessage) {
+  if (editing && !editor && editing.opening) {
+    // The view is being opened again (after a change of the document's shape): the parts it opens on are the edits
+    reply({ type: "collected", id, parts: editing.opening, caret: null, scroll: 0 });
+    return;
+  }
   try {
     reply({ type: "collected", id, ...forHost() });
   } catch (err) {
@@ -494,9 +563,13 @@ window.addEventListener("message", (e: MessageEvent) => {
   }
   let job: () => Promise<void>;
   if (msg?.type === "edit" && msg.kind === "docx" && msg.buffer instanceof ArrayBuffer && msg.texts && typeof msg.texts === "object") job = () => edit(msg);
-  else if (msg?.type === "table" && TABLE_OPS.has(msg.op)) job = () => tableOp(msg);
-  else if (msg?.type === "story") job = () => changeStory(msg);
-  else if (msg?.type === "render" && (msg.kind === "docx" || msg.kind === "pptx") && msg.buffer instanceof ArrayBuffer) job = () => render(msg);
+  else if (msg?.type === "table" && TABLE_OPS.has(msg.op)) {
+    act(() => tableOp(msg));
+    return;
+  } else if (msg?.type === "story") {
+    act(() => changeStory(msg));
+    return;
+  } else if (msg?.type === "render" && (msg.kind === "docx" || msg.kind === "pptx") && msg.buffer instanceof ArrayBuffer) job = () => render(msg);
   else if (msg?.type === "load" && msg.kind === "xlsx" && msg.buffer instanceof ArrayBuffer) job = () => loadXlsx(msg);
   else if (msg?.type === "render" && msg.kind === "xlsx-drawings" && typeof msg.sheet === "string" && msg.cols instanceof Float64Array && msg.rows instanceof Float64Array) {
     const gen = ++generation;

@@ -631,3 +631,37 @@ test("a different first page and different odd and even pages get headers of the
   const preview = page.frameLocator('iframe[title="layout.docx"]');
   await expect(preview.locator(".tf-docx-page .tf-docx-hdr")).toHaveText(["Cover", "Even", "Every page"]);
 });
+
+test("typing, Ctrl+Z and saving right after a change that opens the view again lose nothing", async ({ page }) => {
+  await signIn(page);
+  const dir = await makeFolder(page, "Word right after");
+  const id = await uploadFile(page, dir, "after.docx", Buffer.from(await buildDocx(["One", "Two"])));
+  const { frame, text } = await openEditor(page, id, "after.docx");
+  const bullets = page.getByRole("button", { name: "Bulleted list" });
+
+  // Typed straight after a change, while the view opens again: kept, at the caret
+  await frame.getByText("One").click();
+  await text.press("End");
+  await bullets.click();
+  await text.pressSequentially(" more");
+  await expect(frame.getByText("One more")).toBeVisible();
+  await expect(frame.locator(".tf-docx-marker")).toHaveCount(1);
+
+  // Ctrl+Z pressed while a change is still being made undoes that change
+  await frame.getByText("Two").click();
+  await bullets.click();
+  await text.press("ControlOrMeta+z");
+  await expect(frame.locator(".tf-docx-marker")).toHaveCount(1);
+  await expect(frame.getByText("One more")).toBeVisible();
+
+  // Saving straight after a change: the file gets it
+  await frame.getByText("Two").click();
+  await page.getByLabel("Font size").selectOption("14");
+  const save = saving(page, id);
+  await page.getByRole("button", { name: "Save" }).click();
+  expect((await save).ok()).toBe(true);
+  const { xml } = await savedXml(page, id);
+  expect(xml).toContain("One more");
+  expect(xml).toMatch(/<w:sz w:val="28"\/><w:szCs w:val="28"\/><\/w:rPr><w:t[^>]*>Two</);
+  expect([...xml.matchAll(/<w:numPr>/g)]).toHaveLength(1);
+});
