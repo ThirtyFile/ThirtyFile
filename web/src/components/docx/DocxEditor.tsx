@@ -5,12 +5,20 @@
  */
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import {
+  AlignCenterIcon,
+  AlignJustifyIcon,
+  AlignLeftIcon,
+  AlignRightIcon,
+  BaselineIcon,
   BetweenHorizontalEndIcon,
   BetweenHorizontalStartIcon,
   BetweenVerticalEndIcon,
   BetweenVerticalStartIcon,
+  BoldIcon,
   ChevronDownIcon,
   Columns3Icon,
+  HighlighterIcon,
+  ItalicIcon,
   Grid3x3Icon,
   Loader2Icon,
   PaintBucketIcon,
@@ -19,10 +27,13 @@ import {
   SaveIcon,
   SquareDashedIcon,
   SquareIcon,
+  StrikethroughIcon,
   TableCellsMergeIcon,
   TableCellsSplitIcon,
+  UnderlineIcon,
   XIcon,
 } from "lucide-react";
+import { NativeSelect } from "@/components/ui/native-select";
 import { toast } from "sonner";
 import { ApiError, type FileSource, type Node } from "@/api";
 import { Button } from "@/components/ui/button";
@@ -38,10 +49,33 @@ import { t } from "@/lib/i18n";
 import { shortcut } from "@/lib/keys";
 import { cancellable } from "@/lib/cancellable";
 import { officeErrorMessage } from "@/lib/officeErrors";
-import type { Caret } from "@/ooxml/docx/editor";
+import type { Caret, CaretFormat, ParagraphStyle } from "@/ooxml/docx/editor";
+import { HIGHLIGHTS } from "@/ooxml/docx/formatOps";
 import { MAX_SPLIT, type BorderKind, type TableOp } from "@/ooxml/docx/tableOps";
 import { TOO_LARGE } from "@/ooxml/core/package";
 import { dropSession, isDirty, keepSession, openSession, releaseIfClean, reusableSession, saveSession, type DocxSession } from "./session";
+
+/** Word's usual font sizes (points) */
+const SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72];
+
+/** Word's highlight colors, as Word lists them */
+const HIGHLIGHT_COLORS = Object.keys(HIGHLIGHTS).map((hex) => `#${hex}`);
+
+/** A paragraph style's name: Word's own styles in the person's language, the document's own as it names them */
+function styleLabel(name: string): string {
+  const n = name.toLowerCase();
+  const heading = /^heading (\d)$/.exec(n);
+  if (heading) return t("Heading {n}", { n: heading[1] });
+  const known: Record<string, string> = {
+    normal: t("Normal"),
+    title: t("Title"),
+    subtitle: t("Subtitle"),
+    quote: t("Quote"),
+    "list paragraph": t("List paragraph"),
+    "no spacing": t("No spacing"),
+  };
+  return known[n] ?? name;
+}
 
 /** The frame's errors are the renderer's, in English: said in words here */
 const openError = (message: string | undefined) =>
@@ -142,6 +176,9 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
   /** How many cells are selected together (dragging across them, or Shift+click): two or more can be merged */
   const [picked, setPicked] = useState(0);
   const [splitting, setSplitting] = useState(false);
+  /** The formatting where the caret is, and the document's paragraph styles */
+  const [fmt, setFmt] = useState<CaretFormat | null>(null);
+  const [styles, setStyles] = useState<ParagraphStyle[]>([]);
   const waiting = useRef(new Map<number, { resolve(c: Collected): void; reject(e: Error): void }>());
   const nextId = useRef(0);
 
@@ -201,6 +238,12 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
     frame.current?.focus();
   };
   const border = (kind: BorderKind) => table("border", { border: kind });
+  /** Formatting of the selection, in the frame; the caret stays there */
+  const format = (change: { cmd?: string; value?: string; size?: number; style?: string; isDefault?: boolean; align?: string }) => {
+    frame.current?.contentWindow?.postMessage({ type: "format", ...change }, "*");
+    frame.current?.focus();
+  };
+  const formatOff = !fmt || loading || !!error;
   const tableOff = !inCell || loading || !!error;
 
   const exit = () => {
@@ -228,11 +271,18 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
         void save();
         break;
       case "place": {
-        const place = msg as { cell?: unknown; cells?: unknown };
+        const place = msg as { cell?: unknown; cells?: unknown; fmt?: CaretFormat | null };
         setInCell(!!place.cell);
         setPicked(Number(place.cells) || 0);
+        setFmt(place.fmt ?? null);
         break;
       }
+      case "styles":
+        setStyles(((msg as { styles?: ParagraphStyle[] }).styles ?? []).filter((x) => typeof x?.id === "string" && typeof x?.name === "string"));
+        break;
+      case "format-refused":
+        toast.error(t("Select some text first."));
+        break;
       case "table-refused":
         toast.error(t("This table can't be changed that way here."));
         break;
@@ -325,141 +375,9 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
   return (
     <div className="flex size-full flex-col bg-background text-foreground">
       <div className="flex min-h-11 shrink-0 flex-wrap items-center gap-2 border-b px-2 py-1">
-        <p className="min-w-0 flex-1 text-xs text-muted-foreground">{t("Only the text can be changed here, in tables too. Pictures and other parts are kept as they are.")}</p>
+        <p className="min-w-0 flex-1 text-xs text-muted-foreground">{t("Text, its formatting and tables can be changed here. Pictures and other parts are kept as they are.")}</p>
         {dirty && <span className="shrink-0 text-xs text-amber-600 dark:text-amber-400">{t("Unsaved changes")}</span>}
         <div className="flex shrink-0 items-center gap-1">
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  title={tableOff ? t("Put the cursor in a table to change it") : t("Insert")}
-                  disabled={tableOff}
-                  className="gap-1"
-                  onMouseDown={(e) => e.preventDefault()}
-                />
-              }
-            >
-              <BetweenHorizontalStartIcon /> {t("Insert")}
-              <ChevronDownIcon className="size-3 opacity-60" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-auto">
-              <DropdownMenuItem onClick={() => table("rowAbove")}>
-                <BetweenHorizontalStartIcon /> {t("Insert row above")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => table("rowBelow")}>
-                <BetweenHorizontalEndIcon /> {t("Insert row below")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => table("colLeft")}>
-                <BetweenVerticalStartIcon /> {t("Insert column left")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => table("colRight")}>
-                <BetweenVerticalEndIcon /> {t("Insert column right")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  title={tableOff ? t("Put the cursor in a table to change it") : t("Delete")}
-                  disabled={tableOff}
-                  className="gap-1"
-                  onMouseDown={(e) => e.preventDefault()}
-                />
-              }
-            >
-              <Rows3Icon /> {t("Delete")}
-              <ChevronDownIcon className="size-3 opacity-60" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-auto">
-              <DropdownMenuItem variant="destructive" onClick={() => table("deleteRow")}>
-                <Rows3Icon /> {t("Delete row")}
-              </DropdownMenuItem>
-              <DropdownMenuItem variant="destructive" onClick={() => table("deleteCol")}>
-                <Columns3Icon /> {t("Delete column")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  title={tableOff ? t("Put the cursor in a table to change it") : t("Cells")}
-                  disabled={tableOff}
-                  className="gap-1"
-                  onMouseDown={(e) => e.preventDefault()}
-                />
-              }
-            >
-              <TableCellsMergeIcon /> {t("Cells")}
-              <ChevronDownIcon className="size-3 opacity-60" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-auto">
-              <DropdownMenuItem disabled={picked < 2} onClick={() => table("merge")}>
-                <TableCellsMergeIcon /> {t("Merge cells")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSplitting(true)}>
-                <TableCellsSplitIcon /> {t("Split cell…")}
-              </DropdownMenuItem>
-              {picked < 2 && <p className="max-w-64 px-2 py-1.5 text-xs text-muted-foreground">{t("To merge cells, drag across them or Shift+click another cell first.")}</p>}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          {/* Borders and shading: of the cells selected together, or of the cell under the cursor */}
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  title={tableOff ? t("Put the cursor in a table to change it") : t("Borders")}
-                  aria-label={t("Borders")}
-                  disabled={tableOff}
-                  className="gap-0.5 px-1.5"
-                  onMouseDown={(e) => e.preventDefault()}
-                />
-              }
-            >
-              <Grid3x3Icon />
-              <ChevronDownIcon className="size-3 opacity-60" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-auto">
-              <DropdownMenuItem onClick={() => border("all")}>
-                <Grid3x3Icon /> {t("All borders")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => border("outside")}>
-                <SquareIcon /> {t("Outside borders")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => border("inside")}>
-                <Grid3x3Icon className="opacity-70" /> {t("Inside borders")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => border("thickOutside")}>
-                <SquareIcon className="stroke-[3]" /> {t("Thick outside borders")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => border("bottom")}>
-                <PanelBottomIcon /> {t("Bottom border")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => border("top")}>
-                <PanelBottomIcon className="rotate-180" /> {t("Top border")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => border("left")}>
-                <PanelBottomIcon className="rotate-90" /> {t("Left border")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => border("right")}>
-                <PanelBottomIcon className="-rotate-90" /> {t("Right border")}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => border("none")}>
-                <SquareDashedIcon /> {t("No border")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <ColorMenu label={t("Shading")} icon={<PaintBucketIcon className="size-4" />} noneLabel={t("No color")} disabled={tableOff} onPick={(c) => table("shade", { color: c ?? null })} />
           <Button size="sm" disabled={!dirty || saving || loading || !!error} onClick={() => void save()}>
             {saving ? <Loader2Icon className="animate-spin" /> : <SaveIcon />}
             {t("Save")}
@@ -469,6 +387,219 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
             <XIcon /> {t("Done editing")}
           </Button>
         </div>
+      </div>
+      {/* Formatting of the selected text, then the table under the cursor */}
+      <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-0.5 border-b px-2 py-1">
+        <NativeSelect
+          aria-label={t("Paragraph style")}
+          title={t("Paragraph style")}
+          size="xs"
+          className="w-36 shrink-0 rounded px-1"
+          disabled={formatOff || !styles.length}
+          value={fmt?.style ?? styles.find((x) => x.isDefault)?.id ?? ""}
+          onChange={(e) => {
+            const style = styles.find((x) => x.id === e.target.value);
+            if (style) format({ style: style.id, isDefault: style.isDefault });
+          }}
+        >
+          {fmt?.style && !styles.some((x) => x.id === fmt.style) && <option value={fmt.style}>{fmt.style}</option>}
+          {styles.map((x) => (
+            <option key={x.id} value={x.id}>
+              {styleLabel(x.name)}
+            </option>
+          ))}
+        </NativeSelect>
+        <NativeSelect
+          aria-label={t("Font size")}
+          title={t("Font size")}
+          size="xs"
+          className="w-16 shrink-0 rounded px-1"
+          disabled={formatOff}
+          value={fmt?.size ?? 11}
+          onChange={(e) => format({ size: Number(e.target.value) })}
+        >
+          {[...new Set([...SIZES, fmt?.size ?? 11])]
+            .sort((a, b) => a - b)
+            .map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+        </NativeSelect>
+        <span className="mx-1 h-5 shrink-0 border-l" />
+        <FormatButton label={t("Bold")} keys="Ctrl+B" active={fmt?.b} disabled={formatOff} onClick={() => format({ cmd: "bold" })}>
+          <BoldIcon />
+        </FormatButton>
+        <FormatButton label={t("Italic")} keys="Ctrl+I" active={fmt?.i} disabled={formatOff} onClick={() => format({ cmd: "italic" })}>
+          <ItalicIcon />
+        </FormatButton>
+        <FormatButton label={t("Underline")} keys="Ctrl+U" active={fmt?.u} disabled={formatOff} onClick={() => format({ cmd: "underline" })}>
+          <UnderlineIcon />
+        </FormatButton>
+        <FormatButton label={t("Strikethrough")} active={fmt?.s} disabled={formatOff} onClick={() => format({ cmd: "strikeThrough" })}>
+          <StrikethroughIcon />
+        </FormatButton>
+        <ColorMenu
+          label={t("Font color")}
+          icon={<BaselineIcon className="size-4" />}
+          noneLabel={t("Automatic")}
+          disabled={formatOff}
+          onPick={(c) => format({ cmd: "foreColor", value: c ?? "#000000" })}
+        />
+        <ColorMenu
+          label={t("Highlight")}
+          icon={<HighlighterIcon className="size-4" />}
+          noneLabel={t("No highlight")}
+          colors={HIGHLIGHT_COLORS}
+          disabled={formatOff}
+          onPick={(c) => format({ cmd: "hiliteColor", value: c ?? "transparent" })}
+        />
+        <span className="mx-1 h-5 shrink-0 border-l" />
+        <FormatButton label={t("Align left")} active={fmt?.align === "left"} disabled={formatOff} onClick={() => format({ align: "left" })}>
+          <AlignLeftIcon />
+        </FormatButton>
+        <FormatButton label={t("Center")} active={fmt?.align === "center"} disabled={formatOff} onClick={() => format({ align: "center" })}>
+          <AlignCenterIcon />
+        </FormatButton>
+        <FormatButton label={t("Align right")} active={fmt?.align === "right"} disabled={formatOff} onClick={() => format({ align: "right" })}>
+          <AlignRightIcon />
+        </FormatButton>
+        <FormatButton label={t("Justify")} active={fmt?.align === "both"} disabled={formatOff} onClick={() => format({ align: "both" })}>
+          <AlignJustifyIcon />
+        </FormatButton>
+        <span className="mx-1 h-5 shrink-0 border-l" />
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="sm"
+                title={tableOff ? t("Put the cursor in a table to change it") : t("Insert")}
+                disabled={tableOff}
+                className="gap-1"
+                onMouseDown={(e) => e.preventDefault()}
+              />
+            }
+          >
+            <BetweenHorizontalStartIcon /> {t("Insert")}
+            <ChevronDownIcon className="size-3 opacity-60" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent className="w-auto">
+            <DropdownMenuItem onClick={() => table("rowAbove")}>
+              <BetweenHorizontalStartIcon /> {t("Insert row above")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => table("rowBelow")}>
+              <BetweenHorizontalEndIcon /> {t("Insert row below")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => table("colLeft")}>
+              <BetweenVerticalStartIcon /> {t("Insert column left")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => table("colRight")}>
+              <BetweenVerticalEndIcon /> {t("Insert column right")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="sm"
+                title={tableOff ? t("Put the cursor in a table to change it") : t("Delete")}
+                disabled={tableOff}
+                className="gap-1"
+                onMouseDown={(e) => e.preventDefault()}
+              />
+            }
+          >
+            <Rows3Icon /> {t("Delete")}
+            <ChevronDownIcon className="size-3 opacity-60" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent className="w-auto">
+            <DropdownMenuItem variant="destructive" onClick={() => table("deleteRow")}>
+              <Rows3Icon /> {t("Delete row")}
+            </DropdownMenuItem>
+            <DropdownMenuItem variant="destructive" onClick={() => table("deleteCol")}>
+              <Columns3Icon /> {t("Delete column")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="sm"
+                title={tableOff ? t("Put the cursor in a table to change it") : t("Cells")}
+                disabled={tableOff}
+                className="gap-1"
+                onMouseDown={(e) => e.preventDefault()}
+              />
+            }
+          >
+            <TableCellsMergeIcon /> {t("Cells")}
+            <ChevronDownIcon className="size-3 opacity-60" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent className="w-auto">
+            <DropdownMenuItem disabled={picked < 2} onClick={() => table("merge")}>
+              <TableCellsMergeIcon /> {t("Merge cells")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setSplitting(true)}>
+              <TableCellsSplitIcon /> {t("Split cell…")}
+            </DropdownMenuItem>
+            {picked < 2 && <p className="max-w-64 px-2 py-1.5 text-xs text-muted-foreground">{t("To merge cells, drag across them or Shift+click another cell first.")}</p>}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {/* Borders and shading: of the cells selected together, or of the cell under the cursor */}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="sm"
+                title={tableOff ? t("Put the cursor in a table to change it") : t("Borders")}
+                aria-label={t("Borders")}
+                disabled={tableOff}
+                className="gap-0.5 px-1.5"
+                onMouseDown={(e) => e.preventDefault()}
+              />
+            }
+          >
+            <Grid3x3Icon />
+            <ChevronDownIcon className="size-3 opacity-60" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent className="w-auto">
+            <DropdownMenuItem onClick={() => border("all")}>
+              <Grid3x3Icon /> {t("All borders")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => border("outside")}>
+              <SquareIcon /> {t("Outside borders")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => border("inside")}>
+              <Grid3x3Icon className="opacity-70" /> {t("Inside borders")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => border("thickOutside")}>
+              <SquareIcon className="stroke-[3]" /> {t("Thick outside borders")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => border("bottom")}>
+              <PanelBottomIcon /> {t("Bottom border")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => border("top")}>
+              <PanelBottomIcon className="rotate-180" /> {t("Top border")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => border("left")}>
+              <PanelBottomIcon className="rotate-90" /> {t("Left border")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => border("right")}>
+              <PanelBottomIcon className="-rotate-90" /> {t("Right border")}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => border("none")}>
+              <SquareDashedIcon /> {t("No border")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <ColorMenu label={t("Shading")} icon={<PaintBucketIcon className="size-4" />} noneLabel={t("No color")} disabled={tableOff} onPick={(c) => table("shade", { color: c ?? null })} />
       </div>
       <div className="relative min-h-0 flex-1 bg-neutral-200 dark:bg-neutral-800">
         {error ? (
@@ -560,5 +691,25 @@ function SplitDialog({ onClose, onSplit }: { onClose(): void; onSplit(split: { c
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** A formatting button: pressed while the text at the caret has it; clicking it keeps the caret where it is */
+function FormatButton(props: { label: string; keys?: string; active?: boolean; disabled?: boolean; onClick(): void; children: React.ReactNode }) {
+  const label = props.keys ? t("{action} ({keys})", { action: props.label, keys: shortcut(props.keys) }) : props.label;
+  return (
+    <Button
+      variant={props.active ? "secondary" : "ghost"}
+      size="icon-sm"
+      title={label}
+      aria-label={props.label}
+      aria-pressed={!!props.active}
+      disabled={props.disabled}
+      className="size-7 shrink-0"
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={props.onClick}
+    >
+      {props.children}
+    </Button>
   );
 }

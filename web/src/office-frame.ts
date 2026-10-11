@@ -14,7 +14,8 @@ import { renderPptx } from "@/ooxml/pptx";
 import { OoxmlPackage, h } from "@/ooxml/core/package";
 import { parseTheme, type Theme } from "@/ooxml/core/theme";
 import { anchorBox, readDrawings, renderItem } from "@/ooxml/xlsx/drawings";
-import { openDocxEditor, type Caret, type DocxEditor, type EditorTexts, type TableChange } from "@/ooxml/docx/editor";
+import { openDocxEditor, type Caret, type DocxEditor, type EditorTexts, type FormatCommand, type TableChange } from "@/ooxml/docx/editor";
+import type { RangeFormat } from "@/ooxml/docx/formatOps";
 import type { TableOp } from "@/ooxml/docx/tableOps";
 
 type RenderMessage = { type: "render"; kind: "docx" | "pptx"; buffer: ArrayBuffer };
@@ -33,7 +34,12 @@ type CollectMessage = { type: "collect"; id: number };
  * deleted, the cells selected together merged, or the caret's cell split into `cols` columns and `rows` rows
  */
 type TableMessage = { type: "table"; op: TableOp; cols?: number; rows?: number; border?: string; color?: string | null };
-type Message = RenderMessage | LoadXlsxMessage | DrawingsMessage | ScrollMessage | EditMessage | CollectMessage | TableMessage;
+/**
+ * Word editing: formatting of the selection. `cmd` is one of the view's own commands (bold… with `value` a color);
+ * `size`, `style` or `align` change the document and open the view again (answered "format-refused" when they can't)
+ */
+type FormatMessage = { type: "format"; cmd?: string; value?: string; size?: number; style?: string; isDefault?: boolean; align?: string };
+type Message = RenderMessage | LoadXlsxMessage | DrawingsMessage | ScrollMessage | EditMessage | CollectMessage | TableMessage | FormatMessage;
 
 const root = document.getElementById("root")!;
 /**
@@ -72,6 +78,9 @@ async function render({ kind, buffer }: RenderMessage) {
 const CHANGED_DELAY = 600;
 const TABLE_OPS = new Set<string>(["rowAbove", "rowBelow", "colLeft", "colRight", "deleteRow", "deleteCol", "merge", "split", "border", "shade"]);
 const BORDER_KINDS = new Set<string>(["all", "outside", "inside", "thickOutside", "top", "bottom", "left", "right", "none"]);
+const FORMAT_COMMANDS = new Set<string>(["bold", "italic", "underline", "strikeThrough", "foreColor", "hiliteColor"]);
+const ALIGNMENTS = new Set<string>(["left", "center", "right", "both"]);
+const COLOR = /^(#[0-9a-f]{6}|transparent)$/i;
 
 /**
  * The document being edited. `base` is the document.xml the view was last opened on (null: the archive's): a change of
@@ -102,12 +111,12 @@ window.addEventListener("blur", () => {
   if (changedTimer) sendChanged();
 });
 
-async function openEditor(xml: string | null, caret: Caret | null | undefined, scroll: number | undefined) {
+async function openEditor(xml: string | null, caret: Caret | null | undefined, scroll: number | undefined): Promise<DocxEditor> {
   const e = editing!;
   editor?.dispose();
   editor = null;
   e.base = xml;
-  editor = await openDocxEditor(e.pkg, root, {
+  const opened = await openDocxEditor(e.pkg, root, {
     xml,
     texts: e.texts,
     caret,
@@ -132,6 +141,8 @@ async function openEditor(xml: string | null, caret: Caret | null | undefined, s
       queue = queue.then(() => changeTable(op, change)).catch((err: unknown) => reply({ type: "error", message: err instanceof Error ? err.message : String(err) }));
     },
   });
+  editor = opened;
+  return opened;
 }
 
 /** The view opened again on a changed document, and the host told */
@@ -151,7 +162,8 @@ async function edit({ buffer, xml, texts, caret, scroll }: EditMessage) {
   const pkg = await OoxmlPackage.open(buffer);
   editing = { pkg, texts, base: xml ?? null, undo: [], typed: false };
   try {
-    await openEditor(xml ?? null, caret, scroll);
+    const opened = await openEditor(xml ?? null, caret, scroll);
+    reply({ type: "styles", styles: opened.styles });
     dispose = () => {
       editor?.dispose();
       pkg.dispose();
@@ -190,6 +202,37 @@ async function changeTable(op: TableOp, change: TableChange) {
   }
   editing.undo.push({ xml: before.xml, caret: before.caret });
   await reopen(changed.xml, changed.cell !== null ? { block: -1, offset: 0, cell: changed.cell, pick: changed.pick } : before.caret);
+}
+
+/** Formatting from the host's toolbar: the view's own commands right away; size, style and alignment by opening the view again */
+function format(msg: FormatMessage) {
+  if (!editor || !editing) return;
+  if (msg.cmd !== undefined) {
+    if (!FORMAT_COMMANDS.has(msg.cmd)) return;
+    const value = msg.value !== undefined && COLOR.test(msg.value) ? msg.value : undefined;
+    if ((msg.cmd === "foreColor" || msg.cmd === "hiliteColor") && !value) return;
+    editor.format(msg.cmd as FormatCommand, value);
+    return;
+  }
+  let f: RangeFormat | null = null;
+  if (typeof msg.size === "number" && msg.size >= 1 && msg.size <= 1638) f = { size: msg.size };
+  else if (typeof msg.style === "string" && editor.styles.some((s) => s.id === msg.style)) f = { style: msg.style, isDefault: !!msg.isDefault };
+  else if (typeof msg.align === "string" && ALIGNMENTS.has(msg.align)) f = { align: msg.align as "left" | "center" | "right" | "both" };
+  if (!f) return;
+  const range = f;
+  queue = queue
+    .then(async () => {
+      if (!editor || !editing) return;
+      const before = edited();
+      const changed = editor.formatRange(range);
+      if (!changed) {
+        reply({ type: "format-refused" });
+        return;
+      }
+      editing.undo.push({ xml: before.xml, caret: before.caret });
+      await reopen(changed.xml, changed.caret);
+    })
+    .catch((err: unknown) => reply({ type: "error", message: err instanceof Error ? err.message : String(err) }));
 }
 
 function collect({ id }: CollectMessage) {
@@ -296,6 +339,10 @@ window.addEventListener("message", (e: MessageEvent) => {
       scrollAt = { x: msg.x, y: msg.y };
       applyScroll();
     }
+    return;
+  }
+  if (msg?.type === "format") {
+    format(msg);
     return;
   }
   if (msg?.type === "collect" && typeof msg.id === "number") {
