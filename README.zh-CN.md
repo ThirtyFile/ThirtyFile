@@ -79,11 +79,11 @@ pnpm install
 pnpm dev
 ```
 
-提交前的检查与 GitHub 上运行的相同：界面、服务器，以及在真实浏览器中登录、上传和预览文件的端到端测试（第一次运行前，请先用 `cd web && pnpm exec playwright install chromium` 获取浏览器）：
+提交前的检查：界面、服务器，以及在真实浏览器中登录、上传和预览文件的端到端测试（第一次运行前，请先用 `cd web && pnpm exec playwright install chromium` 获取浏览器）。GitHub 上的 pull request 只运行较快的 `quick`，发版前会全部运行：
 
 ```bash
 scripts/check.sh            # 全部
-scripts/check.sh web        # 或其中一部分：web、server、e2e 或 site
+scripts/check.sh web        # 或其中一部分：web、server、e2e、site 或 quick
 ```
 
 | 文件夹 | 内容 |

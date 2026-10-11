@@ -33,8 +33,28 @@ allow = [
 confidence-threshold = 0.9
 
 [bans]
-multiple-versions = "allow"
+# A crate built in two versions makes the binary larger and slower to build. These come from the dependencies'
+# own dependencies, waiting for them to move to the newer version; anything else new is reported (as a warning)
+multiple-versions = "warn"
 wildcards = "deny"
+skip = [
+  { crate = "base64@0.22.1", reason = "sqlx-core" },
+  { crate = "block-buffer@0.10.4", reason = "the 0.10 RustCrypto crates sqlx and crc-fast use" },
+  { crate = "cpufeatures@0.2.17", reason = "the 0.10 RustCrypto crates sqlx and crc-fast use" },
+  { crate = "crypto-common@0.1.6", reason = "the 0.10 RustCrypto crates sqlx and crc-fast use" },
+  { crate = "digest@0.10.7", reason = "the 0.10 RustCrypto crates sqlx and crc-fast use" },
+  { crate = "generic-array@0.14.9", reason = "the 0.10 RustCrypto crates sqlx and crc-fast use" },
+  { crate = "sha2@0.10.9", reason = "sqlx-core and sqlx-macros-core" },
+  { crate = "sha3@0.11.0", reason = "ml-kem (through russh)" },
+  { crate = "hashbrown@0.14.5", reason = "dashmap" },
+  { crate = "hashbrown@0.16.1", reason = "hashlink and sqlx-core" },
+  { crate = "miniz_oxide@0.8.9", reason = "png" },
+  { crate = "quick-xml@0.41.0", reason = "object_store" },
+  { crate = "spin@0.9.9", reason = "flume (through sqlx)" },
+  { crate = "syn@2.0.119", reason = "most derive macros, next to syn 3" },
+  { crate = "tower-http@0.6.11", reason = "reqwest" },
+  { crate = "untrusted@0.7.1", reason = "aws-lc-rs" },
+]
 
 [sources]
 unknown-registry = "deny"

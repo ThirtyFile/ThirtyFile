@@ -9,6 +9,13 @@ import { renderPptx } from "@/ooxml/pptx";
 import { renderChart } from "@/ooxml/chart";
 import { OoxmlPackage } from "@/ooxml/core/package";
 
+// jsdom has no canvas: getContext answers null, as a browser without one would (text is then measured without it),
+// rather than printing "Not implemented"
+beforeAll(() => {
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+});
+afterAll(() => vi.restoreAllMocks());
+
 const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 const A = "http://schemas.openxmlformats.org/drawingml/2006/main";
 const P = "http://schemas.openxmlformats.org/presentationml/2006/main";

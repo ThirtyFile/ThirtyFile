@@ -18,13 +18,10 @@ import {
   FolderUpIcon,
   InfoIcon,
   PanelTopIcon,
-  PencilIcon,
   RefreshCwIcon,
-  ScissorsIcon,
   Share2Icon,
   StarIcon,
   StarOffIcon,
-  Trash2Icon,
   UploadIcon,
   UsersRoundIcon,
   CloudOffIcon,
@@ -258,62 +255,4 @@ export function explorerMenus(p: ExplorerProps, s: ExplorerState, a: ExplorerAct
     properties,
   });
   return { newItems, menuItems };
-}
-
-/**
- * The entries as plain lists, for a style that doesn't arrange them its own way: on items, open, share, favourite and
- * tags, then the clipboard, rename, move, copy and delete, then properties; on empty space, New and Upload, paste, refresh
- * and properties
- */
-export function plainMenu(m: MenuEntries): ReactNode {
-  const { s, a } = m;
-  const { caps, single, canCreate } = s;
-  const k = s.kit.keys;
-  if (!s.count)
-    return (
-      <>
-        {canCreate && m.newItems}
-        {canCreate && <DropdownMenuSeparator />}
-        {m.pasteItem}
-        {m.refreshItem("refresh")}
-        {m.properties}
-      </>
-    );
-  return (
-    <>
-      {m.openItem}
-      {m.openInNewTab}
-      {m.openLocation}
-      {m.downloadItem}
-      {m.compressItem}
-      {m.extractItem}
-      {m.shareWith}
-      {m.shareLink}
-      {m.favorite}
-      {m.tags}
-      <DropdownMenuSeparator />
-      {caps.write && (
-        <DropdownMenuItem onClick={a.cut}>
-          <ScissorsIcon /> {t("Cut")} <Kbd>{k.cut[0]}</Kbd>
-        </DropdownMenuItem>
-      )}
-      <DropdownMenuItem onClick={a.copy}>
-        <CopyIcon /> {t("Copy")} <Kbd>{k.copy[0]}</Kbd>
-      </DropdownMenuItem>
-      {caps.write && single && (
-        <DropdownMenuItem onClick={m.rename}>
-          <PencilIcon /> {t("Rename")} <Kbd>{k.rename[0]}</Kbd>
-        </DropdownMenuItem>
-      )}
-      {m.moveTo}
-      {m.copyTo}
-      {caps.del && (
-        <DropdownMenuItem variant="destructive" onClick={m.remove}>
-          <Trash2Icon /> {t("Delete")} <Kbd>{k.trash[0]}</Kbd>
-        </DropdownMenuItem>
-      )}
-      <DropdownMenuSeparator />
-      {m.itemProperties}
-    </>
-  );
 }

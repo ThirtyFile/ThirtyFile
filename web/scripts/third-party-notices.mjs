@@ -8,6 +8,7 @@
 // anyway (BUNDLED). A licence that isn't allowed stops it with a message.
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // The licences server/deny.toml allows for crates, and the font licence of the typeface
 const ALLOWED = new Set([
@@ -27,8 +28,10 @@ const ALLOWED = new Set([
   "Unlicense",
   "Zlib",
 ]);
-// Development packages built into the interface: Tailwind's base styles, and shadcn's Tailwind variants (style.css)
-const BUNDLED = new Set(["shadcn", "tailwindcss"]);
+// Development packages built into the interface: Tailwind's base styles (style.css)
+const BUNDLED = new Set(["tailwindcss"]);
+// Files copied from other projects into src/vendor/, each folder with its licence file
+const VENDORED = [{ name: "shadcn", versions: ["4.21.1"], license: "MIT", homepage: "https://ui.shadcn.com", paths: [fileURLToPath(new URL("../src/vendor/shadcn", import.meta.url))] }];
 // Packages whose metadata names no licence, with the one their own documentation gives
 const DECLARED = { "combine-errors": "MIT" };
 
@@ -38,7 +41,7 @@ if (!prodFile) {
   process.exit(2);
 }
 const read = (file) => Object.values(JSON.parse(readFileSync(file, "utf8"))).flat();
-const packages = [...read(prodFile), ...(devFile ? read(devFile).filter((p) => BUNDLED.has(p.name)) : [])]
+const packages = [...read(prodFile), ...(devFile ? read(devFile).filter((p) => BUNDLED.has(p.name)) : []), ...VENDORED]
   .map((p) => (p.license === "Unknown" && DECLARED[p.name] ? { ...p, license: DECLARED[p.name] } : p))
   .sort((a, b) => a.name.localeCompare(b.name));
 
