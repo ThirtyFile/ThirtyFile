@@ -628,6 +628,88 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[tokio::test]
+    async fn an_empty_space_folder_swapped_for_a_link_isnt_indexed() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Inbox").await;
+        let (dir, drive) = (&space.dir, &space.drive);
+        // Empty, and swapped for a link to a folder with secrets in it (the data folder, say)
+        let outside = dir.with_extension("outside");
+        write_old(&outside.join("secret.key"), b"KEY");
+        std::fs::rename(dir, dir.with_extension("was")).unwrap();
+        std::os::unix::fs::symlink(&outside, dir).unwrap();
+        let r = crate::folders::scan(&env.st, drive).await.unwrap();
+        assert!(r.error.is_some(), "{r:?}");
+        assert!(env.node_at(drive, "secret.key").await.is_none());
+        assert!(!outside.join(crate::folders::MARKER).exists(), "nothing is written there");
+
+        // A read-only space, whose folder has no marker: its folder is known by its identity, and another isn't indexed
+        std::fs::remove_file(dir).unwrap();
+        std::fs::rename(dir.with_extension("was"), dir).unwrap();
+        std::fs::remove_file(dir.join(crate::folders::MARKER)).unwrap();
+        sqlx::query("UPDATE drives SET read_only = 1 WHERE id = ?").bind(drive).execute(&env.st.db).await.unwrap();
+        write_old(&dir.join("shared.txt"), b"shared");
+        let r = crate::folders::scan(&env.st, drive).await.unwrap();
+        assert!(r.error.is_none(), "{r:?}");
+        assert!(env.node_at(drive, "shared.txt").await.is_some());
+        std::fs::rename(dir, dir.with_extension("was")).unwrap();
+        std::os::unix::fs::symlink(&outside, dir).unwrap();
+        let r = crate::folders::scan(&env.st, drive).await.unwrap();
+        assert!(r.error.is_some(), "{r:?}");
+        assert!(env.node_at(drive, "secret.key").await.is_none());
+        assert!(crate::folders::open_space(dir, drive, true).is_err(), "reads don't go there either");
+        std::fs::remove_file(dir).unwrap();
+        std::fs::rename(dir.with_extension("was"), dir).unwrap();
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn new_content_never_gets_the_setuid_or_setgid_bit_of_the_file_it_replaces() {
+        use std::os::unix::fs::PermissionsExt;
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        let admin = env.admin().await;
+        write_old(&space.dir.join("tool"), b"#!/bin/sh");
+        std::fs::set_permissions(space.dir.join("tool"), std::fs::Permissions::from_mode(0o6755)).unwrap();
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        let (tool, _) = env.node_at(&space.drive, "tool").await.unwrap();
+        crate::files::save_content(State(env.st.clone()), admin.clone(), UrlPath(tool), HeaderMap::new(), axum::body::Bytes::from_static(b"uploaded"))
+            .await
+            .unwrap();
+        let mode = std::fs::metadata(space.dir.join("tool")).unwrap().permissions().mode();
+        assert_eq!(mode & 0o7777, 0o755, "{mode:o}");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn the_journal_reads_only_entries_and_only_a_little_of_each() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        write_old(&space.dir.join("a.txt"), b"a");
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        let (a, _) = env.node_at(&space.drive, "a.txt").await.unwrap();
+        let journal = space.dir.join(JOURNAL_DIR);
+        std::fs::create_dir_all(&journal).unwrap();
+        // A forged entry that would rename an item into the versions folder; a large file; a pipe that would block a read
+        // (the versions folder is there, and a.txt is still at its place: an entry for a change that never was would
+        // record the item at the versions folder's path)
+        std::fs::create_dir_all(space.dir.join(crate::versions::VERSIONS_DIR)).unwrap();
+        let forged = serde_json::json!({ "kind": "move", "node": a, "from": "a.txt", "to": crate::versions::VERSIONS_DIR });
+        std::fs::write(journal.join(crate::util::new_id()), forged.to_string()).unwrap();
+        let big = std::fs::File::create(journal.join(crate::util::new_id())).unwrap();
+        big.set_len(1 << 40).unwrap();
+        let pipe = std::ffi::CString::new(journal.join(crate::util::new_id()).as_os_str().as_encoded_bytes()).unwrap();
+        // SAFETY: a valid path
+        assert_eq!(unsafe { libc::mkfifo(pipe.as_ptr(), 0o600) }, 0);
+        let scan = tokio::time::timeout(Duration::from_secs(20), crate::folders::scan(&env.st, &space.drive)).await;
+        assert!(scan.is_ok_and(|r| r.is_ok()), "the scan finishes");
+        assert!(space.dir.join("a.txt").is_file(), "the forged entry moved nothing");
+        let (name, path): (String, Option<String>) = sqlx::query_as("SELECT name, fs_path FROM nodes WHERE id = ?").bind(&a).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!((name.as_str(), path.as_deref()), ("a.txt", Some("a.txt")));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
     async fn a_space_folder_swapped_for_a_link_leads_nowhere() {
         let env = testutil::env().await;
         let space = env.folder_space("Shared").await;

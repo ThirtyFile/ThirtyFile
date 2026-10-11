@@ -1010,6 +1010,8 @@ export default {
   "{path} holds another space's .thirtyfile-space file: if a different disk is mounted there, mount the right one and check again.": "{path} 中有另一个空间的 .thirtyfile-space 文件：如果那里挂载的是另一块磁盘，请挂载正确的磁盘后再检查一次。",
   "{path} is empty, but the space still has items: if it is on a disk or network share that isn't mounted, mount it and check again. To empty the space, delete its items in ThirtyFile.": "{path} 是空的，但空间中仍有项目：如果它位于尚未挂载的磁盘或网络共享文件夹上，请挂载后再检查一次。如要清空空间，请在 ThirtyFile 中删除其中的项目。",
   "{path} doesn't hold this space's .thirtyfile-space file, nor the items the space has: if another folder or disk is there now, put the right one back and check again.": "{path} 中既没有这个空间的 .thirtyfile-space 文件，也没有空间中的项目：如果那里现在是另一个文件夹或磁盘，请换回正确的后再检查一次。",
+  "{path} isn't the space's folder any more, and doesn't hold its .thirtyfile-space file: if another folder or disk is there now, put the right one back and check again.": "{path} 已不是这个空间的文件夹，里面也没有它的 .thirtyfile-space 文件：如果那里现在是另一个文件夹或磁盘，请换回正确的再检查一次。",
+  "{path} doesn't hold this space's .thirtyfile-space file: if another folder is there now, put the right one back; to use this folder, choose it again for the space.": "{path} 中没有这个空间的 .thirtyfile-space 文件：如果那里现在是另一个文件夹，请换回正确的；若要使用这个文件夹，请为空间重新选择它。",
   "Folder spaces are checked for changes every {n} minutes": "每 {n} 分钟检查一次文件夹空间的更改",
   // Earlier versions of files (versions.rs, admin.rs)
   "This version no longer exists": "这个版本已不存在",

@@ -1010,6 +1010,8 @@ export default {
   "{path} holds another space's .thirtyfile-space file: if a different disk is mounted there, mount the right one and check again.": "{path} には別のスペースの .thirtyfile-space ファイルがあります。そこに別のディスクがマウントされている場合は、正しいディスクをマウントしてからもう一度確認してください。",
   "{path} is empty, but the space still has items: if it is on a disk or network share that isn't mounted, mount it and check again. To empty the space, delete its items in ThirtyFile.": "{path} は空ですが、スペースにはまだ項目があります。マウントされていないディスクまたはネットワーク共有上にある場合は、マウントしてからもう一度確認してください。スペースを空にするには、ThirtyFile で項目を削除してください。",
   "{path} doesn't hold this space's .thirtyfile-space file, nor the items the space has: if another folder or disk is there now, put the right one back and check again.": "{path} には、このスペースの .thirtyfile-space ファイルもスペースの項目もありません。現在そこに別のフォルダーまたはディスクがある場合は、正しいものに戻してからもう一度確認してください。",
+  "{path} isn't the space's folder any more, and doesn't hold its .thirtyfile-space file: if another folder or disk is there now, put the right one back and check again.": "{path} はもうこのスペースのフォルダーではなく、その .thirtyfile-space ファイルもありません。別のフォルダーやディスクがある場合は、正しいものに戻してからもう一度確認してください。",
+  "{path} doesn't hold this space's .thirtyfile-space file: if another folder is there now, put the right one back; to use this folder, choose it again for the space.": "{path} にこのスペースの .thirtyfile-space ファイルがありません。別のフォルダーがある場合は正しいものに戻してください。このフォルダーを使うには、スペースのフォルダーとして選び直してください。",
   "Folder spaces are checked for changes every {n} minutes": "フォルダースペースの変更を {n} 分ごとに確認",
   // Earlier versions of files (versions.rs, admin.rs)
   "This version no longer exists": "このバージョンはもう存在しません",

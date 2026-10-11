@@ -32,6 +32,29 @@ pub enum Intent {
     Move { node: String, from: String, to: String },
 }
 
+/// What an entry of the journal holds at most (an entry is a few hundred bytes)
+const MAX_ENTRY: u64 = 64 * 1024;
+
+impl Intent {
+    /// Whether the paths an entry names are ones a change writes: inside the space, the trash and versions folders
+    /// only where they belong. An entry someone else put there can't have an item renamed into them.
+    fn plausible(&self) -> bool {
+        let inside = |path: &str, folder: Option<&str>| {
+            let parts: Vec<&str> = path.split('/').collect();
+            let fine = !path.is_empty() && parts.iter().all(|p| !p.is_empty() && *p != "." && *p != "..");
+            match folder {
+                Some(f) => fine && parts[0] == f && parts.len() > 1,
+                None => fine && !parts[0].starts_with(".thirtyfile-") && crate::util::validate_name(parts[parts.len() - 1]).is_ok(),
+            }
+        };
+        match self {
+            Intent::Version { from, to, .. } => inside(from, None) && inside(to, Some(crate::versions::VERSIONS_DIR)),
+            Intent::Trash { from, to, .. } => inside(from, None) && inside(to, Some(super::TRASH_DIR)),
+            Intent::Move { from, to, .. } => (inside(from, None) || inside(from, Some(super::TRASH_DIR))) && inside(to, None),
+        }
+    }
+}
+
 /// An entry in a space's journal
 #[derive(Debug)]
 pub struct Entry {
@@ -120,9 +143,17 @@ pub async fn recover(st: &AppState, drive: &str, root: &Pinned) -> AppResult<()>
         read.flatten()
             .filter_map(|e| e.file_name().into_string().ok())
             .filter_map(|name| {
+                // Only the journal's own names: anything else put there isn't an entry, and stays
+                if !crate::util::is_new_id(&name) {
+                    return None;
+                }
                 let file = dir.join(&name).ok()?;
-                // Written in full before its rename: one cut short was never acted on
-                let intent = std::fs::read(file.as_path()).ok().and_then(|b| serde_json::from_slice(&b).ok());
+                // Written in full before its rename: one cut short was never acted on. Read through the folder (never
+                // through a link, never something that isn't a file) and only as much as an entry takes: a large or
+                // endless file put there can't fill the memory, nor a pipe hold the scan
+                let mut body = Vec::new();
+                let read = file.open_file().and_then(|f| std::io::Read::read_to_end(&mut std::io::Read::take(f, MAX_ENTRY), &mut body));
+                let intent = read.ok().and_then(|_| serde_json::from_slice::<Intent>(&body).ok()).filter(Intent::plausible);
                 Some((Entry { file, rel: format!("{JOURNAL_DIR}/{name}") }, intent))
             })
             .collect()

@@ -110,6 +110,16 @@ pub(super) fn remove_copied(copied: CopiedTree) {
     }
 }
 
+/// Removes everything in the folder `root`, through the folder as it was opened (never through a link on the way)
+pub fn remove_contents(root: &Pinned) -> io::Result<()> {
+    for entry in std::fs::read_dir(root.as_path())? {
+        let name = entry?.file_name();
+        let Some(name) = name.to_str() else { continue };
+        remove_all(&root.join(name)?)?;
+    }
+    Ok(())
+}
+
 pub(super) fn remove_all(p: &Pinned) -> io::Result<()> {
     // Neither follows a symbolic link: a link is removed itself
     if std::fs::symlink_metadata(p.as_path())?.is_dir() { std::fs::remove_dir_all(p.as_path()) } else { std::fs::remove_file(p.as_path()) }

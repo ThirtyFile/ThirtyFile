@@ -224,16 +224,22 @@ impl AsRef<Path> for Pinned {
     }
 }
 
-/// Gives the file `to` the permissions `from` has, through the open file (never following a link)
+/// Gives the file `to` the permissions `from` has, through the open file (never following a link): who may read, write
+/// and run it. Never the setuid, setgid or sticky bits: new content written by the server with those of a file someone
+/// left there would run with the server's rights.
 pub fn copy_permissions(from: &Pinned, to: &Pinned) -> io::Result<()> {
     let meta = std::fs::symlink_metadata(from.as_path())?;
     if !meta.is_file() {
         return Ok(());
     }
     #[cfg(target_os = "linux")]
-    return to.open_file()?.set_permissions(meta.permissions());
+    let set = {
+        use std::os::unix::fs::PermissionsExt;
+        to.open_file()?.set_permissions(std::fs::Permissions::from_mode(meta.permissions().mode() & 0o777))
+    };
     #[cfg(not(target_os = "linux"))]
-    std::fs::set_permissions(to.as_path(), meta.permissions())
+    let set = std::fs::set_permissions(to.as_path(), meta.permissions());
+    set
 }
 
 /// Writes a new file (never one already there, nor through a link)

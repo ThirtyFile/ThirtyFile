@@ -687,8 +687,11 @@ pub async fn remove_copies(st: &AppState, job: &Job) -> AppResult<()> {
         } else {
             let drive = job.drive_id.clone();
             tokio::task::spawn_blocking(move || {
-                let ours = Pinned::root(&folder).ok().and_then(|r| crate::folders::space_marker(&r).ok().flatten()).is_some_and(|id| id == drive);
-                if ours && let Err(e) = std::fs::remove_dir_all(&folder) {
+                // Deleted through the folder whose marker was checked: a folder above it swapped for a link meanwhile
+                // doesn't lead the deletion elsewhere
+                let Ok(root) = Pinned::root(&folder) else { return };
+                let ours = crate::folders::space_marker(&root).ok().flatten().is_some_and(|id| id == drive);
+                if ours && let Err(e) = crate::fsops::remove_contents(&root).and_then(|()| std::fs::remove_dir(&folder)) {
                     tracing::warn!("Couldn't remove {path} after a cancelled move: {e}");
                 }
             })
