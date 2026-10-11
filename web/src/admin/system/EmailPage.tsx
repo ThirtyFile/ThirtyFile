@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Pending } from "@/components/ErrorState";
+import { useConfirmIdentity } from "@/components/ConfirmIdentity";
 import { ErrorText, errorProps } from "@/components/dialogs";
 import { Section, SettingsFrame, Toggle } from "@/admin/SettingsFrame";
 import { t } from "@/lib/i18n";
@@ -34,10 +35,13 @@ export function EmailPage() {
     if (q.data && !form) setForm(formOf(q.data));
   }, [q.data, form]);
   const set = (change: Partial<Form>) => setForm((f) => f && { ...f, ...change });
+  // The email server receives password resets: whoever saves it confirms who they are
+  const identity = useConfirmIdentity("smtp-me");
 
   const save = useMutation({
-    mutationFn: (f: Form) => api.updateEmailSettings(f),
+    mutationFn: (f: Form) => api.updateEmailSettings({ ...f, my_password: identity.values.password, my_code: identity.values.code }),
     onSuccess: (data) => {
+      identity.clear();
       qc.setQueryData(keys.emailSettings(), data);
       qc.invalidateQueries({ queryKey: keys.notificationSettings() });
       setForm(formOf(data));
@@ -50,7 +54,7 @@ export function EmailPage() {
   });
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (form && !save.isPending) save.mutate(form);
+    if (form && !save.isPending && identity.ready) save.mutate(form);
   };
 
   return (
@@ -141,9 +145,13 @@ export function EmailPage() {
                 <Input id="smtp-from" type="email" value={form.from} placeholder="drive@example.com" autoComplete="off" onChange={(e) => set({ from: e.target.value })} />
                 <p className="text-xs text-muted-foreground">{t("Emails come from this address, with the site name as the sender's name. The server must allow sending from it.")}</p>
               </div>
+              <div className="grid gap-2 rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">{t("Password reset emails go through this server, so confirm it's you to save.")}</p>
+                {identity.fields(t("For your security, this can only be done within 10 minutes of signing in."))}
+              </div>
               <ErrorText>{save.error?.message}</ErrorText>
               <div className="flex justify-end">
-                <Button type="submit" disabled={save.isPending}>
+                <Button type="submit" disabled={save.isPending || !identity.ready}>
                   {save.isPending && <Loader2Icon className="animate-spin" />}
                   {t("Save")}
                 </Button>

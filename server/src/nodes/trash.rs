@@ -153,7 +153,7 @@ pub(super) async fn trash_root(conn: &mut SqliteConnection, user: &User, id: &st
 
 pub async fn restore(State(st): State<AppState>, user: User, Json(req): Json<BatchReq>) -> AppResult<Json<Value>> {
     let ids = req.ids()?;
-    let locks = fsops::lock(&st, &user, &ids.iter().map(String::as_str).collect::<Vec<_>>()).await?;
+    let locks = fsops::lock_seen(&st, &user, &ids.iter().map(String::as_str).collect::<Vec<_>>()).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     for id in &ids {

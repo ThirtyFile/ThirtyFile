@@ -626,6 +626,28 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir.with_extension("was-sub"));
     }
 
+    #[tokio::test]
+    async fn someone_who_cant_see_an_item_doesnt_wait_for_its_spaces_lock() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        write_old(&space.dir.join("a.txt"), b"a");
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        let (a, _) = env.node_at(&space.drive, "a.txt").await.unwrap();
+        let outsider = env.user("outsider", true).await;
+        // While a change in the space holds its lock, someone without access is told at once there is no such item
+        let held = lock_space(&env.st, &space.drive).await;
+        let st = || State(env.st.clone());
+        let soon = Duration::from_secs(5);
+        let res = tokio::time::timeout(soon, crate::nodes::rename(st(), outsider.clone(), UrlPath(a.clone()), req(json!({ "name": "b.txt" })))).await;
+        assert!(matches!(res, Ok(Err(e)) if e.status == axum::http::StatusCode::NOT_FOUND));
+        let res = tokio::time::timeout(soon, crate::nodes::trash(st(), outsider.clone(), req(json!({ "ids": [a] })))).await;
+        assert!(matches!(res, Ok(Err(_))));
+        let res = tokio::time::timeout(soon, crate::nodes::create_folder(st(), outsider, req(json!({ "parent_id": space.root, "name": "New" })))).await;
+        assert!(matches!(res, Ok(Err(_))));
+        drop(held);
+        assert!(space.dir.join("a.txt").is_file());
+    }
+
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn an_empty_space_folder_swapped_for_a_link_isnt_indexed() {

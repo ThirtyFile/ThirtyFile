@@ -22,6 +22,11 @@ pub fn wrong_password() -> String {
     format!("wrong-{}", new_id())
 }
 
+/// An administrator's change confirmed with the test accounts' password
+pub fn confirmed() -> crate::tokens::Confirmation {
+    crate::tokens::Confirmation { my_password: Some(password().into()), my_code: None }
+}
+
 pub struct TestEnv {
     pub st: AppState,
     pub dir: PathBuf,

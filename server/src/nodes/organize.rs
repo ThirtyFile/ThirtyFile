@@ -34,7 +34,7 @@ pub struct CreateFolderReq {
 
 pub async fn create_folder(State(st): State<AppState>, user: User, Json(req): Json<CreateFolderReq>) -> AppResult<Json<Node>> {
     let name = validate_name(&req.name)?;
-    let locks = fsops::lock(&st, &user, &[&req.parent_id]).await?;
+    let locks = fsops::lock_seen(&st, &user, &[&req.parent_id]).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     let parent = tree::folder_for(&mut tx, &user, &req.parent_id, Need::Write).await?;
@@ -60,7 +60,7 @@ pub struct RenameReq {
 
 pub async fn rename(State(st): State<AppState>, user: User, Path(id): Path<String>, Json(req): Json<RenameReq>) -> AppResult<Json<Node>> {
     let name = validate_name(&req.name)?;
-    let locks = fsops::lock(&st, &user, &[&id]).await?;
+    let locks = fsops::lock_seen(&st, &user, &[&id]).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     let node = tree::node_for(&mut tx, &user, &id, Need::Write).await?;
@@ -214,7 +214,7 @@ async fn put_back_replaced(st: &AppState, user: &User, dest: &str, id: &str) -> 
 pub async fn move_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult<Option<fsops::Across>> {
     let (st, user) = (st.clone(), user.clone());
     let ids = req.ids()?;
-    let locks = fsops::lock(&st, &user, &locked_ids(req.dest()?, &ids)).await?;
+    let locks = fsops::lock_seen(&st, &user, &locked_ids(req.dest()?, &ids)).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     let dest = tree::folder_for(&mut tx, &user, req.dest()?, Need::Write).await?;
@@ -324,7 +324,7 @@ pub(super) fn locked_ids<'a>(dest: &'a str, ids: &'a [String]) -> Vec<&'a str> {
 pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult<Option<fsops::Across>> {
     let (st, user) = (st.clone(), user.clone());
     let ids = req.ids()?;
-    let locks = fsops::lock(&st, &user, &locked_ids(req.dest()?, &ids)).await?;
+    let locks = fsops::lock_seen(&st, &user, &locked_ids(req.dest()?, &ids)).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     let dest = tree::folder_for(&mut tx, &user, req.dest()?, Need::Write).await?;
@@ -435,7 +435,7 @@ pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
 
 pub async fn trash(State(st): State<AppState>, user: User, Json(req): Json<BatchReq>) -> AppResult<Json<Value>> {
     let ids = req.ids()?;
-    let locks = fsops::lock(&st, &user, &ids.iter().map(String::as_str).collect::<Vec<_>>()).await?;
+    let locks = fsops::lock_seen(&st, &user, &ids.iter().map(String::as_str).collect::<Vec<_>>()).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     for id in &outermost(&mut tx, &ids).await? {

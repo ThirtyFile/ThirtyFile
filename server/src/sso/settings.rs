@@ -37,7 +37,18 @@ pub async fn get_settings(State(st): State<AppState>, _: Admin, headers: HeaderM
     Json(admin_view(&st, &headers))
 }
 
-pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, headers: HeaderMap, Json(mut req): Json<SsoSettings>) -> AppResult<Json<Value>> {
+/// Saving the settings: the administrator confirms who they are, since a provider set up here signs people in
+#[derive(Deserialize)]
+pub struct SaveReq {
+    #[serde(flatten)]
+    pub settings: SsoSettings,
+    #[serde(flatten)]
+    pub me: crate::tokens::Confirmation,
+}
+
+pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, headers: HeaderMap, Json(save): Json<SaveReq>) -> AppResult<Json<Value>> {
+    let SaveReq { settings: mut req, me } = save;
+    me.check(&st, &user).await?;
     let old = st.part::<Memory>().settings.read().clone();
     for p in PROVIDERS {
         check_provider(&st, p, req.provider_mut(p).unwrap(), old.provider(p).unwrap()).await?;
