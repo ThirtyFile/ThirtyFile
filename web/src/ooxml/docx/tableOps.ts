@@ -24,6 +24,7 @@
  */
 
 import { attr, kid } from "../core/package";
+import { placeIn, WordXml } from "./xmlEdit";
 
 export type TableOp = "rowAbove" | "rowBelow" | "colLeft" | "colRight" | "deleteRow" | "deleteCol" | "merge" | "split" | "border" | "shade" | "resize";
 
@@ -88,30 +89,7 @@ interface Row {
   after: number;
 }
 
-class Tables {
-  readonly ns: string;
-  readonly prefix: string | null;
-  constructor(
-    readonly doc: Document,
-    sample: Element,
-  ) {
-    this.ns = sample.namespaceURI ?? "";
-    this.prefix = sample.prefix;
-  }
-
-  el(name: string, val?: string | number) {
-    const e = this.doc.createElementNS(this.ns, this.prefix ? `${this.prefix}:${name}` : name);
-    if (val !== undefined) this.set(e, "val", String(val));
-    return e;
-  }
-
-  /** Sets a w: attribute (an existing one by its local name, for a parser that keeps prefixes in names) */
-  set(e: Element, name: string, value: string) {
-    const existing = Array.from(e.attributes).find((a) => a.localName === name || a.name.endsWith(`:${name}`));
-    if (existing) existing.value = value;
-    else e.setAttributeNS(this.ns, this.prefix ? `${this.prefix}:${name}` : name, value);
-  }
-
+class Tables extends WordXml {
   /** A cell's settings, made (its first child) when missing */
   tcPr(tc: Element) {
     const found = kid(tc, "tcPr");
@@ -138,15 +116,6 @@ class Tables {
     }
     return kid(trPr, name) ?? trPr.appendChild(this.el(name));
   }
-}
-
-/** Puts `child` into `parent` where `order` says: before the first child that comes after it */
-function placeIn(parent: Element, child: Element, order: string[]): Element {
-  const i = order.indexOf(child.localName);
-  const later = Array.from(parent.children).find((c) => order.indexOf(c.localName) > i);
-  if (later) parent.insertBefore(child, later);
-  else parent.append(child);
-  return child;
 }
 
 const num = (el: Element | null, name = "val") => {
@@ -683,7 +652,7 @@ function setSide(t: Tables, tc: Element, side: Side, size: number | null) {
   const borders = t.cellProp(tc, "tcBorders");
   const names = SIDE_NAMES[side];
   const el = names.map((n) => kid(borders, n)).find(Boolean) ?? placeIn(borders, t.el(names[0]), BORDERS);
-  for (const a of Array.from(el.attributes)) el.removeAttributeNode(a);
+  t.clear(el);
   if (size === null) t.set(el, "val", "nil");
   else {
     t.set(el, "val", "single");
@@ -748,7 +717,7 @@ function setShading(t: Tables, rows: Row[], range: Range, color: string | null):
       if (cell.start < range.c1 || cell.start > range.c2) continue;
       first ??= cell.tc;
       const shd = t.cellProp(cell.tc, "shd");
-      for (const a of Array.from(shd.attributes)) shd.removeAttributeNode(a);
+      t.clear(shd);
       t.set(shd, "val", "clear");
       t.set(shd, "color", "auto");
       t.set(shd, "fill", hex);

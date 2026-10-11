@@ -16,7 +16,8 @@ export const PALETTE = [
 ];
 
 /** A color chosen from Office's palette, or none: for fill and font colors (workbooks) and shading (documents) */
-export function ColorMenu(props: { label: string; icon: ReactNode; value?: string; noneLabel: string; disabled?: boolean; onPick(c: string | undefined): void }) {
+/** `colors`: the colors offered, when not the whole palette (Word's highlight colors, say) */
+export function ColorMenu(props: { label: string; icon: ReactNode; value?: string; noneLabel: string; disabled?: boolean; colors?: string[]; onPick(c: string | undefined): void }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -42,7 +43,7 @@ export function ColorMenu(props: { label: string; icon: ReactNode; value?: strin
         <DropdownMenuItem onClick={() => props.onPick(undefined)}>{props.noneLabel}</DropdownMenuItem>
         <DropdownMenuSeparator />
         <div className="grid grid-cols-10 gap-1 p-1">
-          {PALETTE.flat().map((c) => (
+          {(props.colors ?? PALETTE.flat()).map((c) => (
             <DropdownMenuItem key={c} title={c} aria-label={c} className="size-5 rounded-sm border border-black/15 p-0" style={{ background: c }} onClick={() => props.onPick(c)} />
           ))}
         </div>

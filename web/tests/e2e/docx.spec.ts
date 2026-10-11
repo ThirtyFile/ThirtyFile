@@ -323,3 +323,57 @@ test("borders, shading and column widths are changed, and cells selected togethe
   expect(widths[0]).toBeGreaterThan(3600);
   expect(xml).toContain(`<w:tcW w:w="${widths[0]}" w:type="dxa"/>`);
 });
+
+test("text is formatted from the toolbar and with shortcuts, and the file gets just those changes", async ({ page }) => {
+  await signIn(page);
+  const dir = await makeFolder(page, "Word format");
+  const body = HEADING + "<w:p><w:r><w:t>Hello world</w:t></w:r></w:p><w:p><w:r><w:t>Second</w:t></w:r></w:p>";
+  const id = await uploadFile(page, dir, "format.docx", Buffer.from(await buildDocument(body)));
+  const { frame, text } = await openEditor(page, id, "format.docx");
+  const bold = page.getByRole("button", { name: "Bold" });
+
+  // Bold from the toolbar, which then shows it pressed; italic with Ctrl+I
+  await frame.getByText("Hello world").dblclick({ position: { x: 60, y: 8 } });
+  await bold.click();
+  await expect(bold).toHaveAttribute("aria-pressed", "true");
+  // A second command on the same words, from a menu that takes the focus away
+  await page.getByRole("button", { name: "Highlight" }).click();
+  await page.getByRole("menuitem", { name: "#00FF00" }).click();
+  await frame
+    .getByText("Hello", { exact: false })
+    .first()
+    .dblclick({ position: { x: 8, y: 8 } });
+  await text.press("ControlOrMeta+i");
+
+  // Color and highlight for "Second", then its size (the view opens again on the changed document)
+  await frame.getByText("Second").dblclick();
+  await page.getByRole("button", { name: "Font color" }).click();
+  await page.getByRole("menuitem", { name: "#FF0000" }).first().click();
+  await page.getByRole("button", { name: "Highlight" }).click();
+  await page.getByRole("menuitem", { name: "#FFFF00" }).click();
+  await page.getByLabel("Font size").selectOption("14");
+  await expect(page.getByLabel("Font size")).toHaveValue("14");
+
+  // The first paragraph centered, the last made a heading
+  await frame.getByText("world").click();
+  await page.getByRole("button", { name: "Center" }).click();
+  await expect(page.getByRole("button", { name: "Center" })).toHaveAttribute("aria-pressed", "true");
+  await frame.getByText("Second").click();
+  await page.getByLabel("Paragraph style").selectOption({ label: "Heading 1" });
+  await expect(page.getByLabel("Paragraph style")).toHaveValue("Heading1");
+
+  const save = saving(page, id);
+  await page.getByRole("button", { name: "Save" }).click();
+  expect((await save).ok()).toBe(true);
+  const { xml } = await savedXml(page, id);
+  expect(xml).toContain(HEADING);
+  const paragraphs = [...xml.matchAll(/<w:p>(.*?)<\/w:p>/g)].map((m) => m[1]);
+  const hello = paragraphs.find((p) => p.includes("Hello"))!;
+  expect(hello).toContain('<w:pPr><w:jc w:val="center"/></w:pPr>');
+  // A double-click selects the word and the space after it, as Windows does
+  expect(hello).toMatch(/<w:r><w:rPr><w:i\/><w:iCs\/><\/w:rPr><w:t xml:space="preserve">Hello <\/w:t><\/w:r>/);
+  expect(hello).toMatch(/<w:r><w:rPr><w:b\/><w:bCs\/><w:highlight w:val="green"\/><\/w:rPr><w:t>world<\/w:t><\/w:r>/);
+  const second = paragraphs.find((p) => p.includes("Second"))!;
+  expect(second).toContain('<w:pStyle w:val="Heading1"/>');
+  expect(second).toMatch(/<w:rPr><w:color w:val="FF0000"\/><w:sz w:val="28"\/><w:szCs w:val="28"\/><w:highlight w:val="yellow"\/><\/w:rPr><w:t>Second<\/w:t>/);
+});

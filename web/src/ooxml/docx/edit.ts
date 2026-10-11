@@ -19,6 +19,8 @@
  */
 
 import { attr, kid } from "../core/package";
+import { applyFmt, rPrOf, type Fmt } from "./formatOps";
+import { WordXml } from "./xmlEdit";
 
 const W14 = "http://schemas.microsoft.com/office/word/2010/wordml";
 const XML_NS = "http://www.w3.org/XML/1998/namespace";
@@ -29,6 +31,9 @@ const TEXT_KIDS = new Set(["rPr", "t", "tab", "br", "cr", "softHyphen", "noBreak
 const MARKERS = new Set(["bookmarkStart", "bookmarkEnd", "proofErr"]);
 /** Paragraph-mark formatting that is about tracked changes, not looks: not given to text typed into an empty paragraph */
 const TRACKING = new Set(["ins", "del", "moveFrom", "moveTo", "rPrChange"]);
+/** The characters the view shows for w:softHyphen and w:noBreakHyphen (as the preview does) */
+const SOFT_HYPHEN = String.fromCharCode(0xad);
+const NON_BREAKING_HYPHEN = String.fromCharCode(0x2011);
 /** Characters an XML file can't hold, and halves of characters without their other half (the u flag matches only those): never written */
 // oxlint-disable-next-line no-control-regex -- control characters are removed on purpose
 const UNWRITABLE = /[\u{0}-\u{8}\u{b}\u{c}\u{e}-\u{1f}\u{fffe}\u{ffff}\u{d800}-\u{dfff}]/gu;
@@ -37,7 +42,14 @@ const UNWRITABLE = /[\u{0}-\u{8}\u{b}\u{c}\u{e}-\u{1f}\u{fffe}\u{ffff}\u{d800}-\
 export interface Piece {
   run: number | null;
   text: string;
+  /** Character formatting the view gave this text, differing from what its run had */
+  fmt?: Fmt;
 }
+
+/** The formatting the view gives a text node of run `run`, differing from what the run had (editor.ts works it out from what is shown) */
+export type FmtOf = (text: Node, run: number | null) => Fmt | undefined;
+
+const fmtKey = (f: Fmt | undefined) => (f ? JSON.stringify(Object.entries(f).sort(([a], [b]) => a.localeCompare(b))) : "");
 
 /** What the edited view holds, in order: blocks kept as they are, and paragraphs with their text */
 export type EditedBlock = { kind: "keep"; block: number } | { kind: "para"; source: number | null; pieces: Piece[] };
@@ -129,10 +141,10 @@ export function runText(r: Element): string {
         s += "\n";
         break;
       case "softHyphen":
-        s += "­";
+        s += SOFT_HYPHEN;
         break;
       case "noBreakHyphen":
-        s += "‑";
+        s += NON_BREAKING_HYPHEN;
         break;
     }
   }
@@ -219,13 +231,13 @@ export function mergePieces(pieces: Piece[]): Piece[] {
   for (const p of pieces) {
     if (!p.text) continue;
     const last = out[out.length - 1];
-    if (last && last.run === p.run) last.text += p.text;
+    if (last && last.run === p.run && fmtKey(last.fmt) === fmtKey(p.fmt)) last.text += p.text;
     else out.push({ ...p });
   }
   return out;
 }
 
-export const samePieces = (a: Piece[], b: Piece[]) => a.length === b.length && a.every((p, i) => p.run === b[i].run && p.text === b[i].text);
+export const samePieces = (a: Piece[], b: Piece[]) => a.length === b.length && a.every((p, i) => p.run === b[i].run && p.text === b[i].text && fmtKey(p.fmt) === fmtKey(b[i].fmt));
 
 // ───────────── Reading the edited view back ─────────────
 
@@ -260,14 +272,14 @@ function finish(tokens: Token[]): Piece[] {
     if (t.run !== null) break;
     t.run = first;
   }
-  return mergePieces(kept.map(({ run, text }) => ({ run, text })));
+  return mergePieces(kept.map(({ run, text, fmt }) => (fmt ? { run, text, fmt } : { run, text })));
 }
 
 /**
  * One paragraph element of the view: its text by run. Nested paragraph elements and kept blocks inside it (a browser
  * may leave them there) split it into several paragraphs.
  */
-function readBlock(el: HTMLElement, source: number | null, out: EditedBlock[]) {
+function readBlock(el: HTMLElement, source: number | null, out: EditedBlock[], fmtOf?: FmtOf) {
   let tokens: Token[] = [];
   let lastRun: number | null = null;
   let produced = false;
@@ -284,7 +296,8 @@ function readBlock(el: HTMLElement, source: number | null, out: EditedBlock[]) {
       if (!text) return;
       const run = runOf(n.parentElement, el) ?? lastRun;
       lastRun = run;
-      tokens.push({ run, text });
+      const fmt = fmtOf?.(n, run);
+      tokens.push(fmt ? { run, text, fmt } : { run, text });
       return;
     }
     if (!isElement(n)) return;
@@ -298,7 +311,7 @@ function readBlock(el: HTMLElement, source: number | null, out: EditedBlock[]) {
     }
     if (isBlock(n)) {
       close(false);
-      readBlock(n, n.dataset.para !== undefined ? Number(n.dataset.para) : source, out);
+      readBlock(n, n.dataset.para !== undefined ? Number(n.dataset.para) : source, out, fmtOf);
       produced = true;
       return;
     }
@@ -319,9 +332,9 @@ function readBlock(el: HTMLElement, source: number | null, out: EditedBlock[]) {
 }
 
 /** The pieces of a single paragraph element (nested blocks aren't expected here) */
-export function readParagraph(el: HTMLElement): Piece[] {
+export function readParagraph(el: HTMLElement, fmtOf?: FmtOf): Piece[] {
   const out: EditedBlock[] = [];
-  readBlock(el, null, out);
+  readBlock(el, null, out, fmtOf);
   return out.flatMap((b) => (b.kind === "para" ? b.pieces : []));
 }
 
@@ -330,7 +343,7 @@ export function readParagraph(el: HTMLElement): Piece[] {
  * paragraph element came from; a browser copies it into both halves of a split one). Paragraphs that came from nowhere
  * (text typed straight into the view) take the paragraph before them, or after them, as their model.
  */
-export function readEdits(root: HTMLElement): EditedBlock[] {
+export function readEdits(root: HTMLElement, fmtOf?: FmtOf): EditedBlock[] {
   const out: EditedBlock[] = [];
   let loose: HTMLElement | null = null;
   const flush = () => {
@@ -344,7 +357,7 @@ export function readEdits(root: HTMLElement): EditedBlock[] {
     } else if (isBlock(n)) {
       flush();
       const el = n as HTMLElement;
-      readBlock(el, el.dataset.para !== undefined ? Number(el.dataset.para) : null, out);
+      readBlock(el, el.dataset.para !== undefined ? Number(el.dataset.para) : null, out, fmtOf);
     } else if (n.nodeType === 3 || isElement(n)) {
       // Inline content straight in the view: one paragraph for each run of it
       if (n.nodeType === 3 && !(n.nodeValue ?? "")) continue;
@@ -366,9 +379,9 @@ export function readEdits(root: HTMLElement): EditedBlock[] {
  * Every container of the view: the body (the view itself, container 0), and each table cell it shows as one of its own
  * (`data-cell` names the container). A cell's text is read only as its cell's, never as part of the body.
  */
-export function readAllEdits(root: HTMLElement): Map<number, EditedBlock[]> {
-  const out = new Map<number, EditedBlock[]>([[0, readEdits(root)]]);
-  for (const host of Array.from(root.querySelectorAll<HTMLElement>("[data-cell]"))) out.set(Number(host.dataset.cell), readEdits(host));
+export function readAllEdits(root: HTMLElement, fmtOf?: FmtOf): Map<number, EditedBlock[]> {
+  const out = new Map<number, EditedBlock[]>([[0, readEdits(root, fmtOf)]]);
+  for (const host of Array.from(root.querySelectorAll<HTMLElement>("[data-cell]"))) out.set(Number(host.dataset.cell), readEdits(host, fmtOf));
   return out;
 }
 
@@ -376,7 +389,10 @@ export function readAllEdits(root: HTMLElement): Map<number, EditedBlock[]> {
 
 class Writer {
   private readonly anchored = new Set<Element>();
-  constructor(private plan: EditPlan) {}
+  readonly x: WordXml;
+  constructor(private plan: EditPlan) {
+    this.x = new WordXml(plan.doc, plan.body);
+  }
 
   el(name: string) {
     const { doc, ns, prefix } = this.plan;
@@ -392,9 +408,13 @@ class Writer {
     return copy.children.length ? copy : null;
   }
 
-  run(r: Element | null, text: string, pPr: Element | null): Element {
-    // A run whose text is the same keeps everything it had
-    if (r && text === runText(r)) return r.cloneNode(true) as Element;
+  run(r: Element | null, text: string, pPr: Element | null, fmt?: Fmt): Element {
+    // A run whose text is the same keeps everything it had (and gets the formatting the view gave it)
+    if (r && text === runText(r)) {
+      const same = r.cloneNode(true) as Element;
+      if (fmt) applyFmt(this.x, rPrOf(this.x, same), fmt);
+      return same;
+    }
     const run = r ? (r.cloneNode(false) as Element) : this.el("r");
     const rPr = r ? kid(r, "rPr")?.cloneNode(true) : this.markRPr(pPr);
     if (rPr) run.append(rPr);
@@ -414,11 +434,12 @@ class Writer {
     for (const ch of text.replace(UNWRITABLE, "")) {
       if (ch === "\t") mark("tab");
       else if (ch === "\n") mark("br");
-      else if (ch === "­") mark("softHyphen");
-      else if (ch === "‑") mark("noBreakHyphen");
+      else if (ch === SOFT_HYPHEN) mark("softHyphen");
+      else if (ch === NON_BREAKING_HYPHEN) mark("noBreakHyphen");
       else buf += ch;
     }
     flush();
+    if (fmt) applyFmt(this.x, rPrOf(this.x, run), fmt);
     return run;
   }
 
@@ -452,7 +473,7 @@ class Writer {
         this.anchored.add(r);
         for (const m of plan.before.get(r) ?? []) host.append(m.cloneNode(true));
       }
-      host.append(this.run(r, piece.text, pPr));
+      host.append(this.run(r, piece.text, pPr, piece.fmt));
     }
     if (last && source !== null) for (const m of plan.after.get(source) ?? []) p.append(m.cloneNode(true));
     return p;

@@ -13,8 +13,12 @@
  * dragging across them or Shift+clicking another one; any key lets go of them. A column's right border is dragged to
  * make it wider or narrower (a guide line shows where it goes).
  *
- * The browser's editing is limited to what can be written back: plain text only (formatting commands, pasting rich
- * content and dragging are refused), and Backspace or Delete never joins a paragraph with a block that is kept as it is.
+ * The browser's editing is limited to what can be written back: plain text with bold, italic, underline, strikethrough,
+ * color and highlight (other formatting commands, pasting rich content and dragging are refused), and Backspace or
+ * Delete never joins a paragraph with a block that is kept as it is. That formatting is read back from what the view
+ * shows, against what each run showed when the view was opened (formatOps.ts writes the difference). Font size,
+ * paragraph style and alignment change the document between two marks put at the selection's ends, and the view is
+ * opened again on it, as for tables.
  */
 
 import { h, kid, type OoxmlPackage } from "../core/package";
@@ -22,7 +26,8 @@ import { breathe } from "../core/yield";
 import { BlockWriter, type BlockItem } from "./blocks";
 import type { Flow, PageFloat } from "./context";
 import { DOCX_CSS } from "./css";
-import { originalPieces, planEdits, readAllEdits, readParagraph, samePieces, saveEdits, writeXml, type EditPlan } from "./edit";
+import { originalPieces, planEdits, readAllEdits, readParagraph, samePieces, saveEdits, writeXml, type EditPlan, type FmtOf } from "./edit";
+import { formatRange, MARK_END, MARK_START, type Fmt, type RangeFormat } from "./formatOps";
 import { cellRange, changeTable, type BorderKind, type TableOp } from "./tableOps";
 import { loadDocx, normalStyle } from "./index";
 import { contentWidth, parseSection, type Section } from "./section";
@@ -72,10 +77,39 @@ export interface EditorOptions {
   /** Ctrl+Z: true when the host undid something itself (a change of a table's shape), so the browser doesn't */
   onUndo?(): boolean;
   /** The caret went into a table cell or out of one (`cell`), or cells were selected together for merging (`cells`) */
-  onPlace?(place: { cell: boolean; cells: number }): void;
+  onPlace?(place: Place): void;
   /** A change of a table made in the view itself (dragging a column's border), for the host to make as it makes the menus' */
   onTable?(op: TableOp, change: TableChange): void;
 }
+
+/** The formatting where the caret is, for the host's toolbar */
+export interface CaretFormat {
+  b: boolean;
+  i: boolean;
+  u: boolean;
+  s: boolean;
+  /** Font size (points), paragraph style id, alignment */
+  size: number;
+  style: string | null;
+  align: "left" | "center" | "right" | "both";
+}
+
+/** Where the caret is: in a table cell, how many cells are selected together, and the formatting there */
+export interface Place {
+  cell: boolean;
+  cells: number;
+  fmt: CaretFormat | null;
+}
+
+/** A paragraph style the document defines, for the host's style list */
+export interface ParagraphStyle {
+  id: string;
+  name: string;
+  isDefault: boolean;
+}
+
+/** The view's own formatting commands (the browser's, so Ctrl+Z undoes them step by step) */
+export type FormatCommand = "bold" | "italic" | "underline" | "strikeThrough" | "foreColor" | "hiliteColor";
 
 export interface DocxEditor {
   /** document.xml as edited (null when the view holds the text it was opened with), where the caret is, and the scroll position */
@@ -85,6 +119,15 @@ export interface DocxEditor {
    * once it is opened again; undefined when the caret isn't in a cell or that table can't be changed this way
    */
   tableOp(op: TableOp, change?: TableChange): { xml: string; cell: number | null; pick?: [number, number] } | undefined;
+  /** A formatting command on the selection, in the view */
+  format(cmd: FormatCommand, value?: string): void;
+  /**
+   * The document with the selection's font size, paragraph style or alignment changed, and where to put the caret once
+   * it is opened again; undefined when there is no selection to change
+   */
+  formatRange(f: RangeFormat): { xml: string; caret: Caret | null } | undefined;
+  /** The paragraph styles the document defines (shown in its own style list) */
+  styles: ParagraphStyle[];
   focus(): void;
   dispose(): void;
 }
@@ -107,6 +150,8 @@ const EDIT_CSS = `
 
 /** Input the editor can't write back: formatting, lists, links, rich drops */
 const REFUSED = new Set(["insertFromDrop", "deleteByDrag", "insertOrderedList", "insertUnorderedList", "insertHorizontalRule", "insertLink", "insertFromPasteAsQuotation"]);
+/** Formatting the view can write back (formatOps.ts); other formatting commands are refused */
+const FORMATS = new Set(["formatBold", "formatItalic", "formatUnderline", "formatStrikeThrough", "formatFontColor", "formatBackColor"]);
 
 /** Characters XML can't hold (a pasted control character would make the file unreadable) */
 // oxlint-disable-next-line no-control-regex -- control characters are removed on purpose
@@ -224,6 +269,32 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
   fixScaled(doc.scaled);
   resolveTabs(doc.tabs);
 
+  // ── Character formatting: what each run shows now, to tell what the view changes later ──
+  const shownFmt = new Map<number, Shown>();
+  for (const span of Array.from(editable.querySelectorAll<HTMLElement>("[data-r]"))) {
+    const run = Number(span.dataset.r);
+    if (shownFmt.has(run) || span.tagName === "BR") continue;
+    const text = span.firstChild;
+    const f = text ? shownAt(text) : null;
+    if (f) shownFmt.set(run, f);
+  }
+  // A text node's formatting differing from what its run showed (text typed without a run: from its paragraph's)
+  const fmtOf: FmtOf = (text, run) => {
+    const now = shownAt(text);
+    const block = text.parentElement?.closest<HTMLElement>("[data-para], p, div, td, li");
+    const before = run !== null ? shownFmt.get(run) : block ? shownOfBlock(block) : null;
+    if (!now || !before) return undefined;
+    const out: Fmt = {};
+    if (now.b !== before.b) out.b = now.b;
+    if (now.i !== before.i) out.i = now.i;
+    if (now.u !== before.u) out.u = now.u;
+    if (now.s !== before.s) out.s = now.s;
+    if (now.color !== before.color) out.color = now.color;
+    if (now.hl !== before.hl) out.hl = now.hl;
+    return Object.keys(out).length ? out : undefined;
+  };
+  const styles = await paragraphStyles(pkg, docRels, docXml);
+
   // A view narrower than the page shows the page smaller
   const fit = () => {
     const avail = root.clientWidth - 16;
@@ -235,7 +306,7 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
 
   // ── Editing limited to what can be written back ──
   const onBeforeInput = (e: InputEvent) => {
-    if (e.inputType.startsWith("format") || REFUSED.has(e.inputType)) e.preventDefault();
+    if ((e.inputType.startsWith("format") && !FORMATS.has(e.inputType)) || REFUSED.has(e.inputType)) e.preventDefault();
   };
   const onKeyDown = (e: KeyboardEvent) => {
     // Keys an input method uses while composing (choosing a candidate, say) are its own
@@ -298,11 +369,41 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
     return host && host !== editable ? host : null;
   };
   const pickedCells = () => Array.from(editable.querySelectorAll<HTMLElement>("[data-cell][data-picked]"));
-  const place = () => opts.onPlace?.({ cell: inCell === true || !!picked, cells: picked ? pickedCells().length : 0 });
+  const place = () => opts.onPlace?.({ cell: inCell === true || !!picked, cells: picked ? pickedCells().length : 0, fmt: caretFormat(plan, editable) });
+  let lastFmt = "";
+  // The last selection the person made: the host's toolbar takes focus away (a list of sizes, a color menu), and focus
+  // coming back may move the selection, so commands from the toolbar act on this one. Once the view loses focus, the
+  // selection is only taken again when the person clicks or types in the view
+  let lastRange: Range | null = null;
+  let frozen = false;
+  const onWindowBlur = () => {
+    frozen = true;
+  };
+  const onTouch = () => {
+    frozen = false;
+  };
+  window.addEventListener("blur", onWindowBlur);
+  editable.addEventListener("mousedown", onTouch, true);
+  editable.addEventListener("keydown", onTouch, true);
+  const keepSelection = () => {
+    const sel = getSelection();
+    if (frozen || !sel?.rangeCount || !editable.contains(sel.anchorNode)) return;
+    lastRange = sel.getRangeAt(0).cloneRange();
+  };
+  const restoreSelection = () => {
+    if (!lastRange || !editable.contains(lastRange.startContainer)) return;
+    const sel = getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(lastRange);
+  };
   const onSelection = () => {
+    keepSelection();
     const now = !!cellOf(getSelection()?.anchorNode ?? null);
-    if (now === inCell) return;
+    // Told when the cell or the formatting where the caret is changes
+    const fmt = JSON.stringify(caretFormat(plan, editable));
+    if (now === inCell && fmt === lastFmt) return;
     inCell = now;
+    lastFmt = fmt;
     place();
   };
   const unpick = () => {
@@ -425,10 +526,11 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
 
   return {
     collect() {
-      const xml = saveEdits(plan, readAllEdits(editable), shown);
+      const xml = saveEdits(plan, readAllEdits(editable, fmtOf), shown);
       return { path: loaded.docPath, xml, caret: caretOf(editable), scroll: root.scrollTop };
     },
     tableOp(op, change = {}) {
+      restoreSelection();
       // Merging, borders and shading: the cells selected together; resizing: the cell whose border was dragged;
       // anything else: the caret's cell (or the first of those selected)
       const ranged = op === "merge" || op === "border" || op === "shade";
@@ -450,7 +552,7 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
       otherTc?.setAttribute("data-tf-other", "");
       let text: string;
       try {
-        text = saveEdits(plan, readAllEdits(editable), shown) ?? writeXml(plan.doc);
+        text = saveEdits(plan, readAllEdits(editable, fmtOf), shown) ?? writeXml(plan.doc);
       } finally {
         tc.removeAttribute("data-tf-cell");
         otherTc?.removeAttribute("data-tf-other");
@@ -470,10 +572,54 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
       const at = focusCell ? after.indexOf(focusCell) : -1;
       return { xml: writeXml(doc), cell: at >= 0 ? at + 1 : null, pick: keep };
     },
+    format(cmd, value) {
+      if (!editable.contains(document.activeElement)) editable.focus({ preventScroll: true });
+      restoreSelection();
+      document.execCommand("styleWithCSS", false, "true");
+      document.execCommand(cmd, false, value);
+      // The command replaces the text it formats: the selection kept is the one now on it, for the next command
+      const sel = getSelection();
+      if (sel?.rangeCount && editable.contains(sel.anchorNode)) lastRange = sel.getRangeAt(0).cloneRange();
+      onSelection();
+    },
+    formatRange(f) {
+      restoreSelection();
+      const sel = getSelection();
+      if (!sel?.rangeCount || !editable.contains(sel.anchorNode)) return undefined;
+      // A font size for no selection: the word at the caret, as in Word
+      if ("size" in f && sel.isCollapsed) {
+        sel.modify("move", "backward", "word");
+        sel.modify("extend", "forward", "word");
+      }
+      const caret = caretOf(editable);
+      const range = sel.getRangeAt(0);
+      const start = document.createTextNode(MARK_START);
+      const end = document.createTextNode(MARK_END);
+      const atEnd = range.cloneRange();
+      atEnd.collapse(false);
+      atEnd.insertNode(end);
+      const atStart = range.cloneRange();
+      atStart.collapse(true);
+      atStart.insertNode(start);
+      let text: string;
+      try {
+        text = saveEdits(plan, readAllEdits(editable, fmtOf), shown) ?? writeXml(plan.doc);
+      } finally {
+        start.remove();
+        end.remove();
+      }
+      const doc = new DOMParser().parseFromString(text, "application/xml");
+      if (!formatRange(doc, f)) return undefined;
+      return { xml: writeXml(doc), caret };
+    },
+    styles,
     focus: () => editable.focus({ preventScroll: true }),
     dispose() {
       ro?.disconnect();
       document.removeEventListener("selectionchange", onSelection);
+      window.removeEventListener("blur", onWindowBlur);
+      editable.removeEventListener("mousedown", onTouch, true);
+      editable.removeEventListener("keydown", onTouch, true);
       document.removeEventListener("mouseup", onMouseUp);
       editable.removeEventListener("mousedown", onMouseDown);
       editable.removeEventListener("mousemove", onMouseMove);
@@ -609,4 +755,105 @@ function placeCaret(editable: HTMLElement, caret: Caret) {
     left -= len;
   }
   getSelection()?.collapse(p, p.childNodes.length);
+}
+
+// ───────────── Formatting shown ─────────────
+
+/** Character formatting as the view shows it (colors as "RRGGBB"; a highlight null when there is none) */
+interface Shown {
+  b: boolean;
+  i: boolean;
+  u: boolean;
+  s: boolean;
+  color: string;
+  hl: string | null;
+}
+
+/** "rgb(…)" or "rgba(…)" as "RRGGBB", or null when transparent */
+function hexOf(css: string): string | null {
+  const m = /rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)(?:[,\s/]+([\d.]+))?/.exec(css);
+  if (!m || (m[4] !== undefined && Number(m[4]) === 0)) return null;
+  return [m[1], m[2], m[3]]
+    .map((v) => Number(v).toString(16).padStart(2, "0"))
+    .join("")
+    .toUpperCase();
+}
+
+/** Elements that hold a paragraph's text, whose own looks (paragraph or cell shading) aren't the text's */
+const isHolder = (e: Element) => e instanceof HTMLElement && (e.dataset.para !== undefined || e.dataset.host !== undefined || ["P", "DIV", "TD", "LI"].includes(e.tagName));
+
+/** What a text node shows: weight, style and color from its own element; lines and highlight from those up to its paragraph */
+function shownAt(text: Node): Shown | null {
+  const el = text.parentElement;
+  if (!el || !el.isConnected) return null;
+  const cs = getComputedStyle(el);
+  let u = false;
+  let s = false;
+  let hl: string | null = null;
+  for (let e: Element | null = el; e && !isHolder(e); e = e.parentElement) {
+    const st = getComputedStyle(e);
+    const lines = st.textDecorationLine;
+    if (lines.includes("underline")) u = true;
+    if (lines.includes("line-through")) s = true;
+    hl ??= hexOf(st.backgroundColor);
+  }
+  return { b: Number(cs.fontWeight) >= 600, i: cs.fontStyle !== "normal", u, s, color: hexOf(cs.color) ?? "000000", hl };
+}
+
+/** What a paragraph shows for text typed into it without a run (the paragraph mark's looks) */
+function shownOfBlock(block: HTMLElement): Shown {
+  const cs = getComputedStyle(block);
+  return { b: Number(cs.fontWeight) >= 600, i: cs.fontStyle !== "normal", u: false, s: false, color: hexOf(cs.color) ?? "000000", hl: null };
+}
+
+/** The formatting where the caret is */
+function caretFormat(plan: EditPlan, editable: HTMLElement): CaretFormat | null {
+  const sel = getSelection();
+  const node = sel?.anchorNode ?? null;
+  if (!node || !editable.contains(node)) return null;
+  const el = node instanceof Element ? node : node.parentElement;
+  if (!el) return null;
+  const text = node.nodeType === 3 ? node : (el.firstChild ?? el);
+  const shown = text.nodeType === 3 ? shownAt(text) : null;
+  const cs = getComputedStyle(el);
+  const para = el.closest<HTMLElement>("[data-para]");
+  const source = para ? plan.blocks[Number(para.dataset.para)] : null;
+  const pStyle = source ? kid(kid(source, "pPr"), "pStyle") : null;
+  const align = para ? getComputedStyle(para).textAlign : "left";
+  return {
+    b: shown?.b ?? Number(cs.fontWeight) >= 600,
+    i: shown?.i ?? cs.fontStyle !== "normal",
+    u: shown?.u ?? false,
+    s: shown?.s ?? false,
+    size: Math.round(parseFloat(cs.fontSize) * 0.75 * 2) / 2,
+    style: pStyle ? (pStyle.getAttributeNS(pStyle.namespaceURI, "val") ?? pStyle.getAttribute("w:val")) : null,
+    align: align === "center" ? "center" : align === "right" || align === "end" ? "right" : align === "justify" ? "both" : "left",
+  };
+}
+
+/** The paragraph styles the document defines that Word shows in its gallery, and those its paragraphs use */
+async function paragraphStyles(pkg: OoxmlPackage, rels: { type: string; target: string; external?: boolean }[], docXml: Document | null): Promise<ParagraphStyle[]> {
+  const path = rels.find((r) => r.type.endsWith("/styles") && !r.external)?.target;
+  const xml = path ? await pkg.xml(path) : null;
+  const used = new Set(
+    Array.from(docXml?.querySelectorAll("*") ?? [])
+      .filter((e) => e.localName === "pStyle")
+      .map((e) => e.getAttributeNS(e.namespaceURI, "val") ?? e.getAttribute("w:val") ?? ""),
+  );
+  const out: ParagraphStyle[] = [];
+  for (const s of Array.from(xml?.documentElement?.children ?? [])) {
+    if (s.localName !== "style") continue;
+    const val = (name: string) => s.getAttributeNS(s.namespaceURI, name) ?? s.getAttribute(`w:${name}`);
+    if (val("type") !== "paragraph") continue;
+    const id = val("styleId") ?? "";
+    const isDefault = val("default") === "1" || val("default") === "true";
+    const shownInGallery = !!kid(s, "qFormat") && !kid(s, "semiHidden");
+    if (!id || !(isDefault || shownInGallery || used.has(id))) continue;
+    const nameEl = kid(s, "name");
+    const name = (nameEl && (nameEl.getAttributeNS(nameEl.namespaceURI, "val") ?? nameEl.getAttribute("w:val"))) || id;
+    out.push({ id, name, isDefault });
+  }
+  // The default first, then headings in order, then the others as Word lists them
+  const rank = (s: ParagraphStyle) => (s.isDefault ? 0 : /^heading \d$/i.test(s.name) ? 1 + Number(s.name.slice(-1)) : 20);
+  return out.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
 }
