@@ -14,7 +14,7 @@ import { renderPptx } from "@/ooxml/pptx";
 import { OoxmlPackage, h } from "@/ooxml/core/package";
 import { parseTheme, type Theme } from "@/ooxml/core/theme";
 import { anchorBox, readDrawings, renderItem } from "@/ooxml/xlsx/drawings";
-import { openDocxEditor, type Caret, type DocxEditor, type EditorTexts, type FormatCommand, type TableChange } from "@/ooxml/docx/editor";
+import { FONT_NAME, openDocxEditor, type Caret, type DocxEditor, type EditorTexts, type FormatCommand, type TableChange } from "@/ooxml/docx/editor";
 import type { RangeFormat } from "@/ooxml/docx/formatOps";
 import type { ListFormat } from "@/ooxml/docx/listOps";
 import type { TableOp } from "@/ooxml/docx/tableOps";
@@ -39,9 +39,25 @@ type CollectMessage = { type: "collect"; id: number };
 type TableMessage = { type: "table"; op: TableOp; cols?: number; rows?: number; border?: string; color?: string | null };
 /**
  * Word editing: formatting of the selection. `cmd` is one of the view's own commands (bold… with `value` a color);
- * `size`, `style` or `align` change the document and open the view again (answered "format-refused" when they can't)
+ * `size`, `font`, `style`, `align`, `line`, `spaceBefore` or `spaceAfter` change the document and open the view again
+ * (answered "format-refused" when they can't); `list` and `level` change lists
  */
-type FormatMessage = { type: "format"; cmd?: string; value?: string; size?: number; style?: string; isDefault?: boolean; align?: string; list?: string; level?: number };
+type FormatMessage = {
+  type: "format";
+  cmd?: string;
+  value?: string;
+  size?: number;
+  style?: string;
+  isDefault?: boolean;
+  align?: string;
+  list?: string;
+  level?: number;
+  font?: string;
+  eastAsia?: boolean;
+  line?: number;
+  spaceBefore?: boolean;
+  spaceAfter?: boolean;
+};
 type Message = RenderMessage | LoadXlsxMessage | DrawingsMessage | ScrollMessage | EditMessage | CollectMessage | TableMessage | FormatMessage;
 
 const root = document.getElementById("root")!;
@@ -178,7 +194,7 @@ async function edit({ buffer, parts: given, texts, caret, scroll }: EditMessage)
   editing = { pkg, texts, base: parts, undo: [], typed: false };
   try {
     const opened = await openEditor(parts, caret, scroll);
-    reply({ type: "styles", styles: opened.styles });
+    reply({ type: "styles", styles: opened.styles, fonts: opened.fonts });
     dispose = () => {
       editor?.dispose();
       pkg.dispose();
@@ -243,6 +259,10 @@ function format(msg: FormatMessage) {
   if (typeof msg.size === "number" && msg.size >= 1 && msg.size <= 1638) f = { size: msg.size };
   else if (typeof msg.style === "string" && editor.styles.some((s) => s.id === msg.style)) f = { style: msg.style, isDefault: !!msg.isDefault };
   else if (typeof msg.align === "string" && ALIGNMENTS.has(msg.align)) f = { align: msg.align as "left" | "center" | "right" | "both" };
+  else if (typeof msg.font === "string" && FONT_NAME.test(msg.font)) f = { font: msg.font, eastAsia: !!msg.eastAsia };
+  else if (typeof msg.line === "number" && Number.isInteger(msg.line) && msg.line >= 60 && msg.line <= 2400) f = { line: msg.line };
+  else if (typeof msg.spaceBefore === "boolean") f = { spaceBefore: msg.spaceBefore };
+  else if (typeof msg.spaceAfter === "boolean") f = { spaceAfter: msg.spaceAfter };
   if (!f) return;
   const range = f;
   queue = queue

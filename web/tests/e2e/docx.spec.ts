@@ -299,8 +299,8 @@ test("borders, shading and column widths are changed, and cells selected togethe
   await page.getByRole("menuitem", { name: "#FFC000" }).first().click();
   await expect(frame.locator("td[data-picked]")).toHaveCount(2);
 
-  // A's right border dragged 60 pixels to the right
-  await page.keyboard.press("Escape");
+  // A's right border dragged 60 pixels to the right, once the menu has closed
+  await expect(page.getByRole("menu")).toBeHidden();
   const a = (await frame.locator("td").first().boundingBox())!;
   await page.mouse.move(a.x + a.width - 1, a.y + a.height / 2);
   await page.mouse.down();
@@ -348,9 +348,10 @@ test("text is formatted from the toolbar and with shortcuts, and the file gets j
   // Color and highlight for "Second", then its size (the view opens again on the changed document)
   await frame.getByText("Second").dblclick();
   await page.getByRole("button", { name: "Font color" }).click();
-  await page.getByRole("menuitem", { name: "#FF0000" }).first().click();
+  await page.getByRole("menu", { name: "Font color" }).getByRole("menuitem", { name: "#FF0000" }).first().click();
   await page.getByRole("button", { name: "Highlight" }).click();
-  await page.getByRole("menuitem", { name: "#FFFF00" }).click();
+  // The font color's menu may still be closing: the color is picked in the highlight's
+  await page.getByRole("menu", { name: "Highlight" }).getByRole("menuitem", { name: "#FFFF00" }).click();
   await page.getByLabel("Font size").selectOption("14");
   await expect(page.getByLabel("Font size")).toHaveValue("14");
 
@@ -421,4 +422,45 @@ test("bulleted and numbered lists are made, and a document without lists gets it
   expect(numbering).toContain('<w:numFmt w:val="decimal"/>');
   expect(await zip.file("word/_rels/document.xml.rels")!.async("string")).toContain('Target="numbering.xml"');
   expect(await zip.file("[Content_Types].xml")!.async("string")).toContain('PartName="/word/numbering.xml"');
+});
+
+test("fonts and line spacing are changed from the toolbar, and the file gets them", async ({ page }) => {
+  await signIn(page);
+  const dir = await makeFolder(page, "Word fonts");
+  const body = "<w:p><w:r><w:t>Hello world</w:t></w:r></w:p><w:p><w:r><w:t>Second</w:t></w:r></w:p><w:p><w:r><w:t>Third</w:t></w:r></w:p>";
+  const id = await uploadFile(page, dir, "fonts.docx", Buffer.from(await buildDocument(body)));
+  const { frame } = await openEditor(page, id, "fonts.docx");
+  const font = page.getByLabel("Font", { exact: true });
+  const spacing = page.getByRole("button", { name: "Line and paragraph spacing" });
+
+  // A Latin font for "Second", an East Asian one for "Third" (the view opens again on the changed document)
+  await frame.getByText("Second").dblclick();
+  await font.selectOption("Georgia");
+  await expect(font).toHaveValue("Georgia");
+  await frame.getByText("Third").dblclick();
+  await font.selectOption("Microsoft JhengHei");
+  await expect(font).toHaveValue("Microsoft JhengHei");
+
+  // Line spacing of 1.5 and 12 points before for the first paragraph; the menu then shows them
+  await frame.getByText("Hello world").click();
+  await spacing.click();
+  await page.getByRole("menuitemradio", { name: "1.5" }).click();
+  await expect(frame.getByText("Hello world")).toBeVisible();
+  await spacing.click();
+  await expect(page.getByRole("menuitemradio", { name: "1.5" })).toHaveAttribute("aria-checked", "true");
+  await page.getByRole("menuitem", { name: "Add space before paragraph" }).click();
+  await expect(frame.getByText("Hello world")).toBeVisible();
+  await spacing.click();
+  await expect(page.getByRole("menuitem", { name: "Remove space before paragraph" })).toBeVisible();
+  await page.getByRole("menu").press("Escape");
+  await expect(page.getByRole("menu")).toBeHidden();
+
+  const save = saving(page, id);
+  await page.getByRole("button", { name: "Save" }).click();
+  expect((await save).ok()).toBe(true);
+  const { xml } = await savedXml(page, id);
+  const paragraphs = [...xml.matchAll(/<w:p>(.*?)<\/w:p>/g)].map((m) => m[1]);
+  expect(paragraphs.find((p) => p.includes("Hello"))).toMatch(/<w:pPr><w:spacing w:line="360" w:lineRule="auto" w:before="240"\/><\/w:pPr><w:r><w:t>Hello world<\/w:t>/);
+  expect(paragraphs.find((p) => p.includes("Second"))).toContain('<w:rPr><w:rFonts w:ascii="Georgia" w:hAnsi="Georgia" w:cs="Georgia"/></w:rPr><w:t>Second</w:t>');
+  expect(paragraphs.find((p) => p.includes("Third"))).toContain('<w:rFonts w:ascii="Microsoft JhengHei" w:hAnsi="Microsoft JhengHei" w:eastAsia="Microsoft JhengHei"/>');
 });

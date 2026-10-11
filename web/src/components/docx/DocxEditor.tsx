@@ -21,6 +21,7 @@ import {
   IndentDecreaseIcon,
   IndentIncreaseIcon,
   ItalicIcon,
+  ListChevronsUpDownIcon,
   ListIcon,
   ListOrderedIcon,
   Grid3x3Icon,
@@ -41,7 +42,15 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { toast } from "sonner";
 import { ApiError, type FileSource, type Node } from "@/api";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ColorMenu } from "@/components/ColorMenu";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -53,7 +62,7 @@ import { t } from "@/lib/i18n";
 import { shortcut } from "@/lib/keys";
 import { cancellable } from "@/lib/cancellable";
 import { officeErrorMessage } from "@/lib/officeErrors";
-import type { Caret, CaretFormat, ParagraphStyle } from "@/ooxml/docx/editor";
+import { FONT_NAME, type Caret, type CaretFormat, type FontChoice, type ParagraphStyle } from "@/ooxml/docx/editor";
 import { HIGHLIGHTS } from "@/ooxml/docx/formatOps";
 import { MAX_SPLIT, type BorderKind, type TableOp } from "@/ooxml/docx/tableOps";
 import { TOO_LARGE } from "@/ooxml/core/package";
@@ -61,6 +70,25 @@ import { dropSession, isDirty, keepSession, openSession, releaseIfClean, reusabl
 
 /** Word's usual font sizes (points) */
 const SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72];
+
+/** Common fonts: Word's Latin ones, then East Asian ones (by their English names) */
+const FONTS: FontChoice[] = [
+  ...["Aptos", "Arial", "Calibri", "Cambria", "Consolas", "Courier New", "Georgia", "Segoe UI", "Tahoma", "Times New Roman", "Verdana"].map((name) => ({ name, eastAsia: false })),
+  ...["DengXian", "DFKai-SB", "Malgun Gothic", "Meiryo", "Microsoft JhengHei", "Microsoft YaHei", "MS Mincho", "PMingLiU", "SimSun", "Yu Gothic"].map((name) => ({
+    name,
+    eastAsia: true,
+  })),
+];
+
+/** Word's line spacing choices, in 240ths of a line */
+const LINE_SPACINGS: [number, string][] = [
+  [240, "1.0"],
+  [276, "1.15"],
+  [360, "1.5"],
+  [480, "2.0"],
+  [600, "2.5"],
+  [720, "3.0"],
+];
 
 /** Word's highlight colors, as Word lists them */
 const HIGHLIGHT_COLORS = Object.keys(HIGHLIGHTS).map((hex) => `#${hex}`);
@@ -182,6 +210,8 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
   /** The formatting where the caret is, and the document's paragraph styles */
   const [fmt, setFmt] = useState<CaretFormat | null>(null);
   const [styles, setStyles] = useState<ParagraphStyle[]>([]);
+  /** The fonts to choose from: the common ones and those the document's font table names */
+  const [fonts, setFonts] = useState<FontChoice[]>(FONTS);
   const waiting = useRef(new Map<number, { resolve(c: Collected): void; reject(e: Error): void }>());
   const nextId = useRef(0);
 
@@ -242,7 +272,21 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
   };
   const border = (kind: BorderKind) => table("border", { border: kind });
   /** Formatting of the selection, in the frame; the caret stays there */
-  const format = (change: { cmd?: string; value?: string; size?: number; style?: string; isDefault?: boolean; align?: string; list?: string; level?: number }) => {
+  const format = (change: {
+    cmd?: string;
+    value?: string;
+    size?: number;
+    style?: string;
+    isDefault?: boolean;
+    align?: string;
+    list?: string;
+    level?: number;
+    font?: string;
+    eastAsia?: boolean;
+    line?: number;
+    spaceBefore?: boolean;
+    spaceAfter?: boolean;
+  }) => {
     frame.current?.contentWindow?.postMessage({ type: "format", ...change }, "*");
     frame.current?.focus();
   };
@@ -280,9 +324,14 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
         setFmt(place.fmt ?? null);
         break;
       }
-      case "styles":
-        setStyles(((msg as { styles?: ParagraphStyle[] }).styles ?? []).filter((x) => typeof x?.id === "string" && typeof x?.name === "string"));
+      case "styles": {
+        const m = msg as { styles?: ParagraphStyle[]; fonts?: FontChoice[] };
+        setStyles((m.styles ?? []).filter((x) => typeof x?.id === "string" && typeof x?.name === "string"));
+        const own = (m.fonts ?? []).filter((x) => typeof x?.name === "string" && FONT_NAME.test(x.name)).map((x) => ({ name: x.name, eastAsia: !!x.eastAsia }));
+        const byName = new Map([...FONTS, ...own].map((x) => [x.name.toLowerCase(), x]));
+        setFonts([...byName.values()].sort((a, b) => Number(a.eastAsia) - Number(b.eastAsia) || a.name.localeCompare(b.name)));
         break;
+      }
       case "format-refused":
         toast.error(t("Select some text first."));
         break;
@@ -413,6 +462,25 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
           ))}
         </NativeSelect>
         <NativeSelect
+          aria-label={t("Font")}
+          title={t("Font")}
+          size="xs"
+          className="w-36 shrink-0 rounded px-1"
+          disabled={formatOff}
+          value={fmt?.font ?? ""}
+          onChange={(e) => {
+            const font = fonts.find((x) => x.name === e.target.value);
+            if (font) format({ font: font.name, eastAsia: font.eastAsia });
+          }}
+        >
+          {fmt?.font && !fonts.some((x) => x.name === fmt.font) && <option value={fmt.font}>{fmt.font}</option>}
+          {fonts.map((x) => (
+            <option key={x.name} value={x.name} style={{ fontFamily: `"${x.name}"` }}>
+              {x.name}
+            </option>
+          ))}
+        </NativeSelect>
+        <NativeSelect
           aria-label={t("Font size")}
           title={t("Font size")}
           size="xs"
@@ -483,6 +551,34 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
         <FormatButton label={t("Justify")} active={fmt?.align === "both"} disabled={formatOff} onClick={() => format({ align: "both" })}>
           <AlignJustifyIcon />
         </FormatButton>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={t("Line and paragraph spacing")}
+                title={t("Line and paragraph spacing")}
+                disabled={formatOff}
+                onMouseDown={(e) => e.preventDefault()}
+              />
+            }
+          >
+            <ListChevronsUpDownIcon />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent className="w-auto">
+            <DropdownMenuRadioGroup value={fmt?.line != null ? String(fmt.line) : ""} onValueChange={(v) => format({ line: Number(v) })}>
+              {LINE_SPACINGS.map(([line, label]) => (
+                <DropdownMenuRadioItem key={line} value={String(line)} closeOnClick>
+                  {label}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => format({ spaceBefore: !fmt?.before })}>{fmt?.before ? t("Remove space before paragraph") : t("Add space before paragraph")}</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => format({ spaceAfter: !fmt?.after })}>{fmt?.after ? t("Remove space after paragraph") : t("Add space after paragraph")}</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <span className="mx-1 h-5 shrink-0 border-l" />
         <DropdownMenu>
           <DropdownMenuTrigger

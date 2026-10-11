@@ -1,5 +1,5 @@
 // Formatting text in a Word document: character formatting the view changed written into the runs as a difference,
-// and font size, paragraph style and alignment applied between the editor's two marks
+// and font, font size, paragraph style, alignment and spacing applied between the editor's two marks
 import { describe, expect, test } from "vitest";
 import { attr } from "@/ooxml/core/package";
 import { originalPieces, planEdits, readEdits, saveEdits, type FmtOf } from "@/ooxml/docx/edit";
@@ -110,5 +110,52 @@ describe("formatting between the marks", () => {
     const e = doc(`<w:p><w:r><w:t>a${MARK_START}b</w:t></w:r></w:p>`);
     expect(formatRange(e, { size: 9 })).toBe(false);
     expect(text(e.documentElement)).toBe("ab");
+  });
+});
+
+describe("fonts and spacing between the marks", () => {
+  /** An element's attributes by local name (happy-dom keeps a parsed attribute's prefix in its name) */
+  const attrsOf = (e: Element | undefined) => (e ? Object.fromEntries(Array.from(e.attributes).map((a) => [a.name.replace(/^.*:/, ""), a.value])) : null);
+  const fontsOf = (r: Element) => attrsOf(find(r, "rFonts")[0]);
+
+  test("a font goes to the text between the marks: a Latin font for the rest, an East Asian one for East Asian text too", () => {
+    const d = doc(
+      `<w:p><w:r><w:rPr><w:rFonts w:asciiTheme="minorHAnsi" w:hAnsiTheme="minorHAnsi" w:eastAsia="PMingLiU" w:hint="eastAsia"/><w:b/></w:rPr><w:t>ab${MARK_START}cd${MARK_END}ef</w:t></w:r></w:p>`,
+    );
+    expect(formatRange(d, { font: "Georgia", eastAsia: false })).toBe(true);
+    const runs = find(d, "r");
+    expect(runs.map(text)).toEqual(["ab", "cd", "ef"]);
+    // The theme fonts of the slots it sets go (they would win); the East Asian font and the hint stay
+    expect(fontsOf(runs[1])).toEqual({ eastAsia: "PMingLiU", hint: "eastAsia", ascii: "Georgia", hAnsi: "Georgia", cs: "Georgia" });
+    expect(fontsOf(runs[0])).toEqual(fontsOf(runs[2]));
+    expect(kidsOf(find(runs[1], "rPr")[0])).toEqual(["rFonts", "b"]);
+    const e = doc(`<w:p><w:r><w:rPr><w:sz w:val="24"/></w:rPr><w:t>${MARK_START}x${MARK_END}</w:t></w:r></w:p>`);
+    formatRange(e, { font: "Microsoft JhengHei", eastAsia: true });
+    expect(fontsOf(find(e, "r")[0])).toEqual({ ascii: "Microsoft JhengHei", hAnsi: "Microsoft JhengHei", eastAsia: "Microsoft JhengHei" });
+    expect(kidsOf(find(e, "rPr")[0])).toEqual(["rFonts", "sz=24"]);
+    // An empty paragraph: its paragraph mark gets the font
+    const m = doc(`<w:p><w:r><w:t>${MARK_START}${MARK_END}</w:t></w:r></w:p>`);
+    formatRange(m, { font: "Arial", eastAsia: false });
+    expect(fontsOf(find(find(m, "pPr")[0], "rPr")[0])).toEqual({ ascii: "Arial", hAnsi: "Arial", cs: "Arial" });
+  });
+
+  test("line spacing and space before and after go to every paragraph the marks touch, keeping their other spacing", () => {
+    const d = doc(
+      `<w:p><w:pPr><w:spacing w:before="120" w:after="200" w:line="360" w:lineRule="exact"/><w:jc w:val="center"/></w:pPr><w:r><w:t>o${MARK_START}ne</w:t></w:r></w:p><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>tw${MARK_END}o</w:t></w:r></w:p><w:p><w:r><w:t>three</w:t></w:r></w:p>`,
+    );
+    expect(formatRange(d, { line: 276 })).toBe(true);
+    expect(find(d, "p").map((p) => attrsOf(find(p, "spacing")[0]))).toEqual([{ before: "120", after: "200", line: "276", lineRule: "auto" }, { line: "276", lineRule: "auto" }, null]);
+    // Spacing goes in Word's order of a paragraph's properties
+    expect(kidsOf(find(find(d, "p")[1], "pPr")[0])).toEqual(["pStyle=Heading1", "spacing"]);
+    // The runs stay as they were
+    expect(find(d, "r").map(text)).toEqual(["one", "two", "three"]);
+    const b = doc(`<w:p><w:pPr><w:spacing w:beforeLines="100" w:beforeAutospacing="1" w:after="0"/></w:pPr><w:r><w:t>${MARK_START}x${MARK_END}</w:t></w:r></w:p>`);
+    // 12 points before: spacing in lines and automatic spacing, which would win, go
+    formatRange(b, { spaceBefore: true });
+    expect(attrsOf(find(b, "spacing")[0])).toEqual({ after: "0", before: "240" });
+    expect(text(b.documentElement)).toBe("x");
+    const a = doc(`<w:p><w:pPr><w:spacing w:after="200" w:afterAutospacing="1" w:line="240" w:lineRule="auto"/></w:pPr><w:r><w:t>${MARK_START}x${MARK_END}</w:t></w:r></w:p>`);
+    formatRange(a, { spaceAfter: false });
+    expect(attrsOf(find(a, "spacing")[0])).toEqual({ after: "0", line: "240", lineRule: "auto" });
   });
 });

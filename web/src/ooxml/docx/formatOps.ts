@@ -185,8 +185,31 @@ export function applyFmt(x: WordXml, rPr: Element, fmt: Fmt) {
   }
 }
 
-/** A change of the marked range: font size (points), paragraph style (id), or alignment (left, center, right, both) */
-export type RangeFormat = { size: number } | { style: string; isDefault?: boolean } | { align: "left" | "center" | "right" | "both" };
+/** A change of the marked range: font size (points), font, paragraph style (id), alignment (left, center, right, both) or spacing */
+export type RangeFormat =
+  | { size: number }
+  /** A font for the runs: East Asian (`eastAsia`) for their East Asian text too, otherwise for the rest */
+  | { font: string; eastAsia: boolean }
+  | { style: string; isDefault?: boolean }
+  | { align: "left" | "center" | "right" | "both" }
+  /** Line spacing in 240ths of a line (240: single) */
+  | { line: number }
+  /** 12 points of space before or after the paragraphs, or none */
+  | { spaceBefore: boolean }
+  | { spaceAfter: boolean };
+
+/** A paragraph's own spacing, made in its place when missing: the attributes not changed stay */
+function spacingOf(x: WordXml, pPr: Element): Element {
+  return kid(pPr, "spacing") ?? placeIn(pPr, x.el("spacing"), PPR);
+}
+
+/** A font written into a run's properties: the other slots stay, the theme fonts of those it sets go (they win over names) */
+function applyFont(x: WordXml, rPr: Element, font: string, eastAsia: boolean) {
+  const fonts = kid(rPr, "rFonts") ?? placeIn(rPr, x.el("rFonts"), RPR);
+  const slots = eastAsia ? ["ascii", "hAnsi", "eastAsia"] : ["ascii", "hAnsi", "cs"];
+  for (const n of slots) x.set(fonts, n, font);
+  x.unset(fonts, ...slots.map((n) => (n === "cs" ? "cstheme" : `${n}Theme`)));
+}
 
 const byName = (root: Element, name: string) => Array.from(root.querySelectorAll("*")).filter((e) => e.localName === name);
 /** The paragraph holding an element */
@@ -272,12 +295,22 @@ export function formatRange(doc: Document, f: RangeFormat): boolean {
   // The paragraphs from the start's to the end's are those the selection touches
   const startP = paragraphOf(startT);
   const endP = paragraphOf(endT);
-  // A style or alignment is the paragraphs': the runs stay as they are, the marks just go
-  if (!("size" in f)) {
+  // A style, alignment or spacing is the paragraphs': the runs stay as they are, the marks just go
+  if (!("size" in f) && !("font" in f)) {
     for (const p of markedParagraphs(doc) ?? []) {
       const pPr = pPrOf(x, p);
       if ("align" in f) x.set(prop(x, pPr, "jc", PPR), "val", f.align);
-      else if (f.isDefault) kid(pPr, "pStyle")?.remove();
+      else if ("line" in f) {
+        const sp = spacingOf(x, pPr);
+        x.set(sp, "line", String(f.line));
+        x.set(sp, "lineRule", "auto");
+      } else if ("spaceBefore" in f || "spaceAfter" in f) {
+        const side = "spaceBefore" in f ? "before" : "after";
+        const sp = spacingOf(x, pPr);
+        x.set(sp, side, ("spaceBefore" in f ? f.spaceBefore : f.spaceAfter) ? "240" : "0");
+        // Spacing in lines, or HTML's automatic spacing, would win over the points
+        x.unset(sp, `${side}Lines`, `${side}Autospacing`);
+      } else if (f.isDefault) kid(pPr, "pStyle")?.remove();
       else x.set(prop(x, pPr, "pStyle", PPR), "val", f.style);
     }
     return true;
@@ -309,9 +342,13 @@ export function formatRange(doc: Document, f: RangeFormat): boolean {
     const j = endP ? ps.indexOf(endP) : -1;
     return i >= 0 && j >= i ? ps.slice(i, j + 1) : [];
   };
-  const half = String(Math.round(f.size * 2));
-  // A selection without text (an empty paragraph): the paragraph mark gets the size, for the text typed there
+  // A selection without text (an empty paragraph): the paragraph mark gets the size or font, for the text typed there
   const targets = inRange.length ? inRange.map((r) => rPrOf(x, r)) : paragraphs().map((p) => rPrOf(x, pPrOf(x, p)));
+  if ("font" in f) {
+    for (const rPr of targets) applyFont(x, rPr, f.font, f.eastAsia);
+    return true;
+  }
+  const half = String(Math.round(f.size * 2));
   for (const rPr of targets) for (const n of ["sz", "szCs"]) x.set(prop(x, rPr, n, RPR), "val", half);
   return true;
 }

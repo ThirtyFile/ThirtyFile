@@ -810,6 +810,14 @@ export function renderParagraph(p: Element, f: Flow): ParaResult {
     if (!el.childNodes.length || (last && inl.endsWithBr) || !hasFlowContent(el)) el.append(h("br", { class: "tf-docx-eol" }));
   });
 
+  // Editing: the paragraph's spacing (from its style and its own), for the editor's toolbar
+  if (f.edit) {
+    const first = segs[0].el;
+    first.dataset.spLine = !sp.lineRule || sp.lineRule === "auto" ? String(sp.line ?? 240) : "";
+    first.dataset.spBefore = String(sp.before ?? 0);
+    first.dataset.spAfter = String(sp.after ?? 0);
+  }
+
   // Tabs: those in the same paragraph are processed in order
   if (inl.tabs.length) {
     const byP = new Map<HTMLElement, TabRef[]>();

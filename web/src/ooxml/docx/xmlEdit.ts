@@ -28,6 +28,11 @@ export class WordXml {
     else e.setAttributeNS(this.ns, this.prefix ? `${this.prefix}:${name}` : name, value);
   }
 
+  /** Removes w: attributes by their local names */
+  unset(e: Element, ...names: string[]) {
+    for (const a of Array.from(e.attributes)) if (names.some((n) => a.localName === n || a.name.endsWith(`:${n}`))) e.removeAttributeNode(a);
+  }
+
   /** An element's attributes all removed, to set them afresh */
   clear(e: Element) {
     for (const a of Array.from(e.attributes)) e.removeAttributeNode(a);
