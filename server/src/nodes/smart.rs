@@ -26,16 +26,19 @@ use crate::{
     util::now,
 };
 
-use super::{Criteria, Held, ListQuery, Listing, Located, Position, PositionQuery, SelectReq, Selected, ext_list, list_held, locate, position_in, select_in};
+use super::{
+    Criteria, Held, ListQuery, Listing, Located, Position, PositionQuery, SelectReq, Selected, check_terms, ext_list, list_held, locate, position_in, run_held,
+    select_in,
+};
 
 /// Smart folders one person may have
 const MAX_SMART: i64 = 100;
 /// Characters in a smart folder's name
 const MAX_NAME: usize = 100;
 /// Characters of the name to look for
-const MAX_TERM: usize = 255;
+pub(super) const MAX_TERM: usize = 255;
 /// File types (extensions) one smart folder looks for
-const MAX_EXTS: usize = 50;
+pub(super) const MAX_EXTS: usize = 50;
 /// Tags one smart folder looks for
 const MAX_TAGS: usize = 20;
 /// The longest period "modified in the last days" can be
@@ -91,21 +94,10 @@ impl SmartQuery {
     /// looks must be somewhere the person can open now; a folder is kept by its id (the alias "root" too).
     async fn checked(mut self, conn: &mut SqliteConnection, user: &User) -> AppResult<Self> {
         self.name = self.name.trim().to_string();
-        if self.name.chars().count() > MAX_TERM {
-            return Err(AppError::bad_request(format!("The name to look for can be at most {MAX_TERM} characters")));
-        }
-        if self.name.chars().any(char::is_control) {
-            return Err(AppError::bad_request("The name to look for can't contain control characters"));
-        }
+        let exts = ext_list(self.ext.as_deref());
+        check_terms(&self.name, &exts)?;
         if !matches!(self.kind.as_deref(), None | Some("file") | Some("folder")) {
             return Err(AppError::bad_request("Look for files, folders or both"));
-        }
-        let exts = ext_list(self.ext.as_deref());
-        if exts.len() > MAX_EXTS {
-            return Err(AppError::bad_request(format!("Choose at most {MAX_EXTS} file types")));
-        }
-        if exts.iter().any(|e| e.chars().count() > 16 || !e.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-')) {
-            return Err(AppError::bad_request("Enter file types as extensions, such as pdf or docx"));
         }
         self.ext = (!exts.is_empty()).then(|| exts.join(","));
         if self.min_size.is_some_and(|s| s < 0) || self.max_size.is_some_and(|s| s < 0) {
@@ -363,10 +355,8 @@ async fn held_by(conn: &mut SqliteConnection, user: &User, id: i64) -> AppResult
 /// by its `next` or from a position (with how many there are)
 pub async fn smart_items(State(st): State<AppState>, user: User, Path(id): Path<i64>, Query(q): Query<ListQuery>) -> AppResult<Json<Listing<Located>>> {
     let q = ListQuery { folders_only: None, tag: None, tagged_by: None, ..q }.paged();
-    let mut c = st.db.acquire().await?;
-    let held = held_by(&mut c, &user, id).await?;
-    let list = list_held(&mut c, &held, "", &q).await?;
-    drop(c);
+    let held = held_by(&mut *st.db.acquire().await?, &user, id).await?;
+    let list = run_held(&st, held, move |mut c, held| async move { list_held(&mut c, &held, "", &q).await }).await?;
     Ok(Json(match list {
         Listing::All(items) => Listing::All(locate(&st, &user, items).await?),
         Listing::Page { items, next, total } => Listing::Page { items: locate(&st, &user, items).await?, next, total },
@@ -375,16 +365,14 @@ pub async fn smart_items(State(st): State<AppState>, user: User, Path(id): Path<
 
 /// Where an item is in a smart folder's listing
 pub async fn smart_position(State(st): State<AppState>, user: User, Path(id): Path<i64>, Query(q): Query<PositionQuery>) -> AppResult<Json<Position>> {
-    let mut c = st.db.acquire().await?;
-    let held = held_by(&mut c, &user, id).await?;
-    Ok(Json(position_in(&mut c, &held, &q).await?))
+    let held = held_by(&mut *st.db.acquire().await?, &user, id).await?;
+    Ok(Json(run_held(&st, held, move |mut c, held| async move { position_in(&mut c, &held, &q).await }).await?))
 }
 
 /// Items selected in a smart folder not all loaded in the browser, a batch at a time (as `select` in a folder)
 pub async fn smart_select(State(st): State<AppState>, user: User, Path(id): Path<i64>, Json(req): Json<SelectReq>) -> AppResult<Json<Selected>> {
-    let mut c = st.db.acquire().await?;
-    let held = held_by(&mut c, &user, id).await?;
-    Ok(Json(select_in(&mut c, &held, &req).await?))
+    let held = held_by(&mut *st.db.acquire().await?, &user, id).await?;
+    Ok(Json(run_held(&st, held, move |mut c, held| async move { select_in(&mut c, &held, &req).await }).await?))
 }
 
 #[cfg(test)]
@@ -636,6 +624,10 @@ mod tests {
         assert!(!held(crit("", &["pdf", "jpg"])).unindexed);
         assert!(held(crit("", &["pdf", "c"])).unindexed);
         assert!(!held(Criteria { below: Some("x".into()), ..crit("a", &[]) }).unindexed);
+        // One space, or one person's files: through their indexes
+        assert!(!held(Criteria { space: Some("x".into()), ..crit("a", &[]) }).unindexed);
+        assert!(!held(Criteria { owner: Some("amy".into()), ..crit("a", &[]) }).unindexed);
+        assert!(held(Criteria { owner: Some(" ".into()), ..crit("a", &[]) }).unindexed);
         let plan: Vec<(i64, i64, i64, String)> = {
             let h = held(crit("", &["pdf"]));
             let sql = format!("EXPLAIN QUERY PLAN SELECT n.id FROM nodes n WHERE {}", h.condition);

@@ -81,7 +81,10 @@ pub fn spawn_writer(st: AppState, mut rx: tokio::sync::mpsc::Receiver<LogEvent>)
                     Err(_) => break,
                 }
             }
-            write_batch(&st, &batch).await;
+            // A batch whose writing panics is lost, not the writer: the events after it are still written
+            if futures_util::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(write_batch(&st, &batch))).await.is_err() {
+                tracing::error!("Writing {} log events stopped with an error; they were lost", batch.len());
+            }
         }
     });
     LogWriter { stop, handle }
