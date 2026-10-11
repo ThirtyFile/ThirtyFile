@@ -79,11 +79,11 @@ pnpm install
 pnpm dev
 ```
 
-Checks before committing, the same ones that run on GitHub: the interface, the server, and an end-to-end test that signs in, uploads and previews files in a real browser (the first time, get the browser with `cd web && pnpm exec playwright install chromium`):
+Checks before committing: the interface, the server, and an end-to-end test that signs in, uploads and previews files in a real browser (the first time, get the browser with `cd web && pnpm exec playwright install chromium`). Pull requests on GitHub run the quicker `quick` part; all of them run before a release:
 
 ```bash
 scripts/check.sh            # everything
-scripts/check.sh web        # or one part: web, server, e2e or site
+scripts/check.sh web        # or one part: web, server, e2e, site or quick
 ```
 
 | Folder | Contents |

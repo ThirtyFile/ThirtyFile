@@ -1,5 +1,5 @@
 # Complete verification, called before releases or started by hand (Actions > Build > Run workflow).
-# Pull requests run checks.yml; pushes to main run CodeQL, without repeating the tests or builds.
+# Pull requests and pushes to main run checks.yml (pushes to main also run CodeQL), without the tests or builds here.
 #
 # Explicit verification also builds both image platforms once the tests have passed, without
 # pushing them, with the quicker `ci` Cargo profile (server/Cargo.toml). Each platform's image is started with the shipped compose.yaml on bind-mounted folders, first the latest
@@ -31,7 +31,7 @@ on:
 
 # Explicit full verification and releases always finish; no per-commit build is started.
 concurrency:
-  group: build-${{ github.ref }}-${{ inputs.release_version || (github.event_name == 'push' && github.sha) || 'check' }}
+  group: build-${{ github.ref }}-${{ inputs.release_version || 'check' }}
   cancel-in-progress: false
 
 permissions:
@@ -41,45 +41,6 @@ env:
   IMAGE: ghcr.io/thirtyfile/thirtyfile
 
 jobs:
-  changes:
-    name: Changes
-    timeout-minutes: 5
-    runs-on: ubuntu-latest
-    outputs:
-      code: ${{ steps.diff.outputs.code }}
-      image: ${{ steps.diff.outputs.image }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - id: diff
-        env:
-          # Explicit verification has no diff base and always runs the full checks.
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-          RELEASE: ${{ inputs.release_version }}
-        run: |
-          # Releases always build; so does anything whose starting point is unknown
-          if [ -n "$RELEASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
-            echo "code=true" >> "$GITHUB_OUTPUT"
-            echo "image=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          changed=$(git diff --name-only "$BASE" HEAD)
-          echo "$changed"
-          # Everything except the website, the documentation, the community files and the issue / pull request forms is code
-          if echo "$changed" | grep -qvE '^(site/|README(\.[a-zA-Z-]+)?\.md$|LICENSE$|\.github/(ISSUE_TEMPLATE/|pull_request_template\.md$|CONTRIBUTING\.md$|CODE_OF_CONDUCT\.md$|SECURITY\.md$|release\.yml$|dependabot\.yml$|workflows/(pages|codeql|scan)\.yml$))'; then
-            echo "code=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "code=false" >> "$GITHUB_OUTPUT"
-          fi
-          # What decides how the image is built and started
-          if echo "$changed" | grep -qE '^(Dockerfile|\.dockerignore|compose\.yaml|server/(Cargo\.(toml|lock)|about\.(toml|hbs)|rust-toolchain\.toml)|web/(package\.json|pnpm-lock\.yaml|scripts/third-party-notices\.mjs)|\.github/(scripts/smoke-test\.sh|workflows/build\.yml))$'; then
-            echo "image=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "image=false" >> "$GITHUB_OUTPUT"
-          fi
-
   # The database structure is frozen at v0.4.0: data folders made by a release must keep starting, and the server
   # refuses a database whose applied migration file has changed since (db.rs, "made by a different build"). Changes to
   # the structure go into a new migration file (0002_…), and the database is copied before it runs
@@ -92,19 +53,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - run: |
-          # v0.4.0 and the newest release: every migration file in them is still here, byte for byte
-          latest=$(git tag -l 'v*' --sort=-v:refname | grep -v -- - | head -n 1)
-          failed=0
-          for tag in v0.4.0 $latest; do
-            for file in $(git ls-tree -r --name-only "$tag" -- server/migrations/); do
-              if ! git diff --quiet "$tag" HEAD -- "$file"; then
-                echo "::error file=$file::$file differs from the file released in $tag. Released migrations never change: put the change in a new file, server/migrations/000N_<name>.sql"
-                failed=1
-              fi
-            done
-          done
-          exit "$failed"
+      # v0.4.0 and the newest release: every migration file in them is still here, byte for byte (the same check the
+      # pull-request gate runs)
+      - run: bash scripts/check.sh released-migrations
 
   # The website: every translated page exists in each language with matching language links, and the links inside
   # it resolve. Quick, so it runs on every change, the website's own included
@@ -121,8 +72,6 @@ jobs:
   check:
     name: Tests
     timeout-minutes: 45
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -133,7 +82,8 @@ jobs:
           package_json_file: web/package.json
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 26
+          # The Dockerfile's web stage's version (Dependabot updates that one: change these with it)
+          node-version: 26.10.0
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
@@ -219,8 +169,7 @@ jobs:
   image:
     name: Docker image
     timeout-minutes: 90
-    needs: [changes, check]
-    if: needs.changes.outputs.image == 'true'
+    needs: check
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -367,19 +316,20 @@ jobs:
             fi
           done
 
-  # The one check the ruleset requires. Skipped jobs count as passed on GitHub, so when "Changes" itself fails, the
-  # tests and the image are skipped and would let the pull request through; this job fails in that case.
+  # The result of the whole verification, for a release to wait on. (Not named like the pull-request gate's check,
+  # "Checks passed", which the ruleset requires: a run of this workflow on a branch isn't that check.) Skipped jobs
+  # count as passed on GitHub, so when the tests fail and the image is skipped, this job fails.
   result:
-    name: Checks passed
+    name: Full verification
     timeout-minutes: 5
-    needs: [changes, migrations, site, check, image]
+    needs: [migrations, site, check, image]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
-          echo "changes, migrations, website, tests, image: $RESULTS"
+          echo "migrations, website, tests, image: $RESULTS"
           case " $RESULTS " in
             *" failure "* | *" cancelled "*) exit 1 ;;
           esac

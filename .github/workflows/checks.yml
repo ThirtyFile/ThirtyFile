@@ -1,9 +1,13 @@
-# The required pull-request gate: no tests, coverage, Rust compilation or image builds.
-# Complete verification is run locally, before releases, or through Build's manual entry point.
+# The required pull-request gate: formatting, translations, types, lint, the interface's unit tests, and the server
+# compiled with clippy, so nothing that doesn't build reaches main. No server tests, coverage, browser tests or image
+# builds: complete verification is run locally, before releases, or through Build's manual entry point.
+# Pushes to main run it too, to keep the Rust build cache warm for pull requests (they restore it; only main saves it).
 name: Checks
 
 on:
   pull_request:
+  push:
+    branches: [main]
 
 concurrency:
   group: checks-${{ github.ref }}
@@ -16,7 +20,8 @@ jobs:
   check:
     name: Checks passed
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # A cold Rust cache compiles every dependency once
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -27,9 +32,15 @@ jobs:
           package_json_file: web/package.json
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 26
+          # The Dockerfile's web stage's version (Dependabot updates that one: change these with it)
+          node-version: 26.10.0
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - run: rustup toolchain install
         working-directory: server
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: server
+          shared-key: checks
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: bash scripts/check.sh quick

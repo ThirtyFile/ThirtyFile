@@ -20,8 +20,9 @@ const walk = (dir, out = []) => {
 };
 
 // import … from "x", import "x", export … from "x", import("x"), import type … from "x"; comments are left out first
+// (a block comment keeps its line breaks, so the lines reported are the file's)
 const SPECIFIER = /\b(?:import|export)\s+(?:type\s+)?(?:[\w*{}\s,$]+\s+from\s+)?["']([^"']+)["']|\bimport\(\s*["']([^"']+)["']\s*\)/g;
-const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
+const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, "")).replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
 
 /** The imports of the files under `root` that leave it: `file:line: why`, paths relative to `base` */
 export function crossings(root, packages, base = root) {

@@ -239,6 +239,15 @@ mod tests {
         };
         idle(13).await;
         assert!(env.session_user(&cookie).await.is_some(), "still in use");
+        // Using it writes the time it was last used, in the background: that is waited for, so it can't land after the
+        // session is made idle again below (on a busy machine it can take more than a moment)
+        for _ in 0..500 {
+            let (t,): (i64,) = sqlx::query_as("SELECT MAX(last_used_at) FROM sessions WHERE user_id = ?").bind(amy.id).fetch_one(&env.st.db).await.unwrap();
+            if t >= now() - 5 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
         idle(15).await;
         assert!(env.session_user(&cookie).await.is_none(), "ended for being idle");
         // Not listed among the devices signed in any more

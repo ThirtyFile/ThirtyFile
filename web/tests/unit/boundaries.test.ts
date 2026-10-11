@@ -22,6 +22,9 @@ describe("check-boundaries", () => {
     writeFileSync(
       join(root, "core", "a.ts"),
       [
+        // A block comment over two lines: the lines reported are still the file's
+        "/* Imports,",
+        ' and import "@/nowhere" in a comment */',
         'import JSZip from "jszip";',
         'import { b } from "./b";',
         'import { up } from "../core/b";',
@@ -36,10 +39,10 @@ describe("check-boundaries", () => {
     );
     writeFileSync(join(root, "core", "b.ts"), "export const b = 1;\n");
     expect(find(root, ["jszip"], dir)).toEqual([
-      'lib/core/a.ts:5: "@/lib/i18n" isn\'t a relative path inside the folder or one of: jszip',
-      'lib/core/a.ts:6: "../../api/types" leads outside the folder',
-      'lib/core/a.ts:9: "react" isn\'t a relative path inside the folder or one of: jszip',
-      'lib/core/a.ts:10: "../../elsewhere" leads outside the folder',
+      'lib/core/a.ts:7: "@/lib/i18n" isn\'t a relative path inside the folder or one of: jszip',
+      'lib/core/a.ts:8: "../../api/types" leads outside the folder',
+      'lib/core/a.ts:11: "react" isn\'t a relative path inside the folder or one of: jszip',
+      'lib/core/a.ts:12: "../../elsewhere" leads outside the folder',
     ]);
   });
 });

@@ -79,11 +79,11 @@ pnpm install
 pnpm dev
 ```
 
-コミット前のチェックは GitHub で実行されるものと同じです。画面、サーバー、そして実際のブラウザーでサインイン、アップロード、プレビューを行うエンドツーエンドテストです（初回は `cd web && pnpm exec playwright install chromium` でブラウザーを入手してください）。
+コミット前のチェックは、画面、サーバー、そして実際のブラウザーでサインイン、アップロード、プレビューを行うエンドツーエンドテストです（初回は `cd web && pnpm exec playwright install chromium` でブラウザーを入手してください）。GitHub のプルリクエストでは短い `quick` だけを実行し、リリース前にすべてを実行します。
 
 ```bash
 scripts/check.sh            # すべて
-scripts/check.sh web        # または一部だけ：web、server、e2e、site
+scripts/check.sh web        # または一部だけ：web、server、e2e、site、quick
 ```
 
 | フォルダー | 内容 |
