@@ -172,9 +172,26 @@ pub async fn shrink(pool: &SqlitePool, write_lock: &tokio::sync::Mutex<()>) {
     if let Err(e) = free.await {
         tracing::warn!("Couldn't give the unused space of the database back: {e}");
     }
-    if let Err(e) = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)").execute(pool).await {
+    if let Err(e) = empty_wal(pool).await {
         tracing::warn!("Couldn't empty the WAL file of the database: {e}");
     }
+}
+
+/// Empties the WAL file into the database. A TRUNCATE checkpoint holds every writer while it waits for readers (up to
+/// the busy timeout), so the WAL is first copied without waiting for anyone (PASSIVE); it is emptied only when that got
+/// all of it, on a connection that waits for readers a moment only: a long read (a backup writing its list of files)
+/// leaves it for the next time instead of stalling every change.
+async fn empty_wal(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    let mut c = pool.acquire().await?;
+    let (busy, log, done): (i64, i64, i64) = sqlx::query_as("PRAGMA wal_checkpoint(PASSIVE)").fetch_one(&mut *c).await?;
+    if busy != 0 || log != done {
+        return Ok(());
+    }
+    let (timeout,): (i64,) = sqlx::query_as("PRAGMA busy_timeout").fetch_one(&mut *c).await?;
+    sqlx::query("PRAGMA busy_timeout = 100").execute(&mut *c).await?;
+    let emptied = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)").execute(&mut *c).await;
+    sqlx::query(sqlx::AssertSqlSafe(format!("PRAGMA busy_timeout = {timeout}"))).execute(&mut *c).await?;
+    emptied.map(|_| ())
 }
 
 /// The database's auto-vacuum mode (2: incremental) and its free pages. Read on one connection, the free pages first:

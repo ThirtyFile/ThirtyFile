@@ -226,13 +226,19 @@ pub(super) struct Held {
 /// large smart folders, or one person asking again and again, can't take every core
 static UNINDEXED: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
 
+/// Tests: both turns of listings no index narrows down, held until the guard is dropped
+#[cfg(test)]
+pub(crate) async fn take_unindexed_turns() -> tokio::sync::SemaphorePermit<'static> {
+    UNINDEXED.acquire_many(2).await.unwrap()
+}
+
 impl Held {
     pub(super) fn new(condition: String, args: Vec<Arg>) -> Self {
         Held { condition, args, unindexed: false }
     }
 
     /// Waits for a turn to read the listing when no index narrows it down (held for as long as the result is)
-    pub(super) async fn turn(&self) -> Option<tokio::sync::SemaphorePermit<'static>> {
+    async fn turn(&self) -> Option<tokio::sync::SemaphorePermit<'static>> {
         if self.unindexed { UNINDEXED.acquire().await.ok() } else { None }
     }
 
@@ -242,9 +248,33 @@ impl Held {
     }
 }
 
-/// The items `held` holds (with `extra` columns) in the order of `order_clause`; with a limit, one page of them
+/// Runs `work` (a look at what `held` holds) on a connection of its own. A listing no index narrows down first waits
+/// for its turn, without holding a connection meanwhile (eight such waits would otherwise take the whole pool), and runs
+/// in a task of its own, which keeps the turn and the connection until the query is done, also when the request is given
+/// up: SQLite goes on reading a query nobody waits for any more, and the turn must not go to another one meanwhile.
+pub(super) async fn run_held<T, F, Fut>(st: &AppState, held: Held, work: F) -> AppResult<T>
+where
+    F: FnOnce(sqlx::pool::PoolConnection<sqlx::Sqlite>, Held) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = AppResult<T>> + Send + 'static,
+    T: Send + 'static,
+{
+    if !held.unindexed {
+        let c = st.db.acquire().await?;
+        return work(c, held).await;
+    }
+    let st = st.clone();
+    tokio::spawn(async move {
+        let _turn = held.turn().await;
+        let c = st.db.acquire().await?;
+        work(c, held).await
+    })
+    .await
+    .map_err(AppError::internal)?
+}
+
+/// The items `held` holds (with `extra` columns) in the order of `order_clause`; with a limit, one page of them. A
+/// listing no index narrows down goes through `run_held`.
 pub(super) async fn list_held(conn: &mut SqliteConnection, held: &Held, extra: &str, q: &ListQuery) -> AppResult<Listing<Node>> {
-    let _turn = held.turn().await;
     let sort = SortCol::parse(q.sort.as_deref());
     let desc = q.order.as_deref() == Some("desc");
     let (limit, after) = page_of::<Cursor>(q.limit, q.after.as_deref())?;
@@ -396,17 +426,23 @@ pub async fn position(State(st): State<AppState>, user: User, Path(id): Path<Str
     Ok(Json(position_in(&mut c, &Held::children_of(&folder.id), &q).await?))
 }
 
-/// Where an item is in the listing of what `held` holds
+/// Where an item is in the listing of what `held` holds (a listing no index narrows down goes through `run_held`)
 pub(super) async fn position_in(conn: &mut SqliteConnection, held: &Held, q: &PositionQuery) -> AppResult<Position> {
-    let _turn = held.turn().await;
     let sort = SortCol::parse(q.sort.as_deref());
     let desc = q.order.as_deref() == Some("desc");
-    let total = count_held(conn, held).await?;
-    let Some(row) = sort_row(conn, held, &q.item, sort).await? else { return Ok(Position { position: None, total }) };
+    // The total and the items behind the item are read in one view, so a change in between can't make them disagree
+    #[allow(clippy::disallowed_methods, reason = "a read-only transaction for one consistent view; it never writes")]
+    let mut tx = sqlx::Acquire::begin(&mut *conn).await?;
+    let total = count_held(&mut tx, held).await?;
+    let Some(row) = sort_row(&mut tx, held, &q.item, sort).await? else {
+        tx.commit().await?;
+        return Ok(Position { position: None, total });
+    };
     let mut args = held.args.clone();
     let after = after_cursor(sort, desc, &row.cursor(sort), &mut args);
     let sql = format!("SELECT COUNT(*) FROM nodes n WHERE {} AND {after}", held.condition);
-    let (behind,): (i64,) = bind_all(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())), args).fetch_one(&mut *conn).await?;
+    let (behind,): (i64,) = bind_all(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())), args).fetch_one(&mut *tx).await?;
+    tx.commit().await?;
     Ok(Position { position: Some((total - 1 - behind).max(0)), total })
 }
 
@@ -442,9 +478,9 @@ pub async fn select(State(st): State<AppState>, user: User, Path(id): Path<Strin
     Ok(Json(select_in(&mut c, &Held::children_of(&folder.id), &req).await?))
 }
 
-/// The ids of the items selected of those `held` holds, a batch at a time (see `select`)
+/// The ids of the items selected of those `held` holds, a batch at a time (see `select`; a listing no index narrows
+/// down goes through `run_held`)
 pub(super) async fn select_in(c: &mut SqliteConnection, held: &Held, req: &SelectReq) -> AppResult<Selected> {
-    let _turn = held.turn().await;
     let sort = SortCol::parse(req.sort.as_deref());
     let desc = req.order.as_deref() == Some("desc");
     let limit = req.limit.unwrap_or(MAX_BATCH as i64).clamp(1, MAX_BATCH as i64);

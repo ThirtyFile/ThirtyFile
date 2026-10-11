@@ -17,7 +17,7 @@ use crate::{
     util::now,
 };
 
-use super::{Arg, Held, ListQuery, Located, MAX_BATCH, bind_all, locate, not_root, order_clause};
+use super::{Arg, Held, ListQuery, Located, MAX_BATCH, bind_all, locate, not_root, order_clause, run_held};
 
 #[derive(Deserialize)]
 pub struct SearchQuery {
@@ -63,6 +63,25 @@ pub struct SearchResult {
 /// Extensions as a search takes them (comma separated, with or without the dot): lowercase, without the dot
 pub(super) fn ext_list(ext: Option<&str>) -> Vec<String> {
     ext.unwrap_or_default().split(',').map(|e| e.trim().trim_start_matches('.').to_lowercase()).filter(|e| !e.is_empty()).collect()
+}
+
+/// Checks a name to look for and file types as searches and smart folders take them: not longer than a name can be,
+/// without control characters, and at most MAX_EXTS file types, each an extension of letters, digits, _ and -
+pub(super) fn check_terms(name: &str, exts: &[String]) -> AppResult<()> {
+    use super::smart::{MAX_EXTS, MAX_TERM};
+    if name.chars().count() > MAX_TERM {
+        return Err(AppError::bad_request(format!("The name to look for can be at most {MAX_TERM} characters")));
+    }
+    if name.chars().any(char::is_control) {
+        return Err(AppError::bad_request("The name to look for can't contain control characters"));
+    }
+    if exts.len() > MAX_EXTS {
+        return Err(AppError::bad_request(format!("Choose at most {MAX_EXTS} file types")));
+    }
+    if exts.iter().any(|e| e.chars().count() > 16 || !e.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-')) {
+        return Err(AppError::bad_request("Enter file types as extensions, such as pdf or docx"));
+    }
+    Ok(())
 }
 
 /// What a search, or a smart folder (nodes/smart.rs), looks for. The parts left empty don't narrow it down. Matches
@@ -117,13 +136,15 @@ impl Criteria {
         if let Some(space) = &self.space {
             sql += &format!(" AND n.drive_id = {}", arg(Arg::Text(space.clone())));
         }
+        // One space, or one person's files, narrow it down through their indexes (nodes_drive, nodes_owner_recent)
+        let narrowed = self.space.is_some() || self.owner.as_deref().is_some_and(|o| !o.trim().is_empty());
         for tag in &self.tags {
             // The person's own tags only: someone else's matches nothing
             sql += &format!(" AND n.id IN (SELECT node_id FROM tagged WHERE tag_id = {} AND owner_id = {})", arg(Arg::Int(*tag)), arg(Arg::Int(self.tagged_by)));
         }
         let term = self.term.trim();
         // Whether an index narrows the items down (else every item in reach is read: `Held::turn`)
-        let mut indexed = self.below.is_some() || !self.tags.is_empty();
+        let mut indexed = self.below.is_some() || !self.tags.is_empty() || narrowed;
         if term.chars().count() >= 3 {
             indexed = true;
             // The trigram index: the term as one phrase (quotes inside it doubled)
@@ -175,6 +196,8 @@ impl Criteria {
 /// Searches names in all spaces and shared folders I can access, or in one folder and below
 pub async fn search(State(st): State<AppState>, user: User, Query(q): Query<SearchQuery>) -> AppResult<Json<SearchResult>> {
     let term = q.q.trim();
+    let exts = ext_list(q.ext.as_deref());
+    check_terms(term, &exts)?;
     let tags = q.tag_ids()?;
     if term.is_empty() && tags.is_empty() {
         return Ok(Json(SearchResult { items: Vec::new(), truncated: false }));
@@ -191,7 +214,7 @@ pub async fn search(State(st): State<AppState>, user: User, Query(q): Query<Sear
         below,
         space: None,
         kind: q.kind.clone(),
-        exts: ext_list(q.ext.as_deref()),
+        exts,
         from: q.from,
         to: q.to,
         min_size: q.min_size,
@@ -201,12 +224,14 @@ pub async fn search(State(st): State<AppState>, user: User, Query(q): Query<Sear
         tagged_by: user.id,
     };
     let held = criteria.held(drives, folders);
-    let _turn = held.turn().await;
-    let Held { condition, mut args, .. } = held;
-    let sql = format!("SELECT {NODE_COLS} FROM nodes n WHERE {condition} ORDER BY (n.kind = 'folder') DESC, n.updated_at DESC LIMIT ?{}", args.len() + 1);
-    args.push(Arg::Int(SEARCH_LIMIT + 1));
-    let mut nodes: Vec<Node> = bind_all(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())), args).fetch_all(&mut *c).await?;
     drop(c);
+    let mut nodes: Vec<Node> = run_held(&st, held, |mut c, held| async move {
+        let Held { condition, mut args, .. } = held;
+        let sql = format!("SELECT {NODE_COLS} FROM nodes n WHERE {condition} ORDER BY (n.kind = 'folder') DESC, n.updated_at DESC LIMIT ?{}", args.len() + 1);
+        args.push(Arg::Int(SEARCH_LIMIT + 1));
+        Ok(bind_all(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())), args).fetch_all(&mut *c).await?)
+    })
+    .await?;
     let truncated = nodes.len() as i64 > SEARCH_LIMIT;
     nodes.truncate(SEARCH_LIMIT as usize);
     Ok(Json(SearchResult { items: locate(&st, &user, nodes).await?, truncated }))

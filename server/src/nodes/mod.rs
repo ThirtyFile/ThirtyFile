@@ -804,6 +804,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn searches_waiting_for_a_turn_hold_no_connection() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        env.file(&amy, amy.root(), "ab.txt").await;
+        // Both turns taken: twenty searches no index narrows down (two letters) wait for one
+        let turns = list::take_unindexed_turns().await;
+        let waiting: Vec<_> = (0..20)
+            .map(|_| {
+                let (st, amy) = (env.st.clone(), amy.clone());
+                tokio::spawn(async move {
+                    search(State(st), amy, Query(serde_json::from_value(serde_json::json!({ "q": "ab" })).unwrap())).await.map(|Json(r)| r.items.len())
+                })
+            })
+            .collect();
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        // Meanwhile everything else still gets a connection at once
+        for _ in 0..10 {
+            let c = tokio::time::timeout(std::time::Duration::from_secs(2), env.st.db.acquire()).await;
+            assert!(c.is_ok_and(|c| c.is_ok()), "the waiting searches took the pool");
+        }
+        drop(turns);
+        for w in waiting {
+            assert_eq!(w.await.unwrap().unwrap(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_search_asks_for_no_more_than_a_smart_folder_can() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let ask = |q: serde_json::Value| {
+            let (st, amy) = (env.st.clone(), amy.clone());
+            async move { search(State(st), amy, Query(serde_json::from_value(q).unwrap())).await.map(|_| ()).map_err(|e| e.status) }
+        };
+        let many: Vec<String> = (0..51).map(|i| format!("e{i}")).collect();
+        assert_eq!(ask(serde_json::json!({ "q": "a", "ext": many.join(",") })).await, Err(axum::http::StatusCode::BAD_REQUEST));
+        assert_eq!(ask(serde_json::json!({ "q": "a".repeat(256) })).await, Err(axum::http::StatusCode::BAD_REQUEST));
+        assert_eq!(ask(serde_json::json!({ "q": "a", "ext": "p%f" })).await, Err(axum::http::StatusCode::BAD_REQUEST));
+        assert_eq!(ask(serde_json::json!({ "q": "a", "ext": "pdf,docx" })).await, Ok(()));
+    }
+
+    #[tokio::test]
     async fn folder_share_editor_can_only_restore_or_destroy_items_inside_the_share() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
