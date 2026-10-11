@@ -18,7 +18,11 @@ import {
   ChevronDownIcon,
   Columns3Icon,
   HighlighterIcon,
+  IndentDecreaseIcon,
+  IndentIncreaseIcon,
   ItalicIcon,
+  ListIcon,
+  ListOrderedIcon,
   Grid3x3Icon,
   Loader2Icon,
   PaintBucketIcon,
@@ -53,7 +57,7 @@ import type { Caret, CaretFormat, ParagraphStyle } from "@/ooxml/docx/editor";
 import { HIGHLIGHTS } from "@/ooxml/docx/formatOps";
 import { MAX_SPLIT, type BorderKind, type TableOp } from "@/ooxml/docx/tableOps";
 import { TOO_LARGE } from "@/ooxml/core/package";
-import { dropSession, isDirty, keepSession, openSession, releaseIfClean, reusableSession, saveSession, type DocxSession } from "./session";
+import { dropSession, isDirty, keepSession, openSession, releaseIfClean, reusableSession, saveSession, type DocxSession, type Parts } from "./session";
 
 /** Word's usual font sizes (points) */
 const SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72];
@@ -153,10 +157,9 @@ export default function DocxEditor(props: { node: Node; source: FileSource; onSa
   );
 }
 
-/** What the frame answers when asked for the edited document */
+/** What the frame answers when asked for the edited document: the parts it changed (by path), the caret, the scroll */
 interface Collected {
-  path: string;
-  xml: string | null;
+  parts: Parts;
   caret: Caret | null;
   scroll: number;
 }
@@ -190,9 +193,9 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
 
   /** What the frame holds becomes the session's */
   const absorb = (c: Collected) => {
-    session.path = c.path;
-    // The frame says the whole edited document.xml (null: the file's as opened)
-    session.current = c.xml;
+    // The frame says every part it changed (none: the file as opened)
+    const parts = c.parts && typeof c.parts === "object" ? c.parts : {};
+    session.current = Object.keys(parts).length ? parts : null;
     session.caret = c.caret;
     session.scroll = c.scroll;
   };
@@ -217,7 +220,7 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
       const c = await collect();
       absorb(c);
       if (!isDirty(session)) return;
-      const n = await saveSession(session, node.id, c.path, session.current);
+      const n = await saveSession(session, node.id, session.current);
       toast.success(t("Saved"));
       onSaved?.(n);
     } catch (e) {
@@ -239,7 +242,7 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
   };
   const border = (kind: BorderKind) => table("border", { border: kind });
   /** Formatting of the selection, in the frame; the caret stays there */
-  const format = (change: { cmd?: string; value?: string; size?: number; style?: string; isDefault?: boolean; align?: string }) => {
+  const format = (change: { cmd?: string; value?: string; size?: number; style?: string; isDefault?: boolean; align?: string; list?: string; level?: number }) => {
     frame.current?.contentWindow?.postMessage({ type: "format", ...change }, "*");
     frame.current?.focus();
   };
@@ -329,7 +332,7 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
           table: t("The text in this table's cells can be changed. Its rows and columns are kept as they are."),
         };
         // "*": the sandboxed frame has an opaque origin, which no target origin can name; only that frame receives it
-        frame.current?.contentWindow?.postMessage({ type: "edit", kind: "docx", buffer, xml: session.current, texts, caret: session.caret, scroll: session.scroll }, "*", [buffer]);
+        frame.current?.contentWindow?.postMessage({ type: "edit", kind: "docx", buffer, parts: session.current ?? {}, texts, caret: session.caret, scroll: session.scroll }, "*", [buffer]);
         openTimer = window.setTimeout(() => {
           if (cancelled) return;
           setError(t("Laying out this document took too long, so the preview was stopped. Download it and open it in Office."));
@@ -454,6 +457,19 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
           disabled={formatOff}
           onPick={(c) => format({ cmd: "hiliteColor", value: c ?? "transparent" })}
         />
+        <span className="mx-1 h-5 shrink-0 border-l" />
+        <FormatButton label={t("Bulleted list")} active={fmt?.list === "bullet"} disabled={formatOff} onClick={() => format({ list: "bullet" })}>
+          <ListIcon />
+        </FormatButton>
+        <FormatButton label={t("Numbered list")} active={fmt?.list === "number"} disabled={formatOff} onClick={() => format({ list: "number" })}>
+          <ListOrderedIcon />
+        </FormatButton>
+        <FormatButton label={t("Decrease indent")} keys="Shift+Tab" disabled={formatOff} onClick={() => format({ level: -1 })}>
+          <IndentDecreaseIcon />
+        </FormatButton>
+        <FormatButton label={t("Increase indent")} keys="Tab" disabled={formatOff} onClick={() => format({ level: 1 })}>
+          <IndentIncreaseIcon />
+        </FormatButton>
         <span className="mx-1 h-5 shrink-0 border-l" />
         <FormatButton label={t("Align left")} active={fmt?.align === "left"} disabled={formatOff} onClick={() => format({ align: "left" })}>
           <AlignLeftIcon />

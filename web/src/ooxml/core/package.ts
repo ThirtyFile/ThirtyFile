@@ -312,14 +312,20 @@ export class OoxmlPackage {
     return p;
   }
 
-  /** Use this text for an XML part instead of the archive's (an edited document.xml that isn't saved yet) */
-  replaceXml(path: string, text: string) {
-    this.docs.set(path, Promise.resolve(parseXml(text)));
-  }
+  private replaced = new Set<string>();
 
-  /** Read an XML part from the archive again (after `replaceXml`) */
-  forgetXml(path: string) {
-    this.docs.delete(path);
+  /**
+   * Use these texts for XML parts instead of the archive's (edited parts not saved yet, by path). Parts named before
+   * and not now are read from the archive again, and relationships are worked out again from what the parts now say.
+   */
+  useParts(parts: Record<string, string>) {
+    for (const path of this.replaced) this.docs.delete(path);
+    this.replaced.clear();
+    for (const [path, text] of Object.entries(parts)) {
+      this.docs.set(path, Promise.resolve(parseXml(text)));
+      this.replaced.add(path);
+    }
+    this.relsCache.clear();
   }
 
   /** Relationships of a part (word/document.xml → word/_rels/document.xml.rels) */
