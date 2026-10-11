@@ -139,6 +139,9 @@ struct Watcher {
     skipped: HashMap<String, PathBuf>,
     /// Where the fully watched spaces are told (`Memory::watched`)
     published: std::sync::Arc<crate::sync::Mutex<HashSet<String>>>,
+    /// Folders that came into a watched space, to watch with everything in them, a few at a time (`drain`): a large
+    /// tree moved in doesn't stop the events being read meanwhile
+    todo: Vec<(String, String)>,
 }
 
 impl Drop for Watcher {
@@ -151,56 +154,65 @@ impl Drop for Watcher {
 impl Watcher {
     /// Watches `rel` of a space and every folder below it; false when `rel` itself couldn't be watched (it isn't there)
     fn add_tree(&mut self, drive: &str, rel: &str) -> bool {
-        let Some(root) = self.roots.get(drive).cloned() else { return false };
-        let Ok(pinned) = crate::beneath::Pinned::root(&root) else { return false };
-        let mut queue = vec![rel.to_string()];
-        let mut first = true;
+        let Some(below) = self.watch_one(drive, rel) else { return false };
+        let mut queue = below;
         while let Some(rel) = queue.pop() {
-            let asked_for = std::mem::take(&mut first);
-            // Reached without following a symbolic link on the way, so a folder swapped for a link isn't watched
-            let Ok(dir) = (if rel.is_empty() { Ok(pinned.clone()) } else { pinned.join(&rel).and_then(|d| d.dir()) }) else {
-                if asked_for {
-                    return false;
-                }
-                continue;
-            };
-            let path = dir.as_path();
-            let Ok(c) = CString::new(path.as_os_str().as_bytes()) else { continue };
-            // SAFETY: an open inotify descriptor and a valid path. The path is `/proc/self/fd/…` of the folder opened just
-            // now (without following links), itself a link to it: it must be followed, so no IN_DONT_FOLLOW here
-            let wd = unsafe { libc::inotify_add_watch(self.fd, c.as_ptr(), WATCH_MASK | libc::IN_ONLYDIR) };
-            if wd < 0 {
-                if std::io::Error::last_os_error().raw_os_error() == Some(libc::ENOSPC) && !self.limited {
-                    self.limited = true;
-                    self.publish();
-                    tracing::warn!(
-                        "Can't watch every folder of the folder spaces (the limit fs.inotify.max_user_watches is reached, at {}): changes there are found by the regular scan",
-                        root.join(&rel).display()
-                    );
-                }
-                if asked_for {
-                    return false;
-                }
-                continue;
-            }
-            // A folder reached twice from another space (a bind mount inside it, say) keeps its first owner; in the same
-            // space it is at its new path now
-            match self.dirs.get(&wd) {
-                Some((d, _)) if d != drive => {}
-                _ => {
-                    self.dirs.insert(wd, (drive.to_string(), rel.clone()));
-                }
-            }
-            let Ok(read) = std::fs::read_dir(path) else { continue };
-            for item in read.flatten() {
-                let Ok(name) = item.file_name().into_string() else { continue };
-                if crate::folders::ignored(&name) || !item.file_type().is_ok_and(|t| t.is_dir()) {
-                    continue;
-                }
-                queue.push(if rel.is_empty() { name } else { format!("{rel}/{name}") });
-            }
+            queue.extend(self.watch_one(drive, &rel).unwrap_or_default());
         }
         true
+    }
+
+    /// Watches up to `budget` folders of those waiting in `todo` (and puts the folders in them in it); returns whether
+    /// any are left
+    fn drain(&mut self, budget: usize) -> bool {
+        for _ in 0..budget {
+            let Some((drive, rel)) = self.todo.pop() else { return false };
+            let below = self.watch_one(&drive, &rel).unwrap_or_default();
+            self.todo.extend(below.into_iter().map(|r| (drive.clone(), r)));
+        }
+        !self.todo.is_empty()
+    }
+
+    /// Watches one folder of a space; returns the folders in it, or None when it couldn't be watched
+    fn watch_one(&mut self, drive: &str, rel: &str) -> Option<Vec<String>> {
+        let root = self.roots.get(drive).cloned()?;
+        let pinned = crate::beneath::Pinned::root(&root).ok()?;
+        // Reached without following a symbolic link on the way, so a folder swapped for a link isn't watched
+        let dir = (if rel.is_empty() { Ok(pinned.clone()) } else { pinned.join(rel).and_then(|d| d.dir()) }).ok()?;
+        let path = dir.as_path();
+        let c = CString::new(path.as_os_str().as_bytes()).ok()?;
+        // SAFETY: an open inotify descriptor and a valid path. The path is `/proc/self/fd/…` of the folder opened just
+        // now (without following links), itself a link to it: it must be followed, so no IN_DONT_FOLLOW here
+        let wd = unsafe { libc::inotify_add_watch(self.fd, c.as_ptr(), WATCH_MASK | libc::IN_ONLYDIR) };
+        if wd < 0 {
+            if std::io::Error::last_os_error().raw_os_error() == Some(libc::ENOSPC) && !self.limited {
+                self.limited = true;
+                self.publish();
+                tracing::warn!(
+                    "Can't watch every folder of the folder spaces (the limit fs.inotify.max_user_watches is reached, at {}): changes there are found by the regular scan",
+                    root.join(rel).display()
+                );
+            }
+            return None;
+        }
+        // A folder reached twice from another space (a bind mount inside it, say) keeps its first owner; in the same
+        // space it is at its new path now
+        match self.dirs.get(&wd) {
+            Some((d, _)) if d != drive => {}
+            _ => {
+                self.dirs.insert(wd, (drive.to_string(), rel.to_string()));
+            }
+        }
+        let mut below = Vec::new();
+        let Ok(read) = std::fs::read_dir(path) else { return Some(below) };
+        for item in read.flatten() {
+            let Ok(name) = item.file_name().into_string() else { continue };
+            if crate::folders::ignored(&name) || !item.file_type().is_ok_and(|t| t.is_dir()) {
+                continue;
+            }
+            below.push(if rel.is_empty() { name } else { format!("{rel}/{name}") });
+        }
+        Some(below)
     }
 
     /// Starts and stops watching spaces so the watched ones are `wanted`
@@ -210,6 +222,18 @@ impl Watcher {
 
     /// Tests can model a mounted file system with no external events without changing the process's environment.
     fn update_with(&mut self, wanted: Spaces, fallback: impl Fn(&Path) -> Option<&'static str>) {
+        // The watch limit was reached: everything is watched again from the start, so spaces gone (or a limit raised
+        // meanwhile) let the others be watched in full again
+        if self.limited {
+            self.limited = false;
+            for wd in self.dirs.keys() {
+                // SAFETY: a watch descriptor of this instance
+                unsafe { libc::inotify_rm_watch(self.fd, *wd) };
+            }
+            self.dirs.clear();
+            self.roots.clear();
+            self.todo.clear();
+        }
         self.skipped.retain(|id, path| wanted.get(id) == Some(path));
         let gone: Vec<String> = self.roots.iter().filter(|(id, path)| wanted.get(*id) != Some(*path)).map(|(id, _)| id.clone()).collect();
         for id in &gone {
@@ -277,7 +301,7 @@ impl Watcher {
             self.forget(&drive, &child);
         }
         if mask & libc::IN_ISDIR != 0 && mask & (libc::IN_CREATE | libc::IN_MOVED_TO) != 0 {
-            self.add_tree(&drive, &child);
+            self.todo.push((drive.clone(), child));
         }
         Some((drive, dir))
     }
@@ -300,6 +324,9 @@ impl Watcher {
     }
 }
 
+/// Folders a new tree is watched at between two reads of the events
+const DRAIN_PER_PASS: usize = 256;
+
 fn watch(st: AppState, handle: tokio::runtime::Handle, rx: &std::sync::mpsc::Receiver<Spaces>) {
     // SAFETY: plain system call
     let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
@@ -307,7 +334,18 @@ fn watch(st: AppState, handle: tokio::runtime::Handle, rx: &std::sync::mpsc::Rec
         tracing::warn!("Can't watch folder spaces for changes: {}", std::io::Error::last_os_error());
         return;
     }
-    let mut w = Watcher { fd, dirs: HashMap::new(), roots: HashMap::new(), limited: false, skipped: HashMap::new(), published: st.part::<Memory>().watched.clone() };
+    let mut w = Watcher {
+        fd,
+        dirs: HashMap::new(),
+        roots: HashMap::new(),
+        limited: false,
+        skipped: HashMap::new(),
+        published: st.part::<Memory>().watched.clone(),
+        todo: Vec::new(),
+    };
+    // A full check after the queue overflowed: running, and asked for again meanwhile (once is enough)
+    let rechecking = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let again = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     // (space, folder) → last change
     let mut changed: HashMap<(String, String), Instant> = HashMap::new();
     let mut overflow = false;
@@ -318,9 +356,11 @@ fn watch(st: AppState, handle: tokio::runtime::Handle, rx: &std::sync::mpsc::Rec
             Err(std::sync::mpsc::TryRecvError::Disconnected) => return,
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
         }
+        // Folders still to watch: a few hundred between reads of the events, which don't wait meanwhile
+        let busy = w.drain(DRAIN_PER_PASS);
         let mut pfd = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
         // SAFETY: one valid pollfd
-        let ready = unsafe { libc::poll(&mut pfd, 1, 1000) };
+        let ready = unsafe { libc::poll(&mut pfd, 1, if busy { 0 } else { 1000 }) };
         if ready > 0 {
             for (wd, mask, name) in read_events(fd, &mut buf) {
                 if mask & libc::IN_Q_OVERFLOW != 0 {
@@ -336,15 +376,27 @@ fn watch(st: AppState, handle: tokio::runtime::Handle, rx: &std::sync::mpsc::Rec
         if overflow {
             overflow = false;
             changed.clear();
+            // Overflowing again while that check runs asks for one more after it, not one more each time
+            if rechecking.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                again.store(true, std::sync::atomic::Ordering::SeqCst);
+                continue;
+            }
             tracing::info!("Too many changes at once in the folder spaces: checking them in full");
             // One after another: hundreds of spaces read at once would load every index into memory together
             let (st, ids): (AppState, Vec<String>) = (st.clone(), w.roots.keys().cloned().collect());
+            let (rechecking, again) = (rechecking.clone(), again.clone());
             handle.spawn(async move {
-                for id in ids {
-                    if let Err(e) = crate::folders::scan(&st, &id).await {
-                        tracing::warn!("Scanning a folder space failed: {}", e.message);
+                loop {
+                    for id in &ids {
+                        if let Err(e) = crate::folders::scan(&st, id).await {
+                            tracing::warn!("Scanning a folder space failed: {}", e.message);
+                        }
+                    }
+                    if !again.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                        break;
                     }
                 }
+                rechecking.store(false, std::sync::atomic::Ordering::SeqCst);
             });
             continue;
         }
@@ -410,7 +462,7 @@ mod tests {
         // SAFETY: plain system call
         let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
         assert!(fd >= 0);
-        Watcher { fd, dirs: HashMap::new(), roots: HashMap::new(), limited: false, skipped: HashMap::new(), published: Default::default() }
+        Watcher { fd, dirs: HashMap::new(), roots: HashMap::new(), limited: false, skipped: HashMap::new(), published: Default::default(), todo: Vec::new() }
     }
 
     fn paths(w: &Watcher) -> Vec<String> {
@@ -428,6 +480,7 @@ mod tests {
                 changed.insert(dir);
             }
         }
+        while w.drain(DRAIN_PER_PASS) {}
         changed
     }
 

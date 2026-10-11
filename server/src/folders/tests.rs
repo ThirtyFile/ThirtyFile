@@ -50,6 +50,28 @@ async fn opening_a_folder_doesnt_wait_for_a_change_in_its_space_nor_read_it_agai
     assert_eq!(list().await, ["a.txt", "b.txt"]);
 }
 
+#[tokio::test]
+async fn opening_a_folder_with_many_new_items_leaves_them_to_a_scan() {
+    let env = testutil::env().await;
+    let space = env.folder_space("Shared").await;
+    for i in 0..=SYNC_NEW_LIMIT {
+        write_old(&space.dir.join(format!("f{i}.txt")), b"x");
+    }
+    let count = || {
+        let db = env.st.db.clone();
+        async move { sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM nodes WHERE kind = 'file'").fetch_one(&db).await.unwrap().0 }
+    };
+    // A scan is running (it holds the space's scan lock): opening the folder adds none of them in the request, and the
+    // scan asked for afterwards takes them all in
+    let scanning = scan_lock(&env.st, &space.drive).lock_owned().await;
+    let root = crate::tree::get_node(&mut env.st.db.acquire().await.unwrap(), &space.root).await.unwrap().unwrap();
+    sync_opened(&env.st, &root).await;
+    assert_eq!(count().await, 0);
+    drop(scanning);
+    scan(&env.st, &space.drive).await.unwrap();
+    assert_eq!(count().await, SYNC_NEW_LIMIT as i64 + 1);
+}
+
 /// The process's own memory (not files it maps, such as the database: Linux's RssAnon), in MB
 fn anon_mb() -> Option<u64> {
     let status = std::fs::read_to_string("/proc/self/status").ok()?;

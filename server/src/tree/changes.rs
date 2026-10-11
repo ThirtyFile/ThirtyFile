@@ -12,7 +12,7 @@
 //! Meanwhile: an item being deleted for good isn't listed in the trash; an item whose trash, restore or path change
 //! isn't finished can't be moved, copied, restored or deleted (`refuse_busy`).
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use sqlx::SqliteConnection;
 use tokio::sync::OwnedMutexGuard;
@@ -409,6 +409,8 @@ async fn step(conn: &mut SqliteConnection, c: &Change, frontier: &mut Option<Vec
 
 /// Finishes the changes `rows`, a batch per transaction, counting the items changed into `progress`
 pub async fn run(st: &AppState, rows: Vec<Unfinished>, progress: &Tracker) -> AppResult<()> {
+    // Known to be under way until this returns, so the hourly retry (`retry_unfinished`) leaves them alone
+    let _running = Running::claim(rows.iter().map(|r| r.id.clone()).collect());
     let mut rows: VecDeque<Unfinished> = rows.into();
     while !rows.is_empty() {
         let mut out = Leftovers::default();
@@ -450,10 +452,78 @@ pub fn finish_later(st: &AppState, rows: Vec<Unfinished>, held: Vec<OwnedMutexGu
     let st = st.clone();
     tokio::spawn(async move {
         if let Err(e) = run(&st, rows, &Tracker::default()).await {
-            tracing::warn!("Couldn't finish a change of many items, will finish it at the next start: {}", e.message);
+            tracing::warn!("Couldn't finish a change of many items, will try again within the hour: {}", e.message);
         }
         drop(held);
     });
+}
+
+/// Changes being made now (`run`), by id
+static RUNNING: crate::sync::Mutex<Option<HashSet<String>>> = crate::sync::Mutex::new(None);
+
+/// The changes a `run` is making, known as under way until it ends
+struct Running(Vec<String>);
+
+impl Running {
+    fn claim(ids: Vec<String>) -> Running {
+        RUNNING.lock().get_or_insert_with(HashSet::new).extend(ids.iter().cloned());
+        Running(ids)
+    }
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        if let Some(set) = RUNNING.lock().as_mut() {
+            for id in &self.0 {
+                set.remove(id);
+            }
+        }
+    }
+}
+
+/// Hourly (maintenance): finishes the changes that stopped halfway (the disk was full, or the database busy) and that
+/// nothing is making now, rather than leaving them for the next start. Meanwhile a half-made rename leaves items under
+/// old paths, which makes every scan of that space fail.
+pub async fn retry_unfinished(st: &AppState) -> AppResult<()> {
+    let rows = unfinished(st).await?;
+    let running = RUNNING.lock().clone().unwrap_or_default();
+    // Older than a few minutes: a change just recorded is still being started by its request
+    let since = crate::util::now() - 300;
+    let mut left = Vec::new();
+    for (id, drive, created) in rows {
+        if created < since && !running.contains(&id) {
+            left.push((id, drive));
+        }
+    }
+    if left.is_empty() {
+        return Ok(());
+    }
+    tracing::info!("Finishing {} change(s) of many items that stopped halfway", left.len());
+    finish_rows(st, left).await;
+    Ok(())
+}
+
+/// The changes recorded and not finished, oldest first: (id, its folder space if any, when it was recorded)
+async fn unfinished(st: &AppState) -> AppResult<Vec<(String, Option<String>, i64)>> {
+    Ok(sqlx::query_as(
+        "SELECT c.id, CASE WHEN d.mode = 'folder' THEN d.id END, c.created_at FROM tree_changes c
+         LEFT JOIN nodes n ON n.id = c.node_id LEFT JOIN drives d ON d.id = COALESCE(c.drive_id, n.drive_id)
+         ORDER BY c.created_at, c.rowid",
+    )
+    .fetch_all(&st.db)
+    .await?)
+}
+
+/// Finishes `rows` in the background, with the locks of their folder spaces held
+async fn finish_rows(st: &AppState, rows: Vec<(String, Option<String>)>) {
+    let mut drives: Vec<String> = rows.iter().filter_map(|(_, d)| d.clone()).collect();
+    drives.sort();
+    drives.dedup();
+    let mut held = Vec::with_capacity(drives.len());
+    for d in &drives {
+        held.push(crate::fsops::lock_space(st, d).await);
+    }
+    finish_later(st, rows.into_iter().map(|(id, _)| Unfinished { id, frontier: None }).collect(), held);
 }
 
 /// Deletes an item and everything in it for good, a batch per transaction, without hiding it first: for items that
@@ -503,25 +573,12 @@ pub async fn repath_now(st: &AppState, drive_id: &str, old: &str, new: &str) -> 
 /// At startup: finishes the changes a stop left unfinished, in the background, holding the scan locks of the folder
 /// spaces they change from before any scan can start
 pub async fn resume(st: &AppState) -> AppResult<()> {
-    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
-        "SELECT c.id, CASE WHEN d.mode = 'folder' THEN d.id END FROM tree_changes c
-         LEFT JOIN nodes n ON n.id = c.node_id LEFT JOIN drives d ON d.id = COALESCE(c.drive_id, n.drive_id)
-         ORDER BY c.created_at, c.rowid",
-    )
-    .fetch_all(&st.db)
-    .await?;
+    let rows = unfinished(st).await?;
     if rows.is_empty() {
         return Ok(());
     }
-    let mut drives: Vec<String> = rows.iter().filter_map(|(_, d)| d.clone()).collect();
-    drives.sort();
-    drives.dedup();
-    let mut held = Vec::with_capacity(drives.len());
-    for d in &drives {
-        held.push(crate::fsops::lock_space(st, d).await);
-    }
     tracing::info!("Finishing {} change(s) of many items that stopped when ThirtyFile stopped", rows.len());
-    finish_later(st, rows.into_iter().map(|(id, _)| Unfinished { id, frontier: None }).collect(), held);
+    finish_rows(st, rows.into_iter().map(|(id, drive, _)| (id, drive)).collect()).await;
     Ok(())
 }
 
@@ -571,6 +628,35 @@ mod tests {
         .fetch_one(&env.st.db)
         .await
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_change_that_stopped_halfway_is_finished_by_the_hourly_retry() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", false).await;
+        let folder = env.folder(&amy, amy.root(), "F").await;
+        env.file(&amy, &folder, "a.txt").await;
+        // Recorded, never run (as when its run failed), a while ago
+        {
+            let mut tx = crate::db::begin_write(&env.st.db).await.unwrap();
+            purge(&mut tx, &folder).await.unwrap();
+            tx.commit().await.unwrap();
+        }
+        sqlx::query("UPDATE tree_changes SET created_at = created_at - 3600").execute(&env.st.db).await.unwrap();
+        retry_unfinished(&env.st).await.unwrap();
+        settled(&env.st).await;
+        assert_eq!(below(&env, &folder).await, (0, 0));
+        // One recorded just now is left to whoever is starting it
+        let other = env.folder(&amy, amy.root(), "G").await;
+        {
+            let mut tx = crate::db::begin_write(&env.st.db).await.unwrap();
+            purge(&mut tx, &other).await.unwrap();
+            tx.commit().await.unwrap();
+        }
+        retry_unfinished(&env.st).await.unwrap();
+        let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM tree_changes").fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(n, 1);
+        sqlx::query("DELETE FROM tree_changes").execute(&env.st.db).await.unwrap();
     }
 
     #[tokio::test]
