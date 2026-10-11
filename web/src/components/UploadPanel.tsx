@@ -30,7 +30,10 @@ export function UploadPanel({ visitor = false, endpoint = "/api/uploads" }: { vi
   const active = totals.uploading + totals.queued;
   const failed = totals.error;
   const pct = totals.size ? Math.round((totals.sent / totals.size) * 100) : 100;
-  const waiting = tasks.some((task) => task.status === "uploading" && (task.phase === "preparing" || task.phase === "finishing"));
+  // Waiting only while every upload under way is preparing or finishing (a large file being checked, say): with many
+  // small files one of them nearly always is, and the batch's percentage still means something then
+  const running = tasks.filter((task) => task.status === "uploading");
+  const waiting = running.length > 0 && running.every((task) => task.phase === "preparing" || task.phase === "finishing");
   const title = active
     ? waiting
       ? t("Uploading {n} file|Uploading {n} files", { n: active })
@@ -76,9 +79,9 @@ export function UploadPanel({ visitor = false, endpoint = "/api/uploads" }: { vi
           <XIcon />
         </Button>
       </div>
-      {/* Read out by screen readers once everything has finished (not on every percent) */}
+      {/* Read out by screen readers once everything has finished (not on every percent, nor on each file's phase) */}
       <div role="status" className="sr-only">
-        {active ? (waiting ? (tasks.some((task) => task.status === "uploading" && task.phase === "preparing") ? t("Preparing upload…") : t("Finishing upload…")) : "") : title}
+        {active ? "" : title}
       </div>
       {active > 0 && (
         <div role="progressbar" aria-label={t("Upload progress")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={waiting ? undefined : pct} className="h-0.5 bg-muted">

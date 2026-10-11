@@ -8,7 +8,7 @@ import { ConfirmDialog } from "@/components/dialogs";
 import { getDraft, setDraft } from "@/lib/drafts";
 import { t, tc } from "@/lib/i18n";
 import { shortcut } from "@/lib/keys";
-import { cn } from "@/lib/utils";
+import { cn, copyText } from "@/lib/utils";
 import { Axis, MAX_COLS, MAX_ROWS, cellName, key, mergeAt, normRange, parseCellName, rangeName, type Range, type Scalar, type Sheet } from "@/ooxml/xlsx/model";
 import { checkFormula } from "@/ooxml/xlsx/formula";
 import { formatGeneral } from "@/ooxml/core/numfmt";
@@ -17,7 +17,7 @@ import { HEADER_H, HEADER_W, cellRect, cellText, draw, fontOf, type View } from 
 import { SheetToolbar } from "./SheetToolbar";
 import { SheetMenu, type MenuTarget } from "./SheetMenu";
 import * as history from "./history";
-import { clipboardRange, createClipboard } from "./clipboard";
+import { clipboardRange, clipStore, createClipboard } from "./clipboard";
 import { createFormatting } from "./format";
 import { createKeyboard } from "./keyboard";
 import { useGridMouse } from "./mouse";
@@ -241,7 +241,16 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
 
   // ───── Changes and undo ─────
 
+  // A cut waits for its paste only while nothing else changes, as in Excel: an edit, or rows and columns inserted or
+  // deleted, would make the paste clear cells that now hold something else
+  const cancelCut = () => {
+    if (!clipStore.current?.cut) return;
+    clipStore.current = null;
+    setClip(null);
+  };
+
   const commitChanges = (changes: Change[], layout?: Entry["layout"]) => {
+    cancelCut();
     if (history.commit(session, changes, sheetIdx, sel, layout)) tick();
   };
 
@@ -250,6 +259,7 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
   const applyLayout = (sheetI: number, l: Layout) => history.applyLayout(book, sheetI, l);
 
   const pushEntry = (e: Entry) => {
+    cancelCut();
     history.pushEntry(session, e);
     tick();
   };
@@ -626,11 +636,11 @@ function Workspace({ node, session, onSaved, onExit, onReload }: { node: Node; s
             canRedo={session.redo.length > 0}
             onCut={() => {
               const text = copyRange(true);
-              if (text !== null) void navigator.clipboard?.writeText(text);
+              if (text !== null) void copyText(text).then((copied) => copied || toast.error(t("Couldn't copy")));
             }}
             onCopy={() => {
               const text = copyRange(false);
-              if (text !== null) void navigator.clipboard?.writeText(text);
+              if (text !== null) void copyText(text).then((copied) => copied || toast.error(t("Couldn't copy")));
             }}
             onPaste={async () => {
               try {

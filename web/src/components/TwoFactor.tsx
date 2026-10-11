@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { ErrorText, errorProps } from "@/components/dialogs";
 import { cn, copyAndSay } from "@/lib/utils";
 import { t } from "@/lib/i18n";
+import { saveBlob } from "@/downloads";
 
 /** The QR code to scan and the secret to type in instead (grouped by four characters) */
 export function SetupCode({ setup, className }: { setup: TwoFactorSetup; className?: string }) {
@@ -35,14 +36,8 @@ export function SetupCode({ setup, className }: { setup: TwoFactorSetup; classNa
 /** New recovery codes: shown once, with copy and download */
 export function RecoveryCodes({ codes, className }: { codes: string[]; className?: string }) {
   const text = codes.join("\n");
-  const download = () => {
-    const url = URL.createObjectURL(new Blob([`${text}\n`], { type: "text/plain" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "recovery-codes.txt";
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  // As every download made on the page: the file's address lives long enough for the browser to start it
+  const download = () => saveBlob(new Blob([`${text}\n`], { type: "text/plain" }), "recovery-codes.txt");
   return (
     <div className={cn("grid gap-2", className)}>
       <p className="text-xs opacity-80">{t("Keep these recovery codes somewhere safe. Each one signs you in once if you lose your phone. They won't be shown again.")}</p>
