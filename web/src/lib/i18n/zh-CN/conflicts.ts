@@ -12,6 +12,7 @@ export default {
   "The item there moves to the trash.": "原有的项目会移到回收站。",
   "Merge the folders, replacing files with the same names": "合并文件夹，并替换同名文件",
   "Merge the folders, keeping both files when names clash": "合并文件夹，同名文件两者都保留",
+  "Files there with the same names move to the trash.": "原有的同名文件会移到回收站。",
   "Skip this file": "跳过此文件",
   "Skip this folder": "跳过此文件夹",
   "Keep both": "两者都保留",

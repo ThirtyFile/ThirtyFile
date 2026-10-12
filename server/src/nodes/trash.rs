@@ -1,6 +1,6 @@
 //! The trash: listing, restoring, deleting for good and emptying it
 
-use std::collections::HashMap;
+use std::{collections::HashMap, future::Future, pin::Pin};
 
 use axum::{
     Json,
@@ -25,6 +25,14 @@ use crate::{
 };
 
 use super::{BatchReq, Listing, Located, Resolution, encode_cursor, locate, outermost, page_of, replace_existing};
+
+/// Where a trashed item goes back to: the nearest folder above it that is out of the trash (the space's root folder
+/// when the folders above it are gone), and the names of the folders in the trash on the way from there down to the
+/// item. Those are made again when it is restored, as in Windows.
+pub(super) struct Place {
+    pub(super) folder: String,
+    pub(super) missing: Vec<String>,
+}
 
 /// Spaces whose trash the user works with: their own spaces (at least `min_role`), plus every team space for administrators
 pub(super) async fn trash_drives(conn: &mut SqliteConnection, user: &User, min_role: Role) -> AppResult<Vec<String>> {
@@ -118,10 +126,10 @@ pub(super) async fn trash_role(conn: &mut SqliteConnection, user: &User, node: &
     Ok(role)
 }
 
-/// A trashed item and the folder it goes back to (its parent, or the space root when the parent was deleted too).
-/// The user needs `need` on that folder as well: a folder that was merely shared with them gives no rights over the
-/// owner's parent folder, so they can't restore or destroy the shared folder itself, only items inside it.
-pub(super) async fn trash_root(conn: &mut SqliteConnection, user: &User, id: &str, need: Need) -> AppResult<(Node, String)> {
+/// A trashed item and where it goes back to (`Place`). The user needs `need` on the folder there as well: a folder
+/// that was merely shared with them gives no rights over the owner's parent folder, so they can't restore or destroy
+/// the shared folder itself, only items inside it.
+pub(super) async fn trash_root(conn: &mut SqliteConnection, user: &User, id: &str, need: Need) -> AppResult<(Node, Place)> {
     let not_found = || AppError::not_found("Item not found in trash");
     let node = tree::get_node(conn, id).await?.ok_or_else(not_found)?;
     // Not one being deleted for good already
@@ -135,20 +143,136 @@ pub(super) async fn trash_root(conn: &mut SqliteConnection, user: &User, id: &st
     if node.space_read_only {
         return Err(tree::read_only_error(&node));
     }
-    let parent = match &node.parent_id {
-        Some(p) => tree::get_node(conn, p).await?.filter(|p| p.trashed_at.is_none()),
-        None => None,
-    };
+    // Up through the folders in the trash, to the first one that isn't
+    let (mut missing, mut up, mut parent) = (Vec::new(), node.parent_id.clone(), None);
+    while let Some(id) = up {
+        let Some(p) = tree::get_node(conn, &id).await? else { break };
+        if p.trashed_at.is_none() {
+            parent = Some(p);
+            break;
+        }
+        missing.push(p.name.clone());
+        up = p.parent_id.clone();
+    }
+    missing.reverse();
     let dest = match parent {
         Some(p) => p,
         None => {
+            missing.clear();
             let root_id = tree::get_drive(conn, node.drive()).await?.map(|d| d.root_id).ok_or_else(not_found)?;
             tree::get_node(conn, &root_id).await?.ok_or_else(not_found)?
         }
     };
     let dest_role = trash_role(conn, user, &dest).await?.ok_or_else(|| AppError::forbidden("You don't have permission on the folder this item belongs to"))?;
     tree::allows(user, dest_role, need)?;
-    Ok((node, dest.id))
+    Ok((node, Place { folder: dest.id, missing }))
+}
+
+/// The folder a trashed item goes into, when the folders on the way to it are all there (out of the trash): None while
+/// one of them would be made
+pub(super) async fn existing_folder(conn: &mut SqliteConnection, place: &Place) -> AppResult<Option<String>> {
+    let mut folder = place.folder.clone();
+    for name in &place.missing {
+        match tree::find_child(conn, &folder, name).await? {
+            Some(f) if f.is_folder() => folder = f.id,
+            _ => return Ok(None),
+        }
+    }
+    Ok(Some(folder))
+}
+
+/// What the activity log says of a folder made again
+const MADE_AGAIN: &str = "Made again for an item restored from the trash";
+
+/// The folder a restored item goes into: each folder on the way that is in the trash is made again, new and empty,
+/// unless one of that name is there already (a file of that name gives the new folder a number)
+async fn make_way(conn: &mut SqliteConnection, user: &User, locks: &fsops::SpaceLocks, place: &Place) -> AppResult<String> {
+    let mut folder = place.folder.clone();
+    for name in &place.missing {
+        if let Some(f) = tree::find_child(conn, &folder, name).await?.filter(|f| f.is_folder()) {
+            folder = f.id;
+            continue;
+        }
+        let parent = tree::get_node(conn, &folder).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
+        let id = if parent.in_folder_space() {
+            let name = fsops::free_name(conn, &parent, name, true).await?;
+            fsops::make_folder(conn, locks, user.id, &parent, &name).await?
+        } else {
+            let name = tree::unique_name(conn, &parent.id, name, true).await?;
+            crate::content::create_folder(conn, user.id, &parent.id, &name).await?
+        };
+        tree::touch(conn, &parent.id).await?;
+        let made = tree::get_node(conn, &id).await?;
+        logs::record_activity(conn, user, made.as_ref().map(|n| n as _), "create_folder", MADE_AGAIN).await?;
+        folder = id;
+    }
+    Ok(folder)
+}
+
+/// The ids, folders before what was in them (those with fewer folders above them first): an item restored together
+/// with its folder goes back into it, whatever the order they were chosen in
+async fn outer_first(conn: &mut SqliteConnection, ids: Vec<String>) -> AppResult<Vec<String>> {
+    let mut by_depth = Vec::with_capacity(ids.len());
+    for id in ids {
+        let (depth,): (i64,) = sqlx::query_as(
+            "WITH RECURSIVE up(id) AS (SELECT parent_id FROM nodes WHERE id = ?1 UNION ALL SELECT n.parent_id FROM nodes n JOIN up ON n.id = up.id)
+             SELECT count(*) FROM up WHERE id IS NOT NULL",
+        )
+        .bind(&id)
+        .fetch_one(&mut *conn)
+        .await?;
+        by_depth.push((depth, id));
+    }
+    by_depth.sort_by_key(|(depth, _)| *depth);
+    Ok(by_depth.into_iter().map(|(_, id)| id).collect())
+}
+
+/// Merges the folder `from`, in the trash, into the folder `into` of the same name, as Windows does: what went to the
+/// trash with `from` goes into `into`, out of the trash (the folders it holds merged the same way into folders of the
+/// same name), then `from` itself goes. A file whose name `into` has already takes the place of the one there, which
+/// goes to the trash (`replace`), or gets a number. Items put in the trash on their own from inside `from` go back into
+/// `into` when they are restored. What is inside the items that come out is left to the caller (`changes::restore`).
+fn merge<'a>(
+    conn: &'a mut SqliteConnection,
+    user: &'a User,
+    locks: &'a fsops::SpaceLocks,
+    from: &'a Node,
+    into: &'a Node,
+    replace: bool,
+) -> Pin<Box<dyn Future<Output = AppResult<()>> + Send + 'a>> {
+    Box::pin(async move {
+        let sql = format!("SELECT {NODE_COLS} FROM nodes n WHERE n.parent_id = ? AND n.trash_root = 0");
+        let items: Vec<Node> = sqlx::query_as(sqlx::AssertSqlSafe(sql)).bind(&from.id).fetch_all(&mut *conn).await?;
+        for item in &items {
+            let name = match tree::find_child(conn, &into.id, &item.name).await? {
+                Some(there) if there.is_folder() && item.is_folder() => {
+                    merge(conn, user, locks, item, &there, replace).await?;
+                    continue;
+                }
+                Some(there) if replace => {
+                    replace_existing(conn, user, locks, &there, item).await?;
+                    item.name.clone()
+                }
+                Some(_) if into.in_folder_space() => fsops::free_name(conn, into, &item.name, item.is_folder()).await?,
+                Some(_) => tree::unique_name(conn, &into.id, &item.name, item.is_folder()).await?,
+                None => item.name.clone(),
+            };
+            if item.in_folder_space() {
+                fsops::rename(conn, locks, item, into, &name).await?;
+            }
+            // Out of the trash at once, so the next names taken see it
+            sqlx::query("UPDATE nodes SET parent_id = ?, name = ?, trashed_at = NULL, trash_root = 0, trash_id = NULL, trashed_by = NULL WHERE id = ?")
+                .bind(&into.id)
+                .bind(&name)
+                .bind(&item.id)
+                .execute(&mut *conn)
+                .await?;
+        }
+        sqlx::query("UPDATE nodes SET parent_id = ? WHERE parent_id = ?").bind(&into.id).bind(&from.id).execute(&mut *conn).await?;
+        // Empty now (in a folder space, its folder in the trash goes with the trash folder, `fsops::clean_trash`)
+        sqlx::query("DELETE FROM nodes WHERE id = ?").bind(&from.id).execute(&mut *conn).await?;
+        Ok(())
+    })
 }
 
 pub async fn restore(State(st): State<AppState>, user: User, Json(req): Json<BatchReq>) -> AppResult<Json<Value>> {
@@ -156,13 +280,33 @@ pub async fn restore(State(st): State<AppState>, user: User, Json(req): Json<Bat
     let locks = fsops::lock_seen(&st, &user, &ids.iter().map(String::as_str).collect::<Vec<_>>()).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    for id in &ids {
-        // Restored into the original folder, or the space's root folder if that was deleted too
-        let (node, parent_id) = trash_root(&mut tx, &user, id, Need::Write).await?;
+    for id in &outer_first(&mut tx, ids).await? {
+        // Restored into the original folder, made again (with the folders above it) if it is in the trash too
+        let (node, place) = trash_root(&mut tx, &user, id, Need::Write).await?;
         locks.check(&node)?;
         changes::refuse_busy(&mut tx, &node.id).await?;
+        let parent_id = make_way(&mut tx, &user, &locks, &place).await?;
         // Without an answer the item gets a number when its name is taken, as it always did
         if let Some(existing) = tree::find_child(&mut tx, &parent_id, &node.name).await? {
+            // A folder where a folder has its name now is merged into it, whatever the answer but Skip
+            if node.is_folder() && existing.is_folder() {
+                let resolution = req.resolution(&node.id);
+                if resolution == Some(Resolution::Skip) {
+                    continue;
+                }
+                let into = tree::node_for(&mut tx, &user, &existing.id, Need::Write).await?;
+                locks.check(&into)?;
+                changes::refuse_busy(&mut tx, &into.id).await?;
+                let (trash_id,): (Option<String>,) = sqlx::query_as("SELECT trash_id FROM nodes WHERE id = ?").bind(&node.id).fetch_one(&mut *tx).await?;
+                logs::record_activity(&mut tx, &user, Some(&node), "restore", "").await?;
+                merge(&mut tx, &user, &locks, &node, &into, resolution == Some(Resolution::Replace)).await?;
+                // What is inside the items that came out follows, as in a restore
+                if let Some(trash_id) = trash_id {
+                    locks.later(changes::restore(&mut tx, &into.id, &trash_id).await?);
+                }
+                tree::touch(&mut tx, &into.id).await?;
+                continue;
+            }
             match req.resolution(&node.id) {
                 Some(Resolution::Skip) => continue,
                 Some(Resolution::Replace) => replace_existing(&mut tx, &user, &locks, &existing, &node).await?,

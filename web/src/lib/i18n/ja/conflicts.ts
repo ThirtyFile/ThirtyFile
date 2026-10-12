@@ -12,6 +12,7 @@ export default {
   "The item there moves to the trash.": "既存の項目はごみ箱に移動されます。",
   "Merge the folders, replacing files with the same names": "フォルダーを統合し、同じ名前のファイルを置き換える",
   "Merge the folders, keeping both files when names clash": "フォルダーを統合し、名前が重複するファイルは両方を残す",
+  "Files there with the same names move to the trash.": "既存の同じ名前のファイルはごみ箱に移動されます。",
   "Skip this file": "このファイルをスキップ",
   "Skip this folder": "このフォルダーをスキップ",
   "Keep both": "両方を残す",

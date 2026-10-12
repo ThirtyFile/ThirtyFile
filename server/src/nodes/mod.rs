@@ -1305,4 +1305,190 @@ mod tests {
         // Nothing more is old enough
         assert_eq!(purge_expired_trash(&env.st, 30).await.unwrap(), 0);
     }
+
+    /// The names of what a folder holds (not in the trash), sorted
+    async fn names_in(env: &testutil::TestEnv, folder: &str) -> Vec<String> {
+        let rows: Vec<(String,)> =
+            sqlx::query_as("SELECT name FROM nodes WHERE parent_id = ? AND trashed_at IS NULL ORDER BY name").bind(folder).fetch_all(&env.st.db).await.unwrap();
+        rows.into_iter().map(|(n,)| n).collect()
+    }
+
+    /// The item named `name` that `folder` holds (not in the trash)
+    async fn child(env: &testutil::TestEnv, folder: &str, name: &str) -> String {
+        tree::find_child(&mut env.st.db.acquire().await.unwrap(), folder, name).await.unwrap().unwrap().id
+    }
+
+    /// ABC holding ABC.txt and other.txt, in `user`'s files; ABC.txt is deleted, then ABC: (ABC, ABC.txt, other.txt)
+    async fn deleted_one_then_its_folder(env: &testutil::TestEnv, user: &User) -> (String, String, String) {
+        let abc = env.folder(user, user.root(), "ABC").await;
+        let txt = env.file(user, &abc, "ABC.txt").await;
+        let other = env.file(user, &abc, "other.txt").await;
+        let _ = trash(State(env.st.clone()), user.clone(), ids(&[&txt])).await.unwrap();
+        let _ = trash(State(env.st.clone()), user.clone(), ids(&[&abc])).await.unwrap();
+        (abc, txt, other)
+    }
+
+    #[tokio::test]
+    async fn an_item_whose_folder_is_in_the_trash_goes_back_into_it_in_any_order() {
+        let env = testutil::env().await;
+        let st = || State(env.st.clone());
+
+        // The file first: its folder is made again, new and empty, then the folder restored is merged into it
+        let amy = env.user("amy", true).await;
+        let (abc, txt, other) = deleted_one_then_its_folder(&env, &amy).await;
+        let _ = restore(st(), amy.clone(), ids(&[&txt])).await.unwrap();
+        let made = child(&env, amy.root(), "ABC").await;
+        assert_ne!(made, abc);
+        assert_eq!(names_in(&env, &made).await, ["ABC.txt"]);
+        assert!(name_of(&env, &abc).await.2, "the folder deleted stays in the trash with what else it holds");
+        let (detail,): (String,) =
+            sqlx::query_as("SELECT detail FROM activity WHERE node_id = ? AND action = 'create_folder'").bind(&made).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(detail, "Made again for an item restored from the trash");
+        let Json(found) = conflicts(st(), amy.clone(), Json(ConflictsReq { dest_id: None, names: vec![], ids: vec![abc.clone()] })).await.unwrap();
+        assert_eq!(found.iter().map(|c| c.existing.id.as_str()).collect::<Vec<_>>(), [made.as_str()]);
+        let _ = restore(st(), amy.clone(), ids(&[&abc])).await.unwrap();
+        assert_eq!(names_in(&env, amy.root()).await, ["ABC"]);
+        assert_eq!(names_in(&env, &made).await, ["ABC.txt", "other.txt"]);
+        assert_eq!(name_of(&env, &other).await, ("other.txt".into(), Some(made.clone()), false));
+        assert!(tree::get_node(&mut env.st.db.acquire().await.unwrap(), &abc).await.unwrap().is_none(), "merged: the folder from the trash is gone");
+        let (left,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE drive_id = ? AND trashed_at IS NOT NULL")
+            .bind(env.drive_of(amy.root()).await)
+            .fetch_one(&env.st.db)
+            .await
+            .unwrap();
+        assert_eq!(left, 0);
+
+        // The folder first: the file goes back into it
+        let ben = env.user("ben", true).await;
+        let (abc, txt, _) = deleted_one_then_its_folder(&env, &ben).await;
+        let _ = restore(st(), ben.clone(), ids(&[&abc])).await.unwrap();
+        let _ = restore(st(), ben.clone(), ids(&[&txt])).await.unwrap();
+        assert_eq!(names_in(&env, ben.root()).await, ["ABC"]);
+        assert_eq!(names_in(&env, &abc).await, ["ABC.txt", "other.txt"]);
+
+        // Both at once, the file chosen first: the same
+        let cid = env.user("cid", true).await;
+        let (abc, txt, _) = deleted_one_then_its_folder(&env, &cid).await;
+        let _ = restore(st(), cid.clone(), ids(&[&txt, &abc])).await.unwrap();
+        assert_eq!(names_in(&env, cid.root()).await, ["ABC"]);
+        assert_eq!(names_in(&env, &abc).await, ["ABC.txt", "other.txt"]);
+    }
+
+    #[tokio::test]
+    async fn every_folder_on_the_way_in_the_trash_is_made_again() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let st = || State(env.st.clone());
+        let a = env.folder(&amy, amy.root(), "A").await;
+        let b = env.folder(&amy, &a, "B").await;
+        let c = env.file(&amy, &b, "c.txt").await;
+        let _ = env.file(&amy, &b, "d.txt").await;
+        let _ = trash(st(), amy.clone(), ids(&[&c])).await.unwrap();
+        let _ = trash(st(), amy.clone(), ids(&[&a])).await.unwrap();
+
+        let _ = restore(st(), amy.clone(), ids(&[&c])).await.unwrap();
+        let made_a = child(&env, amy.root(), "A").await;
+        let made_b = child(&env, &made_a, "B").await;
+        assert_ne!((made_a.as_str(), made_b.as_str()), (a.as_str(), b.as_str()));
+        assert_eq!(names_in(&env, &made_b).await, ["c.txt"]);
+        // The rest comes back with A, merged level by level
+        let _ = restore(st(), amy.clone(), ids(&[&a])).await.unwrap();
+        assert_eq!(names_in(&env, amy.root()).await, ["A"]);
+        assert_eq!(names_in(&env, &made_a).await, ["B"]);
+        assert_eq!(names_in(&env, &made_b).await, ["c.txt", "d.txt"]);
+    }
+
+    /// A folder D in the trash holding x.txt and Sub/y.txt, and a new folder D in its place holding the same names:
+    /// (D in the trash, the new D, its Sub, the x.txt and y.txt in the trash, those in the new D)
+    async fn folder_clash(env: &testutil::TestEnv, user: &User) -> [String; 7] {
+        let old = env.folder(user, user.root(), "D").await;
+        let x_old = env.file(user, &old, "x.txt").await;
+        let sub_old = env.folder(user, &old, "Sub").await;
+        let y_old = env.file(user, &sub_old, "y.txt").await;
+        let _ = trash(State(env.st.clone()), user.clone(), ids(&[&old])).await.unwrap();
+        let new = env.folder(user, user.root(), "D").await;
+        let x_new = env.file(user, &new, "x.txt").await;
+        let sub_new = env.folder(user, &new, "Sub").await;
+        let y_new = env.file(user, &sub_new, "y.txt").await;
+        [old, new, sub_new, x_old, y_old, x_new, y_new]
+    }
+
+    #[tokio::test]
+    async fn a_folder_restored_where_one_has_its_name_is_merged_into_it_as_answered() {
+        let env = testutil::env().await;
+        let st = || State(env.st.clone());
+
+        // Replace: the files from the trash take the names, those there go to the trash
+        let amy = env.user("amy", true).await;
+        let [old, new, sub, x_old, y_old, x_new, y_new] = folder_clash(&env, &amy).await;
+        let _ = restore(st(), amy.clone(), resolved(&[&old], None, Resolution::Replace)).await.unwrap();
+        assert_eq!(names_in(&env, &new).await, ["Sub", "x.txt"]);
+        assert_eq!((child(&env, &new, "x.txt").await, child(&env, &sub, "y.txt").await), (x_old, y_old));
+        assert!(name_of(&env, &x_new).await.2 && name_of(&env, &y_new).await.2);
+
+        // Keep both: those from the trash get a number
+        let ben = env.user("ben", true).await;
+        let [old, new, sub, x_old, y_old, ..] = folder_clash(&env, &ben).await;
+        let _ = restore(st(), ben.clone(), resolved(&[&old], None, Resolution::Keep)).await.unwrap();
+        assert_eq!(names_in(&env, &new).await, ["Sub", "x (1).txt", "x.txt"]);
+        assert_eq!(names_in(&env, &sub).await, ["y (1).txt", "y.txt"]);
+        assert_eq!((child(&env, &new, "x (1).txt").await, child(&env, &sub, "y (1).txt").await), (x_old, y_old));
+
+        // Skip: nothing comes back
+        let cid = env.user("cid", true).await;
+        let [old, new, sub, ..] = folder_clash(&env, &cid).await;
+        let _ = restore(st(), cid.clone(), resolved(&[&old], None, Resolution::Skip)).await.unwrap();
+        assert!(name_of(&env, &old).await.2);
+        assert_eq!((names_in(&env, &new).await, names_in(&env, &sub).await), (vec!["Sub".to_string(), "x.txt".into()], vec!["y.txt".to_string()]));
+    }
+
+    #[tokio::test]
+    async fn a_large_folder_merged_comes_back_a_batch_at_a_time() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let _small = tree::changes::small_batches(2);
+        let old = env.folder(&amy, amy.root(), "D").await;
+        let inner = env.folder(&amy, &old, "Inner").await;
+        for i in 0..7 {
+            env.file(&amy, &inner, &format!("f{i}.txt")).await;
+        }
+        let _ = trash(State(env.st.clone()), amy.clone(), ids(&[&old])).await.unwrap();
+        tree::changes::settled(&env.st).await;
+        let new = env.folder(&amy, amy.root(), "D").await;
+        let _ = restore(State(env.st.clone()), amy.clone(), ids(&[&old])).await.unwrap();
+        tree::changes::settled(&env.st).await;
+        assert_eq!(names_in(&env, &new).await, ["Inner"]);
+        assert_eq!(names_in(&env, &inner).await.len(), 7);
+    }
+
+    #[tokio::test]
+    async fn in_a_folder_space_the_folder_is_made_again_and_merged_on_disk() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        let admin = env.admin().await;
+        let st = || State(env.st.clone());
+        testutil::write_old(&space.dir.join("ABC/ABC.txt"), b"one");
+        testutil::write_old(&space.dir.join("ABC/other.txt"), b"two");
+        testutil::write_old(&space.dir.join("Live/x.txt"), b"three");
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        let at = async |rel: &str| env.node_at(&space.drive, rel).await.unwrap().0;
+        let (abc, txt, other, live) = (at("ABC").await, at("ABC/ABC.txt").await, at("ABC/other.txt").await, at("Live/x.txt").await);
+        let _ = trash(st(), admin.clone(), ids(&[&txt])).await.unwrap();
+        let _ = trash(st(), admin.clone(), ids(&[&abc])).await.unwrap();
+        assert!(!space.dir.join("ABC").exists());
+
+        // A restore that fails (an item not in the trash) leaves no folder made for it on disk
+        assert!(restore(st(), admin.clone(), ids(&[&txt, &live])).await.is_err());
+        assert!(!space.dir.join("ABC").exists());
+
+        let _ = restore(st(), admin.clone(), ids(&[&txt])).await.unwrap();
+        assert_eq!(std::fs::read(space.dir.join("ABC/ABC.txt")).unwrap(), b"one");
+        let _ = restore(st(), admin.clone(), ids(&[&abc])).await.unwrap();
+        tree::changes::settled(&env.st).await;
+        assert_eq!(std::fs::read(space.dir.join("ABC/other.txt")).unwrap(), b"two");
+        assert_eq!(env.node_at(&space.drive, "ABC/other.txt").await.unwrap().0, other);
+        assert_eq!(env.node_at(&space.drive, "ABC/ABC.txt").await.unwrap().0, txt);
+        let r = crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        assert_eq!((r.added, r.changed, r.removed), (0, 0, 0), "the index agrees with the disk: {r:?}");
+    }
 }

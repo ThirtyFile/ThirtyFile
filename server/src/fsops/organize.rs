@@ -11,6 +11,8 @@ pub struct MadeDir {
     pub stat: Stat,
     /// It was there already (made on the server meanwhile, or the same folder by a name in other letter case)
     pub existed: bool,
+    /// Where it is
+    path: Pinned,
 }
 
 /// Makes a folder on disk; one that is there already is used as it is
@@ -26,9 +28,24 @@ pub async fn make_dir(parent: &Node, name: &str) -> AppResult<MadeDir> {
             Err(e) => return Err(disk_error(e)),
         };
         let name = if existed { name_on_disk(&inside, &name, &path) } else { name };
-        Ok(MadeDir { rel: child_rel(rel_of(&dir), &name), stat: stat(path.as_path()).map_err(disk_error)?, name, existed })
+        Ok(MadeDir { rel: child_rel(rel_of(&dir), &name), stat: stat(path.as_path()).map_err(disk_error)?, name, existed, path })
     })
     .await
+}
+
+/// Makes a folder on disk, then in the index, for a change that holds `locks`: should the change fail, the folder is
+/// removed from disk again. One there already is used as it is (with the item the index has for it). Returns its id.
+pub async fn make_folder(conn: &mut SqliteConnection, locks: &SpaceLocks, owner: i64, parent: &Node, name: &str) -> AppResult<String> {
+    let made = make_dir(parent, name).await?;
+    if let Some(known) = indexed_dir(conn, parent, &made).await? {
+        return Ok(known);
+    }
+    if !made.existed {
+        locks.note_made(made.path.clone());
+    }
+    let id = new_id();
+    insert(conn, &id, owner, parent, &made.name, &made.rel, &made.stat).await?;
+    Ok(id)
 }
 
 /// The item the index has in `parent` for a folder `make_dir` found there already, if any: by its path on disk, or by

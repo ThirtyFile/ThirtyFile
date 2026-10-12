@@ -24,7 +24,7 @@ use crate::{
     util::{new_id, now, validate_name},
 };
 
-use super::{MAX_BATCH, MAX_COPY_ITEMS, trash_root};
+use super::{MAX_BATCH, MAX_COPY_ITEMS, existing_folder, trash_root};
 
 #[derive(Deserialize)]
 pub struct CreateFolderReq {
@@ -542,7 +542,9 @@ pub async fn conflicts(State(st): State<AppState>, user: User, Json(req): Json<C
         }
     } else {
         for id in &req.ids {
-            let (node, parent) = trash_root(&mut c, &user, id, Need::Read).await?;
+            let (node, place) = trash_root(&mut c, &user, id, Need::Read).await?;
+            // Into a folder that will be made: nothing there yet
+            let Some(parent) = existing_folder(&mut c, &place).await? else { continue };
             if let Some(existing) = tree::find_child(&mut c, &parent, &node.name).await? {
                 out.push(Conflict {
                     id: Some(node.id.clone()),

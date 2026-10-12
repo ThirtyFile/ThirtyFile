@@ -1020,6 +1020,7 @@ export default {
   // Earlier versions of files (versions.rs, admin.rs)
   "This version no longer exists": "このバージョンはもう存在しません",
   "Restored an earlier version": "以前のバージョンを復元",
+  "Made again for an item restored from the trash": "ごみ箱から復元した項目のために作り直し",
   "Enter a number of versions from 0 to 1000": "0 から 1000 までのバージョン数を入力してください",
   "Enter a number of days from 0 to 3650": "0 から 3650 までの日数を入力してください",
   "Earlier versions of files aren't kept": "ファイルの以前のバージョンを保持しない",

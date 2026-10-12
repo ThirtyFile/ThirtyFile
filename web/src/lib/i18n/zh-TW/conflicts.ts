@@ -12,6 +12,7 @@ export default {
   "The item there moves to the trash.": "原本的項目會移到垃圾桶。",
   "Merge the folders, replacing files with the same names": "合併資料夾，並取代同名的檔案",
   "Merge the folders, keeping both files when names clash": "合併資料夾，同名的檔案兩者都保留",
+  "Files there with the same names move to the trash.": "原本同名的檔案會移到垃圾桶。",
   "Skip this file": "略過這個檔案",
   "Skip this folder": "略過這個資料夾",
   "Keep both": "兩者都保留",
