@@ -80,7 +80,7 @@ jobs:
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           package_json_file: web/package.json
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           # The Dockerfile's web stage's version (Dependabot updates that one: change these with it)
           node-version: 26.10.0
@@ -108,7 +108,7 @@ jobs:
       # The backend's formatting (rustfmt, server/rustfmt.toml), then its tests (cargo test), clippy, and the end-to-end
       # test in a real browser (sign in, upload, preview, download) run against one build instrumented for coverage (cargo llvm-cov show-env): the dependencies are
       # compiled once for both, and the coverage in the job summary counts what the browser test reaches too.
-      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: cargo-llvm-cov
       # The browser the end-to-end test uses (about 150 MB), kept between runs while the lock file (and with it the
