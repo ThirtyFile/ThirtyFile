@@ -48,8 +48,9 @@ test("a new favorite and a rename reload only what they changed", async ({ page 
   const renamed = answer(page, "PATCH", /^\/api\/nodes\/[^/]+$/);
   const relisted = listing(page, here, renamed);
   await page.keyboard.press("Enter");
-  await expect(row("Beta 2")).toBeVisible();
+  // The list shows the new name once the server has it
   expect((await renamed).ok()).toBe(true);
+  await expect(row("Beta 2")).toBeVisible();
   // The renamed item's folder is put in order again; the other folder isn't loaded
   await relisted;
   expect(asked.of(here)).toBe(1);
