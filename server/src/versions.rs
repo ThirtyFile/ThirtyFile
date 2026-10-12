@@ -336,18 +336,19 @@ fn there_for(file: &std::fs::Metadata, folder: &std::fs::Metadata, age: std::tim
 }
 
 /// Removes files in a folder space's versions folder that no version refers to any more (the file was deleted for
-/// good, or removing it failed earlier), once they are old enough (`UNKNOWN_GRACE`). Run with each scan of the space.
-/// Only what ThirtyFile named there is looked at: folders named by a file's id, holding files named by a version's id.
+/// good, or removing it failed earlier), once they are old enough (`UNKNOWN_GRACE`), and the folders left empty. Run
+/// with each scan of the space. Only what ThirtyFile named there is looked at: folders named by a file's id, holding
+/// files named by a version's id.
 pub async fn clean_folder(st: &AppState, drive_id: &str, root: &Path) -> AppResult<()> {
     let top = root.to_path_buf();
     #[cfg(test)]
     let grace = if fsops::testing::versions_grace(drive_id) { UNKNOWN_GRACE } else { std::time::Duration::ZERO };
     #[cfg(not(test))]
     let grace = UNKNOWN_GRACE;
-    let found = tokio::task::spawn_blocking(move || -> Vec<String> {
-        let Ok(dir) = Pinned::root(&top).and_then(|r| r.join(VERSIONS_DIR)).and_then(|d| d.dir()) else { return Vec::new() };
-        let Ok(read) = std::fs::read_dir(dir.as_path()) else { return Vec::new() };
-        let mut found = Vec::new();
+    let (found, empty) = tokio::task::spawn_blocking(move || -> (Vec<String>, Vec<Pinned>) {
+        let Ok(dir) = Pinned::root(&top).and_then(|r| r.join(VERSIONS_DIR)).and_then(|d| d.dir()) else { return Default::default() };
+        let Ok(read) = std::fs::read_dir(dir.as_path()) else { return Default::default() };
+        let (mut found, mut empty) = (Vec::new(), Vec::new());
         for node_dir in read.flatten() {
             let Ok(node) = node_dir.file_name().into_string() else { continue };
             if !crate::util::is_new_id(&node) {
@@ -358,17 +359,30 @@ pub async fn clean_folder(st: &AppState, drive_id: &str, root: &Path) -> AppResu
             let Ok(files) = std::fs::read_dir(inside.as_path()) else { continue };
             let all: Vec<String> = files.flatten().filter_map(|f| f.file_name().into_string().ok()).collect();
             if all.is_empty() {
-                let _ = std::fs::remove_dir(node_dir.as_path());
+                empty.push(node_dir);
+                continue;
             }
             let Ok(folder) = std::fs::symlink_metadata(inside.as_path()) else { continue };
             let old = |name: &str| inside.join(name).and_then(|f| std::fs::symlink_metadata(f.as_path())).is_ok_and(|file| there_for(&file, &folder, grace));
             let names: Vec<String> = all.into_iter().filter(|n| crate::util::is_new_id(n) && old(n)).collect();
             found.extend(names.into_iter().map(|n| format!("{VERSIONS_DIR}/{node}/{n}")));
         }
-        found
+        (found, empty)
     })
     .await
     .map_err(AppError::internal)?;
+    // Under the space's lock: a change that keeps a version (`keep_on_disk`) makes the file's folder here and puts the
+    // version in it while it holds that lock, and the folder would be empty in between
+    if !empty.is_empty() {
+        let _space = fsops::lock_space(st, drive_id).await;
+        tokio::task::spawn_blocking(move || {
+            for d in empty {
+                let _ = std::fs::remove_dir(d.as_path());
+            }
+        })
+        .await
+        .map_err(AppError::internal)?;
+    }
     if found.is_empty() {
         return Ok(());
     }
@@ -795,5 +809,29 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
         panic!("the file stayed");
+    }
+
+    #[tokio::test]
+    async fn a_scan_leaves_the_versions_folder_a_change_has_just_made() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        // A save keeping a version holds the space and has made the file's folder for it, still empty
+        let folder = space.dir.join(VERSIONS_DIR).join(new_id());
+        std::fs::create_dir_all(&folder).unwrap();
+        let change = fsops::lock_space(&env.st, &space.drive).await;
+        let (st, drive, dir) = (env.st.clone(), space.drive.clone(), space.dir.clone());
+        let cleaning = tokio::spawn(async move { clean_folder(&st, &drive, &dir).await });
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert!(folder.exists(), "removed while the change was making it");
+        // The version is put in it, then the change ends
+        std::fs::write(folder.join(new_id()), b"one").unwrap();
+        drop(change);
+        cleaning.await.unwrap().unwrap();
+        assert!(folder.exists());
+
+        // An empty folder no change is using goes
+        std::fs::remove_file(std::fs::read_dir(&folder).unwrap().next().unwrap().unwrap().path()).unwrap();
+        clean_folder(&env.st, &space.drive, &space.dir).await.unwrap();
+        assert!(!folder.exists());
     }
 }
