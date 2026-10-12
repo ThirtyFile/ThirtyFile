@@ -204,7 +204,7 @@ pub async fn create_as(st: &AppState, up: &Uploader, headers: &HeaderMap) -> App
     {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
-        let parent = tree::folder_for(&mut tx, user, &parent_id, tree::Need::Write).await?;
+        let parent = tree::folder_for(&mut tx, user, &parent_id, tree::Need::Add).await?;
         // Refused before anything is sent, rather than when the upload is put in place
         if parent.in_folder_space() {
             for n in rel_parts.iter().chain(std::iter::once(&name)) {
@@ -639,10 +639,13 @@ async fn replaced_file(conn: &mut sqlx::SqliteConnection, user: &User, upload: &
     if upload.on_conflict != "replace" {
         return Ok(None);
     }
-    match tree::find_child(conn, folder, &upload.name).await?.filter(|n| !n.is_folder()) {
-        Some(existing) => Ok(Some(tree::node_for(conn, user, &existing.id, tree::Need::Write).await?)),
-        None => Ok(None),
+    let Some(existing) = tree::find_child(conn, folder, &upload.name).await?.filter(|n| !n.is_folder()) else { return Ok(None) };
+    // A contributor's upload never replaces someone else's file: both are kept
+    let (_, role) = tree::node_with_role(conn, user, &existing.id).await?;
+    if role == tree::Role::Contributor && !tree::is_own(user, &existing) {
+        return Ok(None);
     }
+    Ok(Some(tree::node_for(conn, user, &existing.id, tree::Need::Write).await?))
 }
 
 /// Creates the file (or gives the file it replaces the new content) while holding the write lock; returns the file's
@@ -657,7 +660,7 @@ async fn commit_upload(st: &AppState, up: &Uploader, upload: &Upload, staged: &c
     // Through a share link, the file goes into the folder as it is now: still inside the shared folder, and still
     // writable by the link's creator; it never falls back to the creator's own files
     if let Some(s) = &up.share {
-        let target = tree::folder_for(&mut tx, user, &upload.parent_id, tree::Need::Write).await?;
+        let target = tree::folder_for(&mut tx, user, &upload.parent_id, tree::Need::Add).await?;
         check_in_share(&mut tx, s, &target.id).await?;
     }
     // The target folder may have been deleted, or the permission to it removed, during the upload
@@ -667,7 +670,7 @@ async fn commit_upload(st: &AppState, up: &Uploader, upload: &Upload, staged: &c
     if role.is_none() && tree::role_on(&mut tx, user, &parent).await?.is_some() {
         return Err(folder_gone());
     }
-    if role.is_none_or(|r| tree::allows(user, r, tree::Need::Write).is_err()) {
+    if role.is_none_or(|r| tree::allows(user, r, tree::Need::Add).is_err()) {
         return Err(AppError::forbidden("You no longer have permission to upload to this folder"));
     }
     staged.check(&parent)?;
@@ -1140,5 +1143,26 @@ mod tests {
         assert_eq!(env.node_at(&space.drive, "report.txt").await, Some((original, 6)));
         let r = crate::folders::scan(&env.st, &space.drive).await.unwrap();
         assert_eq!((r.added, r.changed, r.removed), (0, 0, 0), "the index already knows: {r:?}");
+    }
+
+    #[tokio::test]
+    async fn a_contributors_upload_keeps_both_instead_of_replacing_someone_elses_file() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let ben = env.user("ben", true).await;
+        let library = env.folder(&amy, amy.root(), "Library").await;
+        env.grant(&library, &ben, "contributor").await;
+        let id = begin_in(&env, &amy, &library, "report.txt", 5).await;
+        let amys = send(&env, &amy, &id, 0, b"hello").await.unwrap().headers()["x-node-id"].to_str().unwrap().to_string();
+
+        // Told to replace Amy's file, Ben's upload is kept next to it
+        let id = begin_with(&env, &ben, &library, "report.txt", 3, "replace").await;
+        let kept = send(&env, &ben, &id, 0, b"ben").await.unwrap();
+        assert_eq!(kept.headers()["x-node-name"], "report%20%281%29%2Etxt");
+        assert_eq!(read(&env, &amy, &amys).await, b"hello");
+        // His own he replaces
+        let id = begin_with(&env, &ben, &library, "report (1).txt", 4, "replace").await;
+        let replaced = send(&env, &ben, &id, 0, b"ben2").await.unwrap();
+        assert_eq!(replaced.headers()["x-node-id"], kept.headers()["x-node-id"]);
     }
 }

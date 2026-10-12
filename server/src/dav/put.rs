@@ -15,7 +15,7 @@ pub(super) async fn put(st: &AppState, user: &User, segs: &[String], headers: &H
         let mut c = st.db.acquire().await?;
         let (parent, name) = parent_of(&mut c, user, segs).await?;
         // Checked before anything is received: nobody without write access makes the server take a file
-        let parent = tree::folder_for(&mut c, user, &parent.id, Need::Write).await?;
+        let parent = tree::folder_for(&mut c, user, &parent.id, Need::Add).await?;
         (parent, name)
     };
     let mut c = st.db.acquire().await?;
@@ -116,7 +116,7 @@ pub(super) async fn store_file(st: &AppState, user: &User, parent: &Node, name: 
         turn.ready()?;
         let mut tx = crate::db::begin_write(&st.db).await?;
         // Looked at again under the write lock: the folder or the file may have changed meanwhile
-        let folder = tree::folder_for(&mut tx, user, &parent.id, Need::Write).await?;
+        let folder = tree::folder_for(&mut tx, user, &parent.id, Need::Add).await?;
         staged.check(&folder)?;
         let (created, written) = match child_named(&mut tx, &folder.id, name).await? {
             Some(n) if n.is_folder() => return Err(AppError::new(StatusCode::METHOD_NOT_ALLOWED, "A folder has this name")),

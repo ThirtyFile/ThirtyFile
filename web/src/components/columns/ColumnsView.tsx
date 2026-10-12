@@ -272,7 +272,7 @@ function Column({
   const nav = useRef<ListNav | null>(null);
   const marked = useMemo(() => new Set(next ? [next] : []), [next]);
   // Items and files dropped on the empty space of another folder's column go into that folder
-  const { dropping, dropProps } = useFolderDrop(!open && folder && s.caps.write ? folder : null, { onDropped: () => s.setSelected(new Set()) });
+  const { dropping, dropProps } = useFolderDrop(!open && folder && s.caps.add ? folder : null, { onDropped: () => s.setSelected(new Set()) });
   const ownIds = useMemo(() => new Set(p.items.map((n) => n.id)), [p.items]);
 
   // The folder open in the next column is brought into view (in a large folder, its part loads)
@@ -314,7 +314,7 @@ function Column({
     // Items dragged from another column onto the empty space of this one move here (files from the computer are the
     // explorer's: they upload here)
     boxProps =
-      folder && s.caps.write
+      folder && s.caps.add
         ? {
             onDragOver: (e: DragEvent) => {
               if (!carriesItems(e.dataTransfer)) return;
