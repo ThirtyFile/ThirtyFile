@@ -28,14 +28,20 @@ test("a search is saved as a smart folder that lists what matches, and its items
   await page.getByRole("button", { name: "Save as smart folder" }).click();
   const dialog = page.getByRole("dialog", { name: "New smart folder" });
   const type = dialog.getByLabel("Type", { exact: true });
-  await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue(`report-${u}`);
+  const name = dialog.getByLabel("Name", { exact: true });
+  await expect(name).toHaveValue(`report-${u}`);
   await expect(dialog.getByLabel("Name contains")).toHaveValue(`report-${u}`);
   await expect(dialog.getByLabel("Look in")).toHaveValue(`folder:${dir}`);
   await expect(type).toHaveValue("doc");
-  // Only PDFs
+  // The name has the focus, selected to be typed over
+  await expect(name).toBeFocused();
+  expect(await name.evaluate((el: HTMLInputElement) => [el.selectionStart, el.selectionEnd])).toEqual([0, `report-${u}`.length]);
+  // Only PDFs: what is typed stays in the field it is typed in, also when the dialog has only just opened
   await type.selectOption("custom");
   await dialog.getByLabel("File types").fill("pdf");
-  await dialog.getByLabel("Name", { exact: true }).fill(`Reports ${u}`);
+  await expect(dialog.getByLabel("File types")).toHaveValue("pdf");
+  await expect(name).toHaveValue(`report-${u}`);
+  await name.fill(`Reports ${u}`);
   const made = answer(page, "POST", "/api/smart-folders");
   // Rows also present in the preceding search do not prove the smart folder has loaded.
   const matches = answer(page, "GET", /^\/api\/smart-folders\/\d+\/items$/);

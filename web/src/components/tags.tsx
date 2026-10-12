@@ -2,12 +2,12 @@
 //! menu that puts tags on items and takes them off, and the dialog that makes or changes a tag. The same in every
 //! interface style.
 
-import { memo, useEffect, useId, useRef, useState } from "react";
+import { memo, useId, useRef, useState } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Loader2Icon, MinusIcon, PlusIcon, TagIcon } from "lucide-react";
 import type { Node, Tag, TagColor } from "@/api";
-import { ErrorText, errorProps } from "@/components/dialogs";
+import { ErrorText, errorProps, useSelectOnFirstFocus } from "@/components/dialogs";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -204,13 +204,10 @@ function TagDialog({ tag, onDone }: { tag?: Tag; onDone(tag: Tag | null): void }
     const saved = tag ? await updateTag(qc, tag.id, { name: name.trim(), color }) : await createTag(qc, name.trim(), color);
     onDone(saved);
   });
-  useEffect(() => {
-    const timer = setTimeout(() => ref.current?.select(), 50);
-    return () => clearTimeout(timer);
-  }, []);
+  const select = useSelectOnFirstFocus();
   return (
     <Dialog open onOpenChange={(o) => !o && onDone(null)}>
-      <DialogContent>
+      <DialogContent initialFocus={ref}>
         <form onSubmit={run} className="grid gap-4">
           <DialogHeader>
             <DialogTitle>{tag ? t("Edit tag") : t("New tag")}</DialogTitle>
@@ -218,7 +215,16 @@ function TagDialog({ tag, onDone }: { tag?: Tag; onDone(tag: Tag | null): void }
           </DialogHeader>
           <div className="grid gap-2">
             <Label htmlFor={nameId}>{t("Name")}</Label>
-            <Input id={nameId} ref={ref} value={name} maxLength={MAX_TAG_NAME} onChange={(e) => setName(e.target.value)} autoComplete="off" {...errorProps(error, errorId)} />
+            <Input
+              id={nameId}
+              ref={ref}
+              value={name}
+              maxLength={MAX_TAG_NAME}
+              onChange={(e) => setName(e.target.value)}
+              onFocus={select}
+              autoComplete="off"
+              {...errorProps(error, errorId)}
+            />
           </div>
           <ColorChoice value={color} onChange={setColor} />
           <ErrorText id={errorId}>{error}</ErrorText>
