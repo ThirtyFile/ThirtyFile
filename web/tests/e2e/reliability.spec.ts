@@ -1,7 +1,7 @@
 // Editing, typed Control panel paths and transfer states against a real isolated server.
 import { expect, test, type Page } from "@playwright/test";
 import { buildWorkbook } from "../fixtures";
-import { answer, makeFolder, makeUser, openFolder, signIn, signInAsNewUser, uploadFile, uploadFinished, USER_PASSWORD } from "./helpers";
+import { answer, makeFolder, makeUser, openFolder, PASSWORD, signIn, signInAsNewUser, uploadFile, uploadFinished, USER_PASSWORD } from "./helpers";
 
 test.describe.configure({ mode: "parallel" });
 
@@ -15,7 +15,8 @@ function held() {
 
 async function admin(page: Page, style: "windows" | "mac") {
   await signIn(page);
-  const username = await makeUser(page, "paths-admin", { role: "admin" });
+  // Making an administrator takes the password of the one signed in
+  const username = await makeUser(page, "paths-admin", { role: "admin", my_password: PASSWORD });
   expect((await page.request.post("/api/auth/logout")).ok()).toBe(true);
   expect((await page.request.post("/api/auth/login", { data: { username, password: USER_PASSWORD } })).ok()).toBe(true);
   expect((await page.request.put("/api/auth/password", { data: { current: USER_PASSWORD, new: `${USER_PASSWORD}-2` } })).ok()).toBe(true);
@@ -199,8 +200,9 @@ test("typed Control panel paths do not bypass administrator access", async ({ pa
   const box = page.getByRole("textbox", { name: "Full path" });
   await box.fill("/admin/users");
   await box.press("Enter");
-  await expect(box).toHaveCount(0);
-  await page.waitForURL(/\/files/);
+  // Not the Control panel for them: a path like any other, which isn't there
+  await expect(page.getByText('Can\'t find "/admin/users"', { exact: false })).toBeVisible();
+  await expect(page).not.toHaveURL(/\/admin/);
   expect((await page.request.get("/api/admin/users")).status()).toBe(403);
   await expect(page.getByRole("option", { name: /^Users/ })).toHaveCount(0);
 });
