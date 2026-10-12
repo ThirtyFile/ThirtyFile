@@ -18,7 +18,7 @@ afterEach(() => {
 const info = (location: string[] | null, kind: "personal" | "company" | "team", via_share = false) => ({
   location,
   via_share,
-  drive: { id: "d", name: "x", kind, root_id: "r" },
+  drive: { id: "d", name: "x", kind, root_id: "r", link_makers: "editors" as const },
 });
 
 describe("pathOf", () => {

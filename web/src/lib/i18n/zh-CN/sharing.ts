@@ -65,6 +65,12 @@ export default {
   "Not shared with anyone yet": "尚未共享给任何人",
   "Inherited (managed in a parent folder or the space)": "继承自上级（在上级文件夹或空间中管理）",
   "Your role is “{role}”. Only managers can change access.": "你的角色是“{role}”，只有管理者可以更改访问权限。",
+  "Share links can be made by": "可以创建分享链接的人",
+  "Share links can be made by: {who}": "可以创建分享链接的人：{who}",
+  "Members can still share items with people (Share with…). Someone whose account may not share makes no links anywhere.": "成员仍可用“共享给…”把项目分享给其他人。账号不能分享的人，在任何地方都无法创建链接。",
+  "Stop {n} share link?|Stop {n} share links?": "要停用 {n} 个分享链接吗？",
+  "They were made by people this no longer allows. They stop working now, and work again if you change this back.": "这些链接是由这个设置不再允许的人创建的。它们会立即失效，改回原来的设置后就会恢复。",
+  "Change": "更改",
   "{n} member|{n} members": "{n} 位成员",
   // Activity log, share access log, filters
   "Correct password": "密码正确",

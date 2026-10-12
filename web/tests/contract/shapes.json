@@ -18,6 +18,7 @@
     "drive": {
       "id": "",
       "kind": "",
+      "link_makers": "",
       "name": "",
       "root_id": ""
     },
@@ -77,6 +78,7 @@
     "disabled": false,
     "id": "",
     "kind": "",
+    "link_makers": "",
     "location_id": "",
     "location_name": "",
     "member_count": 0,
@@ -240,6 +242,7 @@
     "drive": {
       "id": "",
       "kind": "",
+      "link_makers": "",
       "name": "",
       "root_id": ""
     },

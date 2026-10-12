@@ -94,7 +94,7 @@
             <thead><tr><th>Role</th><th>Can</th></tr></thead>
             <tbody>
               <tr><td><strong>Viewer</strong></td><td>Browse, preview and download</td></tr>
-              <tr><td><strong>Editor</strong></td><td>Also upload, edit, delete and create share links, each only if their account is allowed to (<strong>Control panel › Users</strong>)</td></tr>
+              <tr><td><strong>Editor</strong></td><td>Also upload, edit, delete and create share links, each only if their account is allowed to (<strong>Control panel › Users</strong>), and share links only where the space lets editors make them (<a href="#link-makers">Who can make links</a>)</td></tr>
               <tr><td><strong>Manager</strong></td><td>Also manage members and sharing, if their account is allowed to share</td></tr>
               <tr><td><strong>Owner</strong></td><td>Also delete the space, if their account is allowed to delete</td></tr>
             </tbody>
@@ -130,7 +130,8 @@
         <h2 id="manage">Your links</h2>
         <p><strong>My share links</strong> in the menu lists every link you created, with its expiry date and how often it was used. Select a link to copy, edit or delete it; <strong>Delete link</strong> stops it working right away.</p>
         <p>Switch the list to <strong>All links I can manage</strong> to also see links other people made in spaces you manage, and on files you own. You can edit and delete those links too, and see who opened them. The share dialog and the details pane of an item show the same links.</p>
-        <div class="note">A link also stops working when its creator loses access to the item or the permission to share, for example when they leave a team space, and when their account is disabled. Deleting an account deletes the links it created.</div>
+        <p id="link-makers"><strong>Who can make links</strong> in a team space or All files is chosen by its managers, at the bottom of the space's <strong>Members</strong> dialog: editors, managers and owners (the default), only managers and owners, or nobody. Members can still share items with people (<strong>Share with…</strong>). Links made by people the choice no longer allows stop working, and work again if it is changed back; the dialog says how many first. In <strong>My files</strong>, you always decide.</p>
+        <div class="note">A link also stops working when its creator loses access to the item or the permission to share, for example when they leave a team space, when the space no longer lets them make links, and when their account is disabled. Deleting an account deletes the links it created.</div>
 
         <h2 id="admin">For administrators</h2>
         <p><strong>Control panel › All share links</strong> lists every public link, in every space, with who created it. Filter by space, by creator, and by whether the link still works, then edit or delete links, or open their access log. Links in other people's personal spaces can only be deleted, and their address and item aren't shown (<a href="users.html#privacy">What administrators can see</a>).</p>
