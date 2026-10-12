@@ -1,6 +1,6 @@
 import { useMemo, useRef, type ReactNode } from "react";
 import { FolderOpenIcon, UploadCloudIcon, type LucideIcon } from "lucide-react";
-import { privateSource, type Node, type Role, type SortKey, type SortOrder } from "@/api";
+import { privateSource, type LinkMakers, type Node, type Role, type SortKey, type SortOrder } from "@/api";
 import { Button } from "@/components/ui/button";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -50,6 +50,8 @@ export interface ExplorerProps {
   spaceId?: string;
   /** A folder space: nothing can be changed from the web yet */
   readOnly?: boolean;
+  /** Whom the space lets make share links */
+  linkMakers?: LinkMakers;
   crumbs: Crumb[];
   path?: string;
   upTo?: string | null;

@@ -126,6 +126,7 @@ function FolderPage({ id }: { id: string }) {
     <Explorer
       notice={info.data?.offline ? <OfflineBanner reason={info.data.offline} /> : info.data?.moving ? <MovingBanner /> : info.data?.read_only ? <ReadOnlyBanner /> : undefined}
       readOnly={info.data?.read_only}
+      linkMakers={info.data?.drive.link_makers}
       offline={info.data?.offline}
       items={children.items}
       list={children.list}

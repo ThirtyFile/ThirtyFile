@@ -12,7 +12,7 @@ pub use quota::*;
 
 use std::collections::HashMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::SqliteConnection;
 
 use crate::{
@@ -154,6 +154,8 @@ pub struct Drive {
     pub read_only: bool,
     /// Being moved to another storage location: read-only until the move is over (moves/)
     pub moving: bool,
+    /// Who may make share links of its items (personal spaces: always their owner)
+    pub link_makers: LinkMakers,
 }
 
 impl Drive {
@@ -175,6 +177,19 @@ pub enum SpaceKind {
     Team,
 }
 
+/// Who may make share links of a space's items (`drives.link_makers`), besides what their account allows
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[serde(rename_all = "lowercase")]
+#[sqlx(rename_all = "lowercase")]
+pub enum LinkMakers {
+    /// Editors, managers and owners
+    Editors,
+    /// Managers and owners
+    Managers,
+    /// Nobody: its items are shared with people only
+    Nobody,
+}
+
 /// How a space keeps its files (`drives.mode`)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, sqlx::Type)]
 #[serde(rename_all = "lowercase")]
@@ -186,7 +201,8 @@ pub enum SpaceMode {
     Folder,
 }
 
-pub const DRIVE_COLS: &str = "d.id, d.name, d.kind, d.root_id, d.owner_id, d.quota_bytes, d.disabled, d.used_bytes, d.mode, d.source_path, d.read_only, d.moving";
+pub const DRIVE_COLS: &str =
+    "d.id, d.name, d.kind, d.root_id, d.owner_id, d.quota_bytes, d.disabled, d.used_bytes, d.mode, d.source_path, d.read_only, d.moving, d.link_makers";
 
 pub async fn get_drive(conn: &mut SqliteConnection, id: &str) -> AppResult<Option<Drive>> {
     let sql = format!("SELECT {DRIVE_COLS} FROM drives d WHERE d.id = ?");

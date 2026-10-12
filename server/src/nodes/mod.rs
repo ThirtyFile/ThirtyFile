@@ -41,11 +41,13 @@ pub struct DriveBrief {
     name: String,
     kind: tree::SpaceKind,
     root_id: String,
+    /// Who may make share links of its items
+    link_makers: tree::LinkMakers,
 }
 
 impl From<tree::Drive> for DriveBrief {
     fn from(d: tree::Drive) -> Self {
-        DriveBrief { id: d.id, name: d.name, kind: d.kind, root_id: d.root_id }
+        DriveBrief { id: d.id, name: d.name, kind: d.kind, root_id: d.root_id, link_makers: d.link_makers }
     }
 }
 

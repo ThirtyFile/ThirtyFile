@@ -375,6 +375,10 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
     if node.parent_id.is_none() {
         return Err(AppError::bad_request("The root folder can't be shared"));
     }
+    // And whom the space lets make links
+    let drive = tree::get_drive(&mut tx, node.drive()).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
+    let role = tree::role_on(&mut tx, &user, &node).await?.ok_or_else(|| AppError::not_found("Item not found"))?;
+    tree::may_link(&user, role, &drive)?;
     check_access(&mut tx, &user, &node, req.allow_upload, req.drop_only).await?;
     sqlx::query(
         "INSERT INTO shares (id, node_id, owner_id, password_hash, expires_at, max_downloads, created_at, allow_upload, drop_only, allow_download)
@@ -558,6 +562,76 @@ mod tests {
         tree::add_blob_ref(&mut c, &hash, content.len() as i64, "local").await.unwrap();
         sqlx::query("UPDATE nodes SET blob_hash = ?, size = ? WHERE id = ?").bind(&hash).bind(content.len() as i64).bind(&id).execute(&mut *c).await.unwrap();
         id
+    }
+
+    #[tokio::test]
+    async fn a_space_chooses_who_makes_share_links_and_links_follow_its_choice() {
+        let env = testutil::env().await;
+        env.st.system.write().allow_user_drives = true;
+        let st = || State(env.st.clone());
+        let amy = env.user("amy", true).await;
+        let ben = env.user("ben", true).await;
+        let dave = env.user("dave", true).await;
+        let Json(space) = crate::drives::create(st(), amy.clone(), Json(serde_json::from_value(json!({ "name": "Team" })).unwrap())).await.unwrap();
+        let space = serde_json::to_value(space).unwrap();
+        let (space_id, root) = (space["id"].as_str().unwrap().to_string(), space["root_id"].as_str().unwrap().to_string());
+        assert_eq!(space["link_makers"], "editors", "as before, by default");
+        env.grant(&root, &ben, "editor").await;
+        env.grant(&root, &dave, "manager").await;
+        let folder = env.folder(&amy, &root, "Docs").await;
+        let link = |who: &User| {
+            let req = serde_json::from_value::<CreateReq>(json!({ "node_id": folder })).unwrap();
+            create(st(), who.clone(), Json(req))
+        };
+        let addr: std::net::SocketAddr = "203.0.113.5:4000".parse().unwrap();
+        let works = |token: String| {
+            let visitor = Visitor { ip: String::new(), user_agent: String::new() };
+            let opened = public_info(st(), Path(token), ConnectInfo(addr), HeaderMap::new(), visitor);
+            async move { opened.await.is_ok() }
+        };
+        let choose = |who: &User, makers: &str| {
+            let req = serde_json::from_value(json!({ "link_makers": makers })).unwrap();
+            crate::drives::update(st(), who.clone(), Path(space_id.clone()), Json(req))
+        };
+        let stopping = |who: &User| crate::drives::links_stopping(st(), who.clone(), Path(space_id.clone()));
+
+        // Editors make links, as before
+        let Json(by_ben) = link(&ben).await.unwrap();
+        let Json(by_dave) = link(&dave).await.unwrap();
+        let Json(counts) = stopping(&amy).await.unwrap();
+        assert_eq!(counts, json!({ "managers": 1, "nobody": 2 }));
+
+        // Only its managers choose: not an editor, nor a manager whose account may not share
+        assert!(matches!(choose(&ben, "managers").await, Err(e) if e.status == axum::http::StatusCode::FORBIDDEN));
+        assert!(stopping(&ben).await.is_err());
+        sqlx::query("UPDATE users SET can_share = 0 WHERE id = ?").bind(dave.id).execute(&env.st.db).await.unwrap();
+        let unshared = crate::auth::user_by_id(&env.st, &mut env.st.db.acquire().await.unwrap(), dave.id).await.unwrap().unwrap();
+        assert!(choose(&unshared, "managers").await.is_err());
+        sqlx::query("UPDATE users SET can_share = 1 WHERE id = ?").bind(dave.id).execute(&env.st.db).await.unwrap();
+
+        // Managers and owners only: Ben's link stops, Dave's works, and Ben can't make another
+        let Json(info) = choose(&amy, "managers").await.unwrap();
+        assert_eq!(serde_json::to_value(info).unwrap()["link_makers"], "managers");
+        assert!(!works(by_ben.id.clone()).await);
+        assert!(works(by_dave.id.clone()).await);
+        assert!(matches!(link(&ben).await, Err(e) if e.status == axum::http::StatusCode::FORBIDDEN));
+        let _ = link(&dave).await.unwrap();
+
+        // Nobody: not even its owner, and every link stops
+        let _ = choose(&dave, "nobody").await.unwrap();
+        assert!(link(&amy).await.is_err());
+        assert!(!works(by_dave.id.clone()).await);
+
+        // Back to editors: the links made before work again
+        let _ = choose(&amy, "editors").await.unwrap();
+        assert!(works(by_ben.id).await && works(by_dave.id).await);
+
+        // A personal space's owner always decides alone, and nothing else is accepted
+        let personal = tree::get_node(&mut env.st.db.acquire().await.unwrap(), amy.root()).await.unwrap().unwrap();
+        let req = serde_json::from_value(json!({ "link_makers": "nobody" })).unwrap();
+        let res = crate::drives::update(st(), amy.clone(), Path(personal.drive().to_string()), Json(req)).await;
+        assert!(matches!(res, Err(e) if e.status == axum::http::StatusCode::BAD_REQUEST));
+        assert!(serde_json::from_value::<crate::drives::UpdateDriveReq>(json!({ "link_makers": "everyone" })).is_err());
     }
 
     #[tokio::test]

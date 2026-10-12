@@ -105,6 +105,30 @@ pub fn allows(user: &User, role: Role, need: Need) -> AppResult<()> {
     }))
 }
 
+impl super::LinkMakers {
+    /// Whether someone with this role on an item may make a share link of it
+    pub fn allow(self, role: Role) -> bool {
+        match self {
+            super::LinkMakers::Editors => role >= Role::Editor,
+            super::LinkMakers::Managers => role >= Role::Manager,
+            super::LinkMakers::Nobody => false,
+        }
+    }
+}
+
+/// Whether the user may make a share link of an item they have this role on in this space: their permission to share
+/// (`allows`), and whom the space lets make links. A personal space's owner always decides alone.
+pub fn may_link(user: &User, role: Role, drive: &super::Drive) -> AppResult<()> {
+    allows(user, role, Need::Share)?;
+    if drive.kind == super::SpaceKind::Personal || drive.link_makers.allow(role) {
+        return Ok(());
+    }
+    Err(AppError::forbidden(match drive.link_makers {
+        super::LinkMakers::Nobody => "Share links can't be made in this space",
+        _ => "In this space, only managers can make share links",
+    }))
+}
+
 /// SQL for "the grant `g` applies to the user and hasn't expired", with the numbers of the query's parameters holding
 /// the user's id and the current time
 fn principal_match(user: u8, now: u8) -> String {

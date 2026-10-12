@@ -105,10 +105,12 @@ pub(super) async fn find_share(st: &AppState, token: &str) -> AppResult<(Share, 
         return Err(gone());
     }
     // The sharer must *currently* still have access and permission to share this item: when they're removed from the space, the folder share is revoked,
-    // their share permission is taken away, or the space is disabled, links they created earlier stop working too (role_on already handles disabled spaces)
+    // their share permission is taken away, the space no longer lets them make links, or the space is disabled, links they created earlier stop
+    // working too (role_on already handles disabled spaces)
     let owner = auth::user_by_id(st, &mut conn, share.owner_id).await?.ok_or_else(gone)?;
     let role = tree::role_on(&mut conn, &owner, &node).await?.ok_or_else(gone)?;
-    tree::allows(&owner, role, tree::Need::Share).map_err(|_| gone())?;
+    let drive = tree::get_drive(&mut conn, node.drive()).await?.ok_or_else(gone)?;
+    tree::may_link(&owner, role, &drive).map_err(|_| gone())?;
     Ok((share, node))
 }
 

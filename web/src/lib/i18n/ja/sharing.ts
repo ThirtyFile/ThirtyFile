@@ -65,6 +65,12 @@ export default {
   "Not shared with anyone yet": "まだ誰とも共有していません",
   "Inherited (managed in a parent folder or the space)": "継承（親フォルダーまたはスペースで管理）",
   "Your role is “{role}”. Only managers can change access.": "現在のロールは「{role}」です。アクセス許可を変更できるのは管理者だけです。",
+  "Share links can be made by": "共有リンクを作成できるユーザー",
+  "Share links can be made by: {who}": "共有リンクを作成できるユーザー：{who}",
+  "Members can still share items with people (Share with…). Someone whose account may not share makes no links anywhere.": "メンバーは引き続き「ユーザーと共有…」で項目を共有できます。アカウントで共有が許可されていない人は、どこでもリンクを作成できません。",
+  "Stop {n} share link?|Stop {n} share links?": "{n} 件の共有リンクを停止しますか？",
+  "They were made by people this no longer allows. They stop working now, and work again if you change this back.": "この設定で許可されなくなった人が作成したリンクです。すぐに使えなくなり、設定を元に戻すと再び使えるようになります。",
+  "Change": "変更",
   "{n} member|{n} members": "メンバー {n} 人",
   // Activity log, share access log, filters
   "Correct password": "パスワード正解",

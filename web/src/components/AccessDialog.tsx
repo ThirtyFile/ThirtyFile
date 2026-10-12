@@ -2,15 +2,15 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { GlobeIcon, Loader2Icon, UserIcon, UsersIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
-import { api, type Grant, type Principal, type PrincipalType, type Role } from "@/api";
-import { keys } from "@/api/queryKeys";
+import { api, type Grant, type LinkMakers, type Principal, type PrincipalType, type Role } from "@/api";
+import { affected, invalidate, keys } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ErrorText } from "@/components/dialogs";
 import { Pending } from "@/components/ErrorState";
 import { useConfirm } from "@/components/confirm";
-import { ROLE_HINT, ROLE_LABEL, atLeast } from "@/lib/drives";
+import { LINK_MAKERS_LABEL, ROLE_HINT, ROLE_LABEL, atLeast } from "@/lib/drives";
 import { refreshFiles } from "@/lib/queries";
 import { useMe } from "@/lib/session";
 import { cn, formatDate } from "@/lib/utils";
@@ -199,6 +199,57 @@ function GrantRow(props: { g: Grant; editable: boolean; roles: Role[]; onRole?(r
 }
 
 /** Manage access: space root folder = space members; other folders / files = sharing */
+/**
+ * Who may make share links of the space's items: chosen by its managers (and administrators), who are told first how
+ * many links working now would stop; shown to everyone else
+ */
+function LinkMakersSetting({ driveId, value, canChoose }: { driveId: string; value: LinkMakers; canChoose: boolean }) {
+  const qc = useQueryClient();
+  const id = useId();
+  const stopping = useQuery({ queryKey: ["links-stopping", driveId], queryFn: () => api.linksStopping(driveId), enabled: canChoose });
+  const [ask, question] = useConfirm();
+  const save = useMutation({
+    mutationFn: (makers: LinkMakers) => api.updateDrive(driveId, { link_makers: makers }),
+    onSuccess: () => {
+      // The space's links, and what the items in it offer (Create share link)
+      void invalidate(qc, ...affected.space(), ["node"], ["access"], ["links-stopping", driveId]);
+      toast.success(t("Saved"));
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  const choose = async (makers: LinkMakers) => {
+    const stops = makers === "editors" ? 0 : (stopping.data?.[makers] ?? 0);
+    if (
+      stops > 0 &&
+      !(await ask({
+        title: t("Stop {n} share link?|Stop {n} share links?", { n: stops }),
+        description: t("They were made by people this no longer allows. They stop working now, and work again if you change this back."),
+        confirmText: t("Change"),
+        destructive: true,
+      }))
+    )
+      return;
+    save.mutate(makers);
+  };
+  if (!canChoose) return <p className="text-xs text-muted-foreground">{t("Share links can be made by: {who}", { who: LINK_MAKERS_LABEL[value] })}</p>;
+  return (
+    <div className="grid gap-1.5 border-t pt-3">
+      {question}
+      <label htmlFor={id} className="text-sm font-medium">
+        {t("Share links can be made by")}
+      </label>
+      <NativeSelect id={id} size="sm" value={value} disabled={save.isPending} onChange={(e) => void choose(e.target.value as LinkMakers)}>
+        {(Object.keys(LINK_MAKERS_LABEL) as LinkMakers[]).map((m) => (
+          <option key={m} value={m}>
+            {LINK_MAKERS_LABEL[m]}
+          </option>
+        ))}
+      </NativeSelect>
+      <p className="text-xs text-muted-foreground">{t("Members can still share items with people (Share with…). Someone whose account may not share makes no links anywhere.")}</p>
+    </div>
+  );
+}
+
 export function AccessDialog({ nodeId, onClose }: { nodeId: string; onClose(): void }) {
   const me = useMe();
   const qc = useQueryClient();
@@ -356,6 +407,7 @@ export function AccessDialog({ nodeId, onClose }: { nodeId: string; onClose(): v
                 </>
               )}
             </div>
+            {info.is_drive_root && <LinkMakersSetting driveId={info.drive.id} value={info.drive.link_makers} canChoose={info.can_manage} />}
             {!info.can_manage && (
               <p className="text-xs text-muted-foreground">
                 {atLeast(info.my_role, "manager") && !me.can_share

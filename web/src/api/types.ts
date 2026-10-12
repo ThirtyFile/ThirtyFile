@@ -123,6 +123,8 @@ export interface Crumb {
 }
 
 export type Role = "viewer" | "editor" | "manager" | "owner";
+/** Who may make share links of a space's items, besides what their account allows (personal spaces: always "editors") */
+export type LinkMakers = "editors" | "managers" | "nobody";
 export type DriveKind = "personal" | "company" | "team";
 
 export interface NodeInfo {
@@ -130,7 +132,7 @@ export interface NodeInfo {
   /** From the space root (exclusive) to this node; when accessed via a shared folder, starts at the shared folder */
   path: Crumb[];
   is_root: boolean;
-  drive: { id: string; name: string; kind: DriveKind; root_id: string };
+  drive: { id: string; name: string; kind: DriveKind; root_id: string; link_makers: LinkMakers };
   role: Role;
   via_share: boolean;
   /** The path that names it, as typed into the address bar or used over WebDAV: ["My files", "Reports"] (see lib/paths.ts); null when no path reaches it */
@@ -184,6 +186,7 @@ export interface Drive {
   mode: "store" | "folder";
   /** Browse, download and share only (folder spaces) */
   read_only: boolean;
+  link_makers: LinkMakers;
   /** Folder spaces, for administrators */
   source_path?: string;
   last_scan_at?: number | null;
@@ -705,7 +708,7 @@ export interface Grant {
 
 export interface AccessInfo {
   node: Node;
-  drive: { id: string; name: string; kind: DriveKind; root_id: string };
+  drive: { id: string; name: string; kind: DriveKind; root_id: string; link_makers: LinkMakers };
   is_drive_root: boolean;
   my_role: Role | null;
   can_manage: boolean;

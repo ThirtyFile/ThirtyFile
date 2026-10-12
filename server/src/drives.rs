@@ -44,6 +44,8 @@ pub struct DriveInfo {
     mode: tree::SpaceMode,
     /// Browse, download and share only
     read_only: bool,
+    /// Who may make share links of its items
+    link_makers: tree::LinkMakers,
     /// Folder spaces, for administrators: the folder, when it was last scanned, and what the scan found
     #[serde(skip_serializing_if = "Option::is_none")]
     source_path: Option<String>,
@@ -112,6 +114,7 @@ async fn drive_infos(
         out.push(DriveInfo {
             mode: d.mode,
             read_only: d.read_only,
+            link_makers: d.link_makers,
             source_path: d.source_path.clone().filter(|_| details && !private),
             last_scan_at: r.last_scan_at.filter(|_| details),
             scan_report: r.scan_report.filter(|_| details).and_then(|r| serde_json::from_str(&r).ok()).map(|r| crate::folders::report_for(r, private)),
@@ -291,6 +294,8 @@ pub struct UpdateDriveReq {
     quota_bytes: Option<i64>,
     /// Folder spaces, administrators: browse, download and share only
     read_only: Option<bool>,
+    /// Who may make share links of its items (managers who may share, and administrators)
+    link_makers: Option<tree::LinkMakers>,
 }
 
 pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<String>, Json(req): Json<UpdateDriveReq>) -> AppResult<Json<DriveInfo>> {
@@ -332,13 +337,72 @@ pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<Strin
         }
         sqlx::query("UPDATE drives SET read_only = ? WHERE id = ?").bind(read_only).bind(&drive.id).execute(&mut *tx).await?;
     }
+    let mut detail = "";
+    if let Some(makers) = req.link_makers.filter(|m| *m != drive.link_makers) {
+        may_choose_link_makers(&user, &drive, role)?;
+        sqlx::query("UPDATE drives SET link_makers = ? WHERE id = ?").bind(makers).bind(&drive.id).execute(&mut *tx).await?;
+        detail = match makers {
+            tree::LinkMakers::Editors => "share links can be made by editors, managers and owners",
+            tree::LinkMakers::Managers => "share links can be made by managers and owners",
+            tree::LinkMakers::Nobody => "share links can't be made",
+        };
+    }
     let root = tree::get_node(&mut tx, &drive.root_id).await?.unwrap();
-    logs::record_activity(&mut tx, &user, Some(&root), "drive_update", "").await?;
+    logs::record_activity(&mut tx, &user, Some(&root), "drive_update", detail).await?;
     let drive = tree::get_drive(&mut tx, &drive.id).await?.unwrap();
     let info = drive_info(&st, &mut tx, drive, role, user.is_admin()).await?;
     tx.commit().await?;
     crate::folders::spaces_changed(&st);
     Ok(Json(info))
+}
+
+/// Who may choose whom a space lets make share links: its managers whose account may share, and administrators (as
+/// for managing its members, `can_manage_node`). Never for a personal space, whose owner alone decides.
+fn may_choose_link_makers(user: &User, drive: &Drive, role: Option<Role>) -> AppResult<()> {
+    if drive.kind == tree::SpaceKind::Personal {
+        return Err(AppError::bad_request("A personal space's owner always decides what is shared from it"));
+    }
+    let manages = user.is_admin() || (role.is_some_and(|r| r >= Role::Manager) && user.can_share);
+    if !manages {
+        return Err(AppError::forbidden("Only the space's managers can choose who makes share links"));
+    }
+    Ok(())
+}
+
+/// The share links that work now and would stop for each choice of who may make them: made by editors (they'd stop
+/// with `managers`), and all of them (with `nobody`). Shown before the choice is saved.
+pub async fn links_stopping(State(st): State<AppState>, user: User, Path(id): Path<String>) -> AppResult<Json<Value>> {
+    let mut c = st.db.acquire().await?;
+    let drive = tree::get_drive(&mut c, &id).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
+    let root = tree::get_node(&mut c, &drive.root_id).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
+    let role = tree::role_on(&mut c, &user, &root).await?;
+    if role.is_none() && !user.is_admin() {
+        return Err(AppError::not_found("Space not found"));
+    }
+    may_choose_link_makers(&user, &drive, role)?;
+    let links: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT s.owner_id, s.node_id FROM shares s JOIN nodes n ON n.id = s.node_id
+         WHERE n.drive_id = ? AND n.trashed_at IS NULL AND (s.expires_at IS NULL OR s.expires_at > ?)
+           AND (s.max_downloads IS NULL OR s.downloads < s.max_downloads)",
+    )
+    .bind(&drive.id)
+    .bind(now())
+    .fetch_all(&mut *c)
+    .await?;
+    let (mut managers, mut nobody) = (0, 0);
+    for (owner, node) in links {
+        let Some(owner) = crate::auth::user_by_id(&st, &mut c, owner).await? else { continue };
+        let Some(node) = tree::get_node(&mut c, &node).await? else { continue };
+        let Some(role) = tree::role_on(&mut c, &owner, &node).await? else { continue };
+        if tree::may_link(&owner, role, &drive).is_err() {
+            continue;
+        }
+        nobody += 1;
+        if !tree::LinkMakers::Managers.allow(role) {
+            managers += 1;
+        }
+    }
+    Ok(Json(json!({ "managers": managers, "nobody": nobody })))
 }
 
 /// Permanently deletes a team space (owner or administrator)
@@ -1018,8 +1082,8 @@ mod tests {
         let v = serde_json::to_value(&info).unwrap();
         assert_eq!(v["drive"]["name"], "Archive");
         assert_eq!(v["drive"]["kind"], "team");
-        let keys: Vec<&String> = v["drive"].as_object().unwrap().keys().collect();
-        assert_eq!(keys.len(), 4, "only the id, name, kind and root: {keys:?}");
+        let keys: Vec<&str> = v["drive"].as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(keys, ["id", "kind", "link_makers", "name", "root_id"], "only these, never its folder");
     }
 
     #[tokio::test]
