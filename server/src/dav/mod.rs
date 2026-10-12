@@ -7,8 +7,9 @@
 //! - Only app passwords sign in (HTTP Basic with the username and an app password, or Bearer), with the same limit on
 //!   wrong attempts as the sign-in page. Cookies are ignored and never set. A read-only app password may only use GET,
 //!   HEAD, OPTIONS and PROPFIND
-//! - Every change goes through the same code as the web: permissions, read-only spaces, folder spaces, quotas, the
-//!   upload size limit, name rules, the trash (DELETE) and the activity log
+//! - Every change goes through the same code as the web (`crate::access`, shared with the other protocols):
+//!   permissions, read-only spaces, folder spaces, quotas, the upload size limit, name rules, the trash (DELETE) and
+//!   the activity log
 //! - Locks are only acknowledged: LOCK hands out a token and UNLOCK accepts any. That is what Windows Explorer, macOS
 //!   Finder and Office need before they save; locks aren't enforced, so the last save wins
 //! - PROPFIND answers Depth 0 and 1 (1 when the header is missing); Depth infinity is refused, as RFC 4918 allows
@@ -26,42 +27,35 @@ use put::*;
 
 use std::{
     collections::HashMap,
-    path::{Path, PathBuf},
     time::{Duration, UNIX_EPOCH},
 };
 
 use axum::{
-    Json,
     body::Body,
-    extract::{self, Request, State},
+    extract::{Request, State},
     http::{HeaderMap, Method, StatusCode, header, request::Parts},
     response::{IntoResponse, Response},
 };
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
 use quick_xml::{NsReader, escape::escape, events::Event, name::ResolveResult};
-use serde_json::{Value, json};
-use sqlx::SqliteConnection;
-use tokio::io::AsyncWriteExt;
 
 use crate::{
+    access::{self, parent_and_name},
     auth::{self, User},
-    content,
     error::{AppError, AppResult},
     files,
     jobs::{self, Limit, Outcome},
-    logs, nodes,
+    nodes,
     paths::{Found, SHARED, Target, child_named, resolve, tops},
     state::AppState,
     tree::{self, Need, Node},
-    util::{new_id, now, numbered_name, validate_name},
+    util::{new_id, now},
 };
 
 /// Where WebDAV is served
 pub const PREFIX: &str = "/dav";
 /// Largest XML request body (PROPFIND, PROPPATCH, LOCK)
 const MAX_XML: usize = 1024 * 1024;
-/// Largest file a PUT may send when no upload size limit is set (sizes are summed as i64 for quotas)
-const MAX_PUT: u64 = 1 << 50;
 const ALLOW: &str = "OPTIONS, GET, HEAD, PUT, DELETE, PROPFIND, PROPPATCH, MKCOL, COPY, MOVE, LOCK, UNLOCK";
 /// Characters left as they are in a path segment of an href; everything else is percent-encoded
 const SEGMENT: &AsciiSet = &NON_ALPHANUMERIC.remove(b'-').remove(b'.').remove(b'_').remove(b'~');
@@ -141,62 +135,6 @@ fn precondition(m: &str) -> AppError {
     AppError::new(StatusCode::PRECONDITION_FAILED, m)
 }
 
-// ───────────── Finding items ─────────────
-
-/// The folder a new item at this path goes into, and the item's name
-async fn parent_of(conn: &mut SqliteConnection, user: &User, segs: &[String]) -> AppResult<(Node, String)> {
-    let Some((last, parent)) = segs.split_last() else { return Err(AppError::forbidden("Spaces can't be changed here")) };
-    let found = resolve(conn, user, parent).await?.ok_or_else(|| AppError::conflict("The folder doesn't exist"))?;
-    let folder = match found.target {
-        Target::Node(n) if n.is_folder() => *n,
-        Target::Node(_) => return Err(AppError::conflict("The folder doesn't exist")),
-        Target::Root | Target::Shared => return Err(AppError::forbidden("Items can only be added inside a space or a shared folder")),
-    };
-    let name = validate_name(last)?;
-    if name != *last {
-        return Err(AppError::bad_request("Name can't start or end with a space"));
-    }
-    // Refused as a client expects for its temporary and system files (.DS_Store, Thumbs.db…) where it can't write them
-    if folder.in_folder_space() {
-        crate::fsops::check_name(&name).map_err(|e| AppError::forbidden(e.message))?;
-    }
-    Ok((folder, name))
-}
-
-async fn found_node(st: &AppState, user: &User, segs: &[String]) -> AppResult<Node> {
-    match resolve(&mut *st.db.acquire().await?, user, segs).await?.ok_or_else(not_found)?.target {
-        Target::Node(n) => Ok(*n),
-        Target::Root | Target::Shared => Err(AppError::forbidden("This folder can't be changed")),
-    }
-}
-
-/// Calls a web handler with a JSON request, so WebDAV changes go through the same checks and logging as the web
-fn json_req<T: serde::de::DeserializeOwned>(v: Value) -> AppResult<Json<T>> {
-    serde_json::from_value(v).map(Json).map_err(AppError::internal)
-}
-
-async fn rename(st: &AppState, user: &User, id: &str, name: &str) -> AppResult<()> {
-    nodes::rename(State(st.clone()), user.clone(), extract::Path(id.to_string()), json_req(json!({ "name": name }))?).await.map(|_| ())
-}
-
-/// Moves an item into another folder, content included (a WebDAV request waits for all of it: see `transfer`)
-async fn move_into(st: &AppState, user: &User, id: &str, dest: &str) -> AppResult<()> {
-    let Json(req) = json_req(json!({ "ids": [id], "dest_id": dest }))?;
-    if let Some(across) = nodes::move_items(st, user, &req).await? {
-        nodes::run_content(st, user, across, &Default::default()).await?;
-    }
-    Ok(())
-}
-
-async fn trash(st: &AppState, user: &User, id: &str) -> AppResult<()> {
-    nodes::trash(State(st.clone()), user.clone(), json_req(json!({ "ids": [id] }))?).await.map(|_| ())
-}
-
-/// Takes an item back out of the trash, where it was
-async fn restore(st: &AppState, user: &User, id: &str) -> AppResult<()> {
-    nodes::restore(State(st.clone()), user.clone(), json_req(json!({ "ids": [id] }))?).await.map(|_| ())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,7 +142,8 @@ mod tests {
         testutil::{self, TestEnv},
         tokens,
     };
-    use axum::{Router, extract::ConnectInfo};
+    use axum::{Json, Router, extract::ConnectInfo};
+    use serde_json::json;
     use tower::ServiceExt;
 
     async fn app_password(env: &TestEnv, user: &User, scope: &str) -> String {

@@ -232,19 +232,3 @@ pub(super) fn foreign(ns: &str, local: &str) -> String {
         _ => format!("<R:{local} xmlns:R=\"{}\"/>", escape(ns)),
     }
 }
-
-/// (used, available) bytes of a space with a quota, remembered per space for one response
-pub(super) async fn quota(conn: &mut SqliteConnection, cache: &mut HashMap<String, Option<(i64, i64)>>, drive_id: &str) -> AppResult<Option<(i64, i64)>> {
-    if let Some(q) = cache.get(drive_id) {
-        return Ok(*q);
-    }
-    let q = match tree::get_drive(conn, drive_id).await? {
-        Some(d) => {
-            let limit = tree::drive_quota(conn, &d).await?;
-            (limit > 0).then(|| (d.used_bytes, (limit - d.used_bytes).max(0)))
-        }
-        None => None,
-    };
-    cache.insert(drive_id.to_string(), q);
-    Ok(q)
-}
