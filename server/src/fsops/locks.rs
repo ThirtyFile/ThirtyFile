@@ -14,13 +14,15 @@ pub(super) struct Renamed {
 }
 
 /// Scan locks of the folder spaces a change touches, held until it is done. They also keep the renames the change
-/// made on disk: unless `committed` is called, dropping them puts those back (still holding the locks), newest first.
+/// made on disk, and the folders it made: unless `committed` is called, dropping them puts those renames back (still
+/// holding the locks), newest first, then removes those folders.
 /// And they keep what the change left to finish after its transaction (tree/changes.rs): once it is committed, that is
 /// finished in the background, the locks held until it is done.
 pub struct SpaceLocks {
     pub(super) st: AppState,
     pub(super) held: Vec<(String, OwnedMutexGuard<()>)>,
     pub(super) renamed: crate::sync::Mutex<Vec<Renamed>>,
+    pub(super) made: crate::sync::Mutex<Vec<Pinned>>,
     pub(super) unfinished: crate::sync::Mutex<Vec<changes::Unfinished>>,
     pub(super) committed: std::sync::atomic::AtomicBool,
 }
@@ -43,6 +45,11 @@ impl SpaceLocks {
         self.renamed.lock().push(Renamed { now, was, made, journal });
     }
 
+    /// A folder the change made, removed again (when empty) should it fail
+    pub(super) fn note_made(&self, dir: Pinned) {
+        self.made.lock().push(dir);
+    }
+
     /// What the change leaves to finish after its transaction, if anything
     pub fn later(&self, unfinished: Option<changes::Unfinished>) {
         self.unfinished.lock().extend(unfinished);
@@ -52,6 +59,7 @@ impl SpaceLocks {
     pub fn committed(&self) {
         let renamed = std::mem::take(&mut *self.renamed.lock());
         remove_entries_later(renamed.into_iter().filter_map(|r| r.journal).collect());
+        self.made.lock().clear();
         self.committed.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
@@ -64,23 +72,31 @@ impl Drop for SpaceLocks {
             changes::finish_later(&self.st, unfinished, held);
         }
         let renamed = std::mem::take(self.renamed.get_mut());
-        if renamed.is_empty() {
+        let made = std::mem::take(self.made.get_mut());
+        if renamed.is_empty() && made.is_empty() {
             return;
         }
+        let undo = move || {
+            put_back(renamed);
+            // What was put in them is back where it was
+            for dir in made.into_iter().rev() {
+                let _ = std::fs::remove_dir(dir.as_path());
+            }
+        };
         // A disk that doesn't answer is waited for on a blocking thread, the locks held until it is done
         if self.held.iter().any(|(d, _)| stuck(d)) {
             let held = std::mem::take(&mut self.held);
             tokio::task::spawn_blocking(move || {
-                put_back(renamed);
+                undo();
                 drop(held);
             });
             return;
         }
-        // Else put back before the change reports its failure, the async worker handing its other tasks to another
+        // Else undone before the change reports its failure, the async worker handing its other tasks to another
         // thread meanwhile (the server's runtime; tests run on one thread)
         match tokio::runtime::Handle::try_current().map(|h| h.runtime_flavor()) {
-            Ok(tokio::runtime::RuntimeFlavor::MultiThread) => tokio::task::block_in_place(|| put_back(renamed)),
-            _ => put_back(renamed),
+            Ok(tokio::runtime::RuntimeFlavor::MultiThread) => tokio::task::block_in_place(undo),
+            _ => undo(),
         }
     }
 }
@@ -120,7 +136,7 @@ pub async fn lock(st: &AppState, user: &User, ids: &[&str]) -> AppResult<SpaceLo
     for (d, _) in &held {
         ready(st, d).await?;
     }
-    Ok(SpaceLocks { st: st.clone(), held, renamed: Default::default(), unfinished: Default::default(), committed: Default::default() })
+    Ok(SpaceLocks { st: st.clone(), held, renamed: Default::default(), made: Default::default(), unfinished: Default::default(), committed: Default::default() })
 }
 
 /// `lock`, for a request about these items: only the spaces where the user may see one of them. Holding a space's

@@ -1020,6 +1020,7 @@ export default {
   // Earlier versions of files (versions.rs, admin.rs)
   "This version no longer exists": "這個版本已不存在",
   "Restored an earlier version": "還原了較早的版本",
+  "Made again for an item restored from the trash": "為了從垃圾桶還原的項目重新建立",
   "Enter a number of versions from 0 to 1000": "請輸入 0 到 1000 的版本數",
   "Enter a number of days from 0 to 3650": "請輸入 0 到 3650 的天數",
   "Earlier versions of files aren't kept": "不保留檔案的較早版本",

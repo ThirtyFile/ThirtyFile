@@ -35,15 +35,23 @@ function ConflictDialog({ req, onDone }: { req: ConflictRequest; onDone(answer: 
   const { clash, op, remaining } = req;
   const folder = clash.existing.kind === "folder";
   const incomingFolder = clash.kind === "folder";
-  // An uploaded folder is merged into the folder there; anything else takes the place of the item there
-  const merge = op === "upload" && folder && incomingFolder;
+  // An uploaded or restored folder is merged into the folder there; anything else takes the place of the item there
+  const merge = (op === "upload" || op === "restore") && folder && incomingFolder;
   const choose = (choice: Resolution) => onDone({ choice, forAll });
   const options: { choice: Resolution; icon: typeof ReplaceIcon; title: string; hint?: string }[] = [
     {
       choice: "replace",
       icon: ReplaceIcon,
       title: merge ? t("Merge the folders, replacing files with the same names") : folder ? t("Replace the folder in the destination") : t("Replace the file in the destination"),
-      hint: op !== "upload" ? t("The item there moves to the trash.") : merge || versionKeep <= 0 ? undefined : t("Its current content is kept as an earlier version."),
+      hint: merge
+        ? op === "restore"
+          ? t("Files there with the same names move to the trash.")
+          : undefined
+        : op !== "upload"
+          ? t("The item there moves to the trash.")
+          : versionKeep <= 0
+            ? undefined
+            : t("Its current content is kept as an earlier version."),
     },
     { choice: "skip", icon: SkipForwardIcon, title: incomingFolder ? t("Skip this folder") : t("Skip this file") },
     {
