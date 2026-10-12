@@ -441,14 +441,18 @@ test("fonts and line spacing are changed from the toolbar, and the file gets the
   await font.selectOption("Microsoft JhengHei");
   await expect(font).toHaveValue("Microsoft JhengHei");
 
-  // Line spacing of 1.5 and 12 points before for the first paragraph; the menu then shows them
+  // Line spacing of 1.5 and 12 points before for the first paragraph; the menu then shows them. Each time, the menu is
+  // closed before it opens again: a menu still closing shows the new choices once the view tells them, and a press on
+  // the button opens the menu only at the next frame, so the checks could pass on the closing one and Escape find none
   await frame.getByText("Hello world").click();
   await spacing.click();
   await page.getByRole("menuitemradio", { name: "1.5" }).click();
+  await expect(page.getByRole("menu")).toBeHidden();
   await expect(frame.getByText("Hello world")).toBeVisible();
   await spacing.click();
   await expect(page.getByRole("menuitemradio", { name: "1.5" })).toHaveAttribute("aria-checked", "true");
   await page.getByRole("menuitem", { name: "Add space before paragraph" }).click();
+  await expect(page.getByRole("menu")).toBeHidden();
   await expect(frame.getByText("Hello world")).toBeVisible();
   await spacing.click();
   await expect(page.getByRole("menuitem", { name: "Remove space before paragraph" })).toBeVisible();
