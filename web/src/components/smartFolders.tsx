@@ -1,13 +1,13 @@
 //! Smart folders in the interface (lib/smartFolders.ts): the dialog that saves a search as one or changes what it looks
 //! for, the line that says what it looks for, and deleting one. The same in every interface style.
 
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Loader2Icon } from "lucide-react";
 import { api, type SmartFolder, type SmartQuery } from "@/api";
 import { keys } from "@/api/queryKeys";
-import { ErrorText, errorProps } from "@/components/dialogs";
+import { ErrorText, errorProps, useSelectOnFirstFocus } from "@/components/dialogs";
 import { TagDot } from "@/components/tags";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -141,15 +141,12 @@ function SmartFolderDialog({ folder, draft, onDone }: { folder?: SmartFolder; dr
     const saved = folder ? await updateSmartFolder(qc, folder.id, { name: form.name.trim(), query }) : await createSmartFolder(qc, form.name.trim(), query);
     onDone(saved);
   });
-  useEffect(() => {
-    const timer = setTimeout(() => ref.current?.select(), 50);
-    return () => clearTimeout(timer);
-  }, []);
+  const select = useSelectOnFirstFocus();
   const spaces = (drives.data ?? []).filter((d) => !d.disabled);
   const sizeField = "w-24";
   return (
     <Dialog open onOpenChange={(o) => !o && onDone(null)}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg" initialFocus={ref}>
         <form onSubmit={run} className="grid gap-4">
           <DialogHeader>
             <DialogTitle>{folder ? t("Edit smart folder") : t("New smart folder")}</DialogTitle>
@@ -157,7 +154,16 @@ function SmartFolderDialog({ folder, draft, onDone }: { folder?: SmartFolder; dr
           </DialogHeader>
           <div className="grid gap-2">
             <Label htmlFor={ids.name}>{t("Name")}</Label>
-            <Input id={ids.name} ref={ref} value={form.name} maxLength={MAX_SMART_NAME} onChange={(e) => set("name", e.target.value)} autoComplete="off" {...errorProps(error, ids.error)} />
+            <Input
+              id={ids.name}
+              ref={ref}
+              value={form.name}
+              maxLength={MAX_SMART_NAME}
+              onChange={(e) => set("name", e.target.value)}
+              onFocus={select}
+              autoComplete="off"
+              {...errorProps(error, ids.error)}
+            />
           </div>
           <fieldset className="grid gap-3">
             <legend className="mb-1 text-sm font-medium">{t("Show items that match")}</legend>

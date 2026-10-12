@@ -1,6 +1,6 @@
 //! Simple dialogs and their parts: an error under a form, asking for a name, and confirming an action
 
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useId, useRef, useState, type FocusEvent, type ReactNode } from "react";
 import { Loader2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -23,34 +23,44 @@ export function errorProps(error: unknown, id: string) {
   return error ? { "aria-invalid": true, "aria-describedby": id } : {};
 }
 
+/**
+ * Selects a dialog's name field (up to `end` of its text) the first time it gets the focus: give the dialog
+ * `initialFocus={ref}` too. The dialog focuses the field as it opens, but not once the person is in another of its
+ * fields; a timer that selected the field later could take the focus from there and put what they type into the name
+ */
+export function useSelectOnFirstFocus(end?: (value: string) => number) {
+  const done = useRef(false);
+  return (e: FocusEvent<HTMLInputElement>) => {
+    if (done.current) return;
+    done.current = true;
+    const el = e.currentTarget;
+    el.setSelectionRange(0, end?.(el.value) ?? el.value.length);
+  };
+}
+
+/** When renaming, only the base name is selected, so it can be typed over directly */
+const baseName = (name: string) => {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? dot : name.length;
+};
+
 export function NameDialog(props: { title: string; label?: string; initial?: string; confirmText?: string; onSubmit(name: string): Promise<void>; onClose(): void }) {
   const [name, setName] = useState(props.initial ?? "");
   const ref = useRef<HTMLInputElement>(null);
   const { busy, error, run } = useSubmit(() => props.onSubmit(name.trim()));
   const errorId = useId();
-
-  useEffect(() => {
-    // When renaming, select only the base name so it can be typed over directly
-    const timer = setTimeout(() => {
-      const el = ref.current;
-      if (!el) return;
-      el.focus();
-      const dot = el.value.lastIndexOf(".");
-      el.setSelectionRange(0, dot > 0 ? dot : el.value.length);
-    }, 50);
-    return () => clearTimeout(timer);
-  }, []);
+  const select = useSelectOnFirstFocus(baseName);
 
   return (
     <Dialog open onOpenChange={(o) => !o && props.onClose()}>
-      <DialogContent>
+      <DialogContent initialFocus={ref}>
         <form onSubmit={run} className="grid gap-4">
           <DialogHeader>
             <DialogTitle>{props.title}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-2">
             {props.label && <Label htmlFor="name-input">{props.label}</Label>}
-            <Input id="name-input" ref={ref} value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" {...errorProps(error, errorId)} />
+            <Input id="name-input" ref={ref} value={name} onChange={(e) => setName(e.target.value)} onFocus={select} autoComplete="off" {...errorProps(error, errorId)} />
             <ErrorText id={errorId}>{error}</ErrorText>
           </div>
           <DialogFooter>
