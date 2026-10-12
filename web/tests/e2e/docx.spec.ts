@@ -295,8 +295,8 @@ test("borders, shading and column widths are changed, and cells selected togethe
   await frame.getByText("A", { exact: true }).click();
   await frame.getByText("B", { exact: true }).click({ modifiers: ["Shift"] });
   await page.getByRole("button", { name: "Shading" }).click();
-  // The palette has this color twice (in its first and last rows)
-  await page.getByRole("menuitem", { name: "#FFC000" }).first().click();
+  // The palette has this color (#FFC000) twice, in its first and last rows
+  await page.getByRole("menuitem", { name: "Gold, accent 4", exact: true }).first().click();
   await expect(frame.locator("td[data-picked]")).toHaveCount(2);
 
   // A's right border dragged 60 pixels to the right, once the menu has closed
@@ -338,7 +338,7 @@ test("text is formatted from the toolbar and with shortcuts, and the file gets j
   await expect(bold).toHaveAttribute("aria-pressed", "true");
   // A second command on the same words, from a menu that takes the focus away
   await page.getByRole("button", { name: "Highlight" }).click();
-  await page.getByRole("menuitem", { name: "#00FF00" }).click();
+  await page.getByRole("menuitem", { name: "Bright green", exact: true }).click();
   await frame
     .getByText("Hello", { exact: false })
     .first()
@@ -348,10 +348,10 @@ test("text is formatted from the toolbar and with shortcuts, and the file gets j
   // Color and highlight for "Second", then its size (the view opens again on the changed document)
   await frame.getByText("Second").dblclick();
   await page.getByRole("button", { name: "Font color" }).click();
-  await page.getByRole("menu", { name: "Font color" }).getByRole("menuitem", { name: "#FF0000" }).first().click();
+  await page.getByRole("menu", { name: "Font color" }).getByRole("menuitem", { name: "Red", exact: true }).click();
   await page.getByRole("button", { name: "Highlight" }).click();
   // The font color's menu may still be closing: the color is picked in the highlight's
-  await page.getByRole("menu", { name: "Highlight" }).getByRole("menuitem", { name: "#FFFF00" }).click();
+  await page.getByRole("menu", { name: "Highlight" }).getByRole("menuitem", { name: "Yellow", exact: true }).click();
   await page.getByLabel("Font size").selectOption("14");
   await expect(page.getByLabel("Font size")).toHaveValue("14");
 
