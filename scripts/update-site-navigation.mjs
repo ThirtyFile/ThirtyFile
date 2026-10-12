@@ -16,6 +16,15 @@ const pages = constant("TRANSLATED");
 const guideMatch = source.match(/^\s*const GUIDES = (\[[\s\S]*?^\s*\]);/m);
 if (!guideMatch) throw new Error("Missing GUIDES list");
 const guides = JSON.parse(guideMatch[1].replace(/,(\s*[\]}])/g, "$1"));
+/** A heading's text without its markup: tags are removed until none is left, then any stray angle bracket */
+const plainText = (html) => {
+  let text = html;
+  for (let before = ""; before !== text; ) {
+    before = text;
+    text = text.replace(/<[^>]*>/g, "");
+  }
+  return text.replace(/[<>]/g, "");
+};
 const dictionaries = {};
 for (const [, code, block] of source.matchAll(/^    "([^"]+)": \{([\s\S]*?)^    \},/gm)) {
   dictionaries[code] = Object.fromEntries([...block.matchAll(/^\s*("(?:[^"\\]|\\.)*"):\s*("(?:[^"\\]|\\.)*"),?$/gm)].map(([, key, value]) => [JSON.parse(key), JSON.parse(value)]));
@@ -89,7 +98,7 @@ ${links}
         const toc = `        <details class="guide-toc">
           <summary>${t("On this page")}</summary>
           <ol>
-${sections.map(([, anchor, label]) => `            <li><a href="#${anchor}">${label.replace(/<[^>]*>/g, "").replace(/[<>]/g, "")}</a></li>`).join("\n")}
+${sections.map(([, anchor, label]) => `            <li><a href="#${anchor}">${plainText(label)}</a></li>`).join("\n")}
           </ol>
         </details>\n`;
         html = html.replace(/^(\s*<h2\b)/m, toc + "$1");
