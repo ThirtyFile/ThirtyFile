@@ -371,8 +371,8 @@ test("text is formatted from the toolbar and with shortcuts, and the file gets j
   const paragraphs = [...xml.matchAll(/<w:p>(.*?)<\/w:p>/g)].map((m) => m[1]);
   const hello = paragraphs.find((p) => p.includes("Hello"))!;
   expect(hello).toContain('<w:pPr><w:jc w:val="center"/></w:pPr>');
-  // A double-click selects the word and the space after it, as Windows does
-  expect(hello).toMatch(/<w:r><w:rPr><w:i\/><w:iCs\/><\/w:rPr><w:t xml:space="preserve">Hello <\/w:t><\/w:r>/);
+  // The browser's double-click selects the word, and on Windows the space after it too: the word is in italics
+  expect(hello).toMatch(/<w:r><w:rPr><w:i\/><w:iCs\/><\/w:rPr><w:t( xml:space="preserve")?>Hello ?<\/w:t><\/w:r>/);
   expect(hello).toMatch(/<w:r><w:rPr><w:b\/><w:bCs\/><w:highlight w:val="green"\/><\/w:rPr><w:t>world<\/w:t><\/w:r>/);
   const second = paragraphs.find((p) => p.includes("Second"))!;
   expect(second).toContain('<w:pStyle w:val="Heading1"/>');
