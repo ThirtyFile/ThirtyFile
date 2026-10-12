@@ -150,15 +150,16 @@ for (const [f, r] of files) {
   });
 }
 
-// 4. Messages the server sends (AppError::…("…") in server/src, outside tests and WebDAV, whose clients show no
-//    translations): each has an entry, shown with tServer(). Placeholders count as the same whatever their names.
+// 4. Messages the server sends (AppError::…("…") in server/src, outside tests and the file protocols: WebDAV and
+//    the access layer the protocols share, whose clients show no translations): each has an entry, shown with
+//    tServer(). Placeholders count as the same whatever their names.
 const serverMessages = [];
 const serverDir = toPath("../../server/src/");
 if (!only) {
   const call = new RegExp(String.raw`AppError::(?:bad_request|forbidden|conflict|not_found|new\(\s*[\w:]+\s*,)\(?\s*(?:format!\(\s*)?("(?:[^"\\]|\\.)*")`, "g");
   for (const f of walk(serverDir, /\.rs$/)) {
     const rel = "server/src/" + relative(serverDir, f).replace(/\\/g, "/");
-    if (rel.endsWith("/dav.rs") || rel.includes("/dav/")) continue;
+    if (rel.endsWith("/dav.rs") || rel.includes("/dav/") || rel.includes("/access/")) continue;
     const full = readFileSync(f, "utf8");
     corpus.push(full);
     // Tests come last in each file

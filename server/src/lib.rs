@@ -6,6 +6,7 @@
 #![cfg_attr(not(test), warn(clippy::too_many_lines))]
 #![warn(clippy::allow_attributes_without_reason)]
 
+mod access;
 mod admin;
 pub mod app;
 mod archive;
