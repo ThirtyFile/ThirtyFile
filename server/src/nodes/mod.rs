@@ -1493,6 +1493,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_contributors_folder_with_unindexed_files_on_disk_cant_be_moved_or_trashed() {
+        let env = testutil::env().await;
+        let ben = env.user("ben", true).await;
+        let space = env.folder_space("Library").await;
+        env.grant(&space.root, &ben, "contributor").await;
+        let make = async |name: &str| {
+            let req = Json(serde_json::from_value(serde_json::json!({ "parent_id": space.root, "name": name })).unwrap());
+            create_folder(State(env.st.clone()), ben.clone(), req).await.unwrap().0.id
+        };
+        let dest = make("Destination").await;
+        for (file, suffix) in [("outside.txt", "Normal"), ("Thumbs.db", "Hidden")] {
+            let moved_name = format!("Moved {suffix}");
+            let trashed_name = format!("Trashed {suffix}");
+            let moved = make(&moved_name).await;
+            let trashed = make(&trashed_name).await;
+            for name in [&moved_name, &trashed_name] {
+                std::fs::write(space.dir.join(name).join(file), b"from the server").unwrap();
+                assert!(env.node_at(&space.drive, &format!("{name}/{file}")).await.is_none());
+            }
+            assert_eq!(move_nodes(State(env.st.clone()), ben.clone(), batch(&[&moved], &dest)).await.unwrap_err().status, StatusCode::FORBIDDEN);
+            assert_eq!(trash(State(env.st.clone()), ben.clone(), ids(&[&trashed])).await.unwrap_err().status, StatusCode::FORBIDDEN);
+            for name in [&moved_name, &trashed_name] {
+                let path = space.dir.join(name).join(file);
+                assert_eq!(std::fs::read(&path).unwrap(), b"from the server");
+                std::fs::remove_file(path).unwrap();
+            }
+            // Once the outside file is removed, the ordinary own folders remain movable and deletable.
+            let _ = move_nodes(State(env.st.clone()), ben.clone(), batch(&[&moved], &dest)).await.unwrap();
+            let _ = trash(State(env.st.clone()), ben.clone(), ids(&[&trashed])).await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn a_contributor_moves_a_folder_of_their_own_files_across_permission_check_batches() {
+        let env = testutil::env().await;
+        let ben = env.user("ben", true).await;
+        let space = env.folder_space("Library").await;
+        env.grant(&space.root, &ben, "contributor").await;
+        let req = Json(serde_json::from_value(serde_json::json!({ "parent_id": space.root, "name": "Mine" })).unwrap());
+        let own = create_folder(State(env.st.clone()), ben.clone(), req).await.unwrap().0.id;
+        let req = Json(serde_json::from_value(serde_json::json!({ "parent_id": space.root, "name": "Destination" })).unwrap());
+        let dest = create_folder(State(env.st.clone()), ben.clone(), req).await.unwrap().0.id;
+        for i in 0..501 {
+            let name = format!("{i}.txt");
+            let file = env.file(&ben, &own, &name).await;
+            sqlx::query("UPDATE nodes SET fs_path = ? WHERE id = ?").bind(format!("Mine/{name}")).bind(file).execute(&env.st.db).await.unwrap();
+            std::fs::write(space.dir.join("Mine").join(name), b"mine").unwrap();
+        }
+        let _ = move_nodes(State(env.st.clone()), ben.clone(), batch(&[&own], &dest)).await.unwrap();
+        assert_eq!(std::fs::read(space.dir.join("Destination/Mine/500.txt")).unwrap(), b"mine");
+    }
+
+    #[tokio::test]
     async fn a_contributor_adds_items_and_changes_moves_and_deletes_only_their_own() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
