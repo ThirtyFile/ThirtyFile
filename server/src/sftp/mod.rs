@@ -357,6 +357,8 @@ impl russh::server::Handler for Connection {
         Ok(())
     }
     async fn channel_eof(&mut self, channel: ChannelId, ssh: &mut Session) -> Result<(), Self::Error> {
+        // OpenSSH scp checks the subsystem's exit status after all SFTP requests have completed.
+        ssh.exit_status_request(channel, 0)?;
         ssh.close(channel)?;
         Ok(())
     }
