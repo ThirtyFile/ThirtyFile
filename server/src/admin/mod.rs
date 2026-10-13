@@ -278,19 +278,7 @@ pub async fn update(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
         still_admin(&mut tx, me.id).await?;
-        let (was_guest, current_role): (bool, UserRole) = sqlx::query_as("SELECT guest, role FROM users WHERE id = ?").bind(id).fetch_one(&mut *tx).await?;
-        if was_guest != target.guest || current_role != target.role {
-            return Err(AppError::conflict("This account's type changed. Reload it and confirm your identity again before saving."));
-        }
-        if req.guest.unwrap_or(was_guest) && role.unwrap_or(current_role) == UserRole::Admin {
-            return Err(AppError::bad_request("Guests can't be administrators"));
-        }
-        if req.guest == Some(true) && !was_guest {
-            if !req.confirm_guest {
-                return Err(AppError::bad_request("Review and confirm the guest conversion before saving"));
-            }
-            crate::guests::convert(&mut tx, id, req.guest_revision.as_deref()).await?;
-        }
+        check_account_conversion(&mut tx, &target, role, &req).await?;
         if !changes.is_empty() {
             logs::record_activity(&mut tx, &me, None, "user_update", &format!("{}: {}", target.username, changes.join(", "))).await?;
         }
@@ -333,6 +321,25 @@ pub async fn update(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
         tx.commit().await?;
     }
     Ok(Json(get_row(&st, id).await?))
+}
+
+/// Recheck the account type in the write transaction, after identity confirmation and before granting privileges.
+async fn check_account_conversion(tx: &mut sqlx::SqliteConnection, target: &UserRow, role: Option<UserRole>, req: &UpdateReq) -> AppResult<()> {
+    let id = target.id;
+    let (was_guest, current_role): (bool, UserRole) = sqlx::query_as("SELECT guest, role FROM users WHERE id = ?").bind(id).fetch_one(&mut *tx).await?;
+    if was_guest != target.guest || current_role != target.role {
+        return Err(AppError::conflict("This account's type changed. Reload it and confirm your identity again before saving."));
+    }
+    if req.guest.unwrap_or(was_guest) && role.unwrap_or(current_role) == UserRole::Admin {
+        return Err(AppError::bad_request("Guests can't be administrators"));
+    }
+    if req.guest == Some(true) && !was_guest {
+        if !req.confirm_guest {
+            return Err(AppError::bad_request("Review and confirm the guest conversion before saving"));
+        }
+        crate::guests::convert(&mut *tx, id, req.guest_revision.as_deref()).await?;
+    }
+    Ok(())
 }
 
 /// Deletes a user. Their personal space is moved to another space (`move_to`) or permanently deleted

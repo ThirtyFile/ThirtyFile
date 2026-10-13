@@ -459,7 +459,7 @@ async fn trash_ids(st: &AppState, user: &User, ids: &[String], empty_only: bool)
     let locks = fsops::lock_seen(st, user, &ids.iter().map(String::as_str).collect::<Vec<_>>()).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    let user = crate::auth::current_user(&mut tx, &user).await?;
+    let user = crate::auth::current_user(&mut tx, user).await?;
     for id in &outermost(&mut tx, ids).await? {
         let node = tree::node_for(&mut tx, &user, id, Need::Delete).await?;
         locks.check(&node)?;

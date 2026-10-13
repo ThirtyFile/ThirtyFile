@@ -7,6 +7,8 @@ for (const [label, viewport] of [
   ["mobile", { width: 390, height: 844 }],
 ] as const) {
   test(`guest conversion is reviewed and reversible on ${label}`, async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
     await page.setViewportSize(viewport);
     await signIn(page);
     const name = await makeUser(page, "guest-conversion");
@@ -27,11 +29,17 @@ for (const [label, viewport] of [
     await expect(save).toBeDisabled();
     await dialog.getByRole("checkbox", { name: "I have reviewed and agree to these guest account changes" }).check();
     await expect(save).toBeEnabled();
+    if (process.env.GUEST_EVIDENCE_DIR) {
+      await dialog.evaluate((node) => (node.scrollTop = 0));
+      await page.screenshot({ path: `${process.env.GUEST_EVIDENCE_DIR}/guest-account-${label}.png` });
+      await save.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: `${process.env.GUEST_EVIDENCE_DIR}/guest-conversion-${label}.png` });
+    }
     await save.click();
     await expect(dialog).toBeHidden({ timeout: 20_000 });
     await expect(row).toContainText("Guest");
     const access = await (await page.request.get(`/api/nodes/${shared}/access`)).json();
-    const grant = access.grants.find((g: { principal_id: number }) => g.principal_id === user.id);
+    const grant = access.direct.find((g: { principal_id: number }) => g.principal_id === user.id);
     expect(grant.role).toBe("editor");
     expect(grant.expires_at).toBeGreaterThan(Math.floor(Date.now() / 1000));
     await row.dblclick();
@@ -42,6 +50,9 @@ for (const [label, viewport] of [
     const current = (await (await page.request.get("/api/admin/users")).json()).find((u: { id: number }) => u.id === user.id);
     expect(current.guest).toBe(false);
     expect(current.personal_space).toBe(true);
+    expect(errors).toEqual([]);
+    expect(await page.title()).toContain("ThirtyFile");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   });
 }
 
