@@ -45,6 +45,7 @@ mod redact;
 mod replicas;
 mod reset;
 mod secrets;
+mod s3;
 mod sessions;
 mod settings;
 mod shares;

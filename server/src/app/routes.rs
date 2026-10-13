@@ -38,6 +38,7 @@ pub fn router(state: AppState) -> Router {
         .route("/dav/{*path}", any(dav::handle))
         .route("/", any(dav::server_root))
         .fallback(web::serve)
+        .layer(middleware::from_fn_with_state(state.clone(), crate::s3::dispatch))
         .layer(middleware::from_fn_with_state(state.clone(), same_origin))
         .layer(middleware::from_fn_with_state(state.clone(), forwarding))
         // gzip / brotli for JSON, HTML, JS, CSS and SVG (see `Compressible`); file contents and other downloads are never compressed
@@ -179,6 +180,12 @@ fn account_api() -> Router<AppState> {
 /// Spaces, who has access, what happened in them, and share links (with what visitors of a link reach)
 fn sharing_api() -> Router<AppState> {
     Router::new()
+        .route("/s3/buckets", get(crate::s3::manage::list).post(crate::s3::manage::create))
+        .route("/s3/buckets/{id}", patch(crate::s3::manage::update).delete(crate::s3::manage::delete))
+        .route("/s3/buckets/{id}/keys", post(crate::s3::manage::new_key))
+        .route("/s3/buckets/{id}/keys/{key}", patch(crate::s3::manage::revoke_key).delete(crate::s3::manage::delete_key))
+        .route("/admin/s3", get(crate::s3::config::get).put(crate::s3::config::save))
+        .route("/admin/s3/buckets", get(crate::s3::manage::admin_list))
         // Listing the spaces works with an app password too
         .route("/drives", get(drives::list).layer(middleware::from_fn(auth::app_passwords::allow)).post(drives::create))
         .route("/drives/{id}", patch(drives::update).delete(drives::delete))

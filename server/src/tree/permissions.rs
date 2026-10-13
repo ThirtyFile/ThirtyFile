@@ -207,6 +207,13 @@ async fn access(conn: &mut SqliteConnection, user: &User, node: &Node) -> AppRes
     }
     // Administrators manage the company shared space (personal spaces are unaffected, for privacy)
     let mut best = (drive.kind == super::SpaceKind::Company && user.is_admin()).then_some(Role::Manager);
+    if user.is_admin() && drive.kind != super::SpaceKind::Personal {
+        if let Some(root) = &user.protocol_root {
+            let (permitted,): (bool,) = sqlx::query_as("WITH RECURSIVE up(id,parent_id,trash) AS (SELECT id,parent_id,trashed_at IS NOT NULL FROM nodes WHERE id=?1 UNION ALL SELECT n.id,n.parent_id,n.trashed_at IS NOT NULL FROM nodes n JOIN up ON n.id=up.parent_id) SELECT EXISTS(SELECT 1 FROM up WHERE id=?2) AND NOT EXISTS(SELECT 1 FROM up WHERE trash)")
+                .bind(&node.id).bind(root).fetch_one(&mut *conn).await?;
+            if permitted { best = Some(Role::Manager); }
+        }
+    }
     // A row for each folder on the way up, and one more for each grant there that applies
     let sql = format!(
         "WITH RECURSIVE up(id, parent_id, trashed) AS (
@@ -269,7 +276,14 @@ pub async fn node_with_role(conn: &mut SqliteConnection, user: &User, id: &str) 
 
 /// Gets a node and checks the required capability
 pub async fn node_for(conn: &mut SqliteConnection, user: &User, id: &str, need: Need) -> AppResult<Node> {
+    let current = if user.protocol_key.is_some() { Some(crate::s3::credentials::actor_in_transaction(conn, user, need).await?) } else { None };
+    let user = current.as_ref().unwrap_or(user);
     let (n, role) = node_with_role(conn, user, id).await?;
+    if let Some(root) = &user.protocol_root {
+        if !crate::access::inside(conn, root, &n.id).await? {
+            return Err(AppError::forbidden("Object is outside the bucket"));
+        }
+    }
     allows_on(conn, user, role, need, &n).await?;
     if matches!(need, Need::Add | Need::Write | Need::Move | Need::Delete) && n.space_read_only {
         return Err(read_only_error(&n));

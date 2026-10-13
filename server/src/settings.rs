@@ -98,6 +98,13 @@ pub async fn reseal_secrets(db: &SqlitePool, new_key: &[u8; 32]) -> Result<usize
             sqlx::query("UPDATE storage_locations SET config = ? WHERE id = ?").bind(json.to_string()).bind(&id).execute(&mut *tx).await?;
         }
     }
+    let keys: Vec<(String, String)> = sqlx::query_as("SELECT id, secret FROM s3_keys").fetch_all(&mut *tx).await?;
+    for (id, value) in keys {
+        if let Some(sealed) = fix(&format!("s3-key:{id}"), &value)? {
+            sqlx::query("UPDATE s3_keys SET secret=? WHERE id=?").bind(sealed).bind(id).execute(&mut *tx).await?;
+            n += 1;
+        }
+    }
     tx.commit().await?;
     Ok(n)
 }

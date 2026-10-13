@@ -97,6 +97,7 @@ async fn maintain(st: AppState, trash_days: i64, hours: Arc<AtomicU32>) {
             }
         })
         .await;
+        step("S3", crate::s3::maintain(&st)).await;
         step("uploads", async {
             if let Err(e) = upload::purge_expired(&st).await {
                 tracing::warn!("Failed to clean up expired uploads: {}", e.message);
