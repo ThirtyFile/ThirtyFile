@@ -239,22 +239,7 @@ pub(super) async fn create_sso_user(st: &AppState, provider: &str, cfg: &Provide
     {
         sqlx::query("UPDATE users SET display_name = ? WHERE id = ?").bind(name).bind(id).execute(&mut *tx).await?;
     }
-    // Groups configured for the domain rule or the provider (ones deleted since are skipped)
-    let mut joined = Vec::new();
-    for g in &groups {
-        let name: Option<(String,)> = sqlx::query_as("SELECT name FROM groups WHERE id = ?").bind(g).fetch_optional(&mut *tx).await?;
-        if let Some((name,)) = name {
-            crate::guests::validate_group_join(&mut tx, id, *g).await.map_err(|e| {
-                if e.status == axum::http::StatusCode::BAD_REQUEST {
-                    AppError::forbidden("Your account couldn't join its configured groups. Ask an administrator to check guest access.")
-                } else {
-                    e
-                }
-            })?;
-            sqlx::query("INSERT OR IGNORE INTO group_members (group_id, user_id) VALUES (?, ?)").bind(g).bind(id).execute(&mut *tx).await?;
-            joined.push(name);
-        }
-    }
+    let joined = join_groups(&mut tx, id, &groups).await?;
     if let Some(user) = crate::auth::user_by_id(st, &mut tx, id).await? {
         let detail = format!(
             "{username} (created automatically by {} sign-in{}{})",
@@ -268,6 +253,27 @@ pub(super) async fn create_sso_user(st: &AppState, provider: &str, cfg: &Provide
     crate::folders::spaces_changed(st);
     tracing::info!("Automatically created account {username} via {} sign-in", label(provider));
     Ok((id, username, true))
+}
+
+/// Validate guest-compatible grants before joining configured groups, in the account creation transaction.
+async fn join_groups(tx: &mut sqlx::SqliteConnection, id: i64, groups: &[i64]) -> AppResult<Vec<String>> {
+    // Groups configured for the domain rule or the provider (ones deleted since are skipped)
+    let mut joined = Vec::new();
+    for g in groups {
+        let name: Option<(String,)> = sqlx::query_as("SELECT name FROM groups WHERE id = ?").bind(g).fetch_optional(&mut *tx).await?;
+        if let Some((name,)) = name {
+            crate::guests::validate_group_join(&mut *tx, id, *g).await.map_err(|e| {
+                if e.status == axum::http::StatusCode::BAD_REQUEST {
+                    AppError::forbidden("Your account couldn't join its configured groups. Ask an administrator to check guest access.")
+                } else {
+                    e
+                }
+            })?;
+            sqlx::query("INSERT OR IGNORE INTO group_members (group_id, user_id) VALUES (?, ?)").bind(g).bind(id).execute(&mut *tx).await?;
+            joined.push(name);
+        }
+    }
+    Ok(joined)
 }
 
 pub(super) async fn link(st: &AppState, provider: &str, ident: &Identity, user_id: i64, ip: &str) -> AppResult<String> {
