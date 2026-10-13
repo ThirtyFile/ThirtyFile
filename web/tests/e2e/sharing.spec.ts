@@ -125,6 +125,7 @@ test("a contributor adds a file and renames it, but can't rename or delete someo
   const uploaded = uploadFinished(page);
   await page.locator('input[type="file"][multiple]').setInputFiles([{ name: "my part.txt", mimeType: "text/plain", buffer: Buffer.from("My part") }]);
   await uploaded;
+  await expect(page.getByRole("status").filter({ hasText: "1 upload complete" })).toBeAttached();
   const row = (name: string) => page.locator("[data-node-id]").filter({ has: page.getByText(name, { exact: true }) });
   const rename = page.getByRole("button", { name: "Rename", exact: true });
   const remove = page.getByRole("button", { name: "Delete", exact: true });
