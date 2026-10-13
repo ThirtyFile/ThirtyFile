@@ -201,6 +201,13 @@ pub fn record_share_access(st: &AppState, share_id: &str, owner_id: i64, node: O
 /// Records an activity (within the caller's transaction, unlike sign-in and share link events)
 pub async fn record_activity(conn: &mut SqliteConnection, user: &User, node: Option<&dyn Item>, action: &str, detail: &str) -> AppResult<()> {
     debug_assert!(super::known_action(action), "{action} isn't in logs::ACTIONS");
+    let detail = match &user.activity_source {
+        Some(source) => {
+            let source: String = source.chars().filter(|c| !c.is_control()).take(256).collect();
+            if detail.is_empty() { format!("through {source}") } else { format!("{detail}; through {source}") }
+        }
+        None => detail.to_string(),
+    };
     sqlx::query("INSERT INTO activity (at, user_id, username, drive_id, node_id, node_name, action, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
         .bind(now())
         .bind(user.id)

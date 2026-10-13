@@ -152,6 +152,10 @@ pub struct User {
     #[sqlx(skip)]
     #[serde(skip)]
     pub session_id: Option<String>,
+    /// Verified protocol context for activity records; never credentials or client-supplied headers.
+    #[sqlx(skip)]
+    #[serde(skip)]
+    pub activity_source: Option<String>,
 }
 
 impl User {
