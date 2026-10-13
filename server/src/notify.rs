@@ -942,8 +942,10 @@ mod tests {
         let prefs = json!({ "email": "amy@example.com", "password": testutil::password(), "kinds": { "link_upload": { "in_app": false, "email": true } } });
         let _ = update_settings(State(env.st.clone()), amy.clone(), Json(serde_json::from_value(prefs).unwrap())).await.unwrap();
 
-        // Access taken away and given again, over and over
+        // Repeated local grant changes while inherited access keeps every queued email valid.
+        // Revoked recipients are tested separately: dispatch timing must not decide whether this rate test passes.
         let folder = env.folder(&amy, amy.root(), "Plans").await;
+        env.grant(amy.root(), &ben, "viewer").await;
         for _ in 0..20 {
             share(&env, &amy, &folder, json!({ "principal_type": "user", "principal_id": ben.id, "role": "viewer" })).await;
             env.revoke(&folder, &ben).await;
@@ -961,6 +963,33 @@ mod tests {
         assert_eq!(to.get("amy@example.com"), Some(&1), "{to:?}");
         let ben_got = to.get("ben@example.com").copied().unwrap_or(0);
         assert!((1..=MAX_EMAILS_PER_KIND).contains(&ben_got), "{to:?}");
+    }
+
+    #[tokio::test]
+    async fn queued_email_skips_a_revoked_recipient_before_sending_to_a_current_one() {
+        let env = testutil::env().await;
+        let (port, mut rx) = crate::mail::tests::fake_server(true).await;
+        let mut c = env.st.db.acquire().await.unwrap();
+        crate::mail::store(&mut c, &crate::mail::tests::settings(port)).await.unwrap();
+        drop(c);
+        let amy = env.user("amy", true).await;
+        let ben = env.user("ben", true).await;
+        for (user, email) in [(&amy, "amy@example.com"), (&ben, "ben@example.com")] {
+            let prefs = json!({ "email": email, "password": testutil::password() });
+            let _ = update_settings(State(env.st.clone()), user.clone(), Json(serde_json::from_value(prefs).unwrap())).await.unwrap();
+        }
+        let folder = env.folder(&amy, amy.root(), "Plans").await;
+        env.grant(&folder, &ben, "viewer").await;
+        let notice = Notice { kind: "shared", node_id: Some(folder.clone()), data: json!({ "by": "amy", "name": "Plans", "item": "folder", "role": "viewer" }) };
+        let emails = add(&mut env.st.db.acquire().await.unwrap(), &[ben.id, amy.id], &notice).await.unwrap();
+        assert_eq!(emails.len(), 2);
+        let mut emails = emails;
+        emails.sort_by_key(|email| email.user_id != ben.id);
+        env.revoke(&folder, &ben).await;
+        send_later(&env.st, emails);
+        // The authorized recipient comes second in the same dispatch task, proving it passed the revoked one.
+        let (to, _) = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv()).await.unwrap().unwrap();
+        assert_eq!(to, "amy@example.com");
     }
 
     #[test]
