@@ -204,6 +204,7 @@ networks:
 
       <h2 id="sftp-port">SFTP 使用独立 TCP 端口</h2>
 <p>SFTP 不经过 HTTP 反向代理。请在 Docker 发布端口（默认 2022），并在防火墙允许此端口。使用服务器主机名连接，而非 HTTPS 路径。第一次信任连接前，核对控制台的主机密钥指纹。请参阅 <a href="protocols.html#sftp">SFTP 设置</a>。</p>
+<p><a href="protocols.html#s3-setup">S3 端点</a>需要独立主机名，例如 <code>s3.files.example.com</code>，以及 HTTPS 证书和代理路由，转发至相同的 ThirtyFile HTTP 端口。请保留原始 Host 请求头，不要改写路径或已签名的查询参数。路径样式 URL 将存储桶名称放在路径中，而非主机名。</p>
         <nav class="next" aria-label="更多指南">
           <a href="settings.html"><span>上一篇</span>设置</a>
           <a class="forward" href="backup.html"><span>下一篇</span>升级与备份</a>

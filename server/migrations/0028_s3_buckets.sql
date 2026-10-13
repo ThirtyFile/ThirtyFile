@@ -40,6 +40,15 @@ CREATE TABLE s3_parts (
     created_at INTEGER NOT NULL,
     PRIMARY KEY(upload_id, number)
 );
+-- Cascades and cancelled management requests cannot lose the names of files awaiting removal.
+CREATE TABLE s3_part_gc (file_id TEXT PRIMARY KEY);
+CREATE TRIGGER s3_part_deleted AFTER DELETE ON s3_parts BEGIN
+    INSERT OR IGNORE INTO s3_part_gc(file_id) VALUES(OLD.file_id);
+END;
+CREATE TRIGGER s3_part_replaced AFTER UPDATE OF file_id ON s3_parts
+WHEN NEW.file_id != OLD.file_id BEGIN
+    INSERT OR IGNORE INTO s3_part_gc(file_id) VALUES(OLD.file_id);
+END;
 ALTER TABLE nodes ADD COLUMN content_md5 TEXT;
 ALTER TABLE nodes ADD COLUMN md5_version TEXT;
 -- Changes made by scans, copies, restores or future adapters must never retain a stale validator.

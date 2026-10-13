@@ -135,7 +135,7 @@ get report.csv</code></pre>
 aws configure set s3.addressing_style path --profile thirtyfile
 aws --profile thirtyfile --endpoint-url https://s3.files.example.com s3 ls s3://backups/
 aws --profile thirtyfile --endpoint-url https://s3.files.example.com s3 cp report.csv s3://backups/report.csv</code></pre>
-<p>rclone では <code>rclone config</code> を実行し、S3、プロバイダー Other を選び、キーを対話形式で入力します。エンドポイントとリージョンを指定し、force_path_style を有効にします。no_check_bucket はクライアントの必要に応じて設定し、ACL とサーバー側暗号化は未設定にします。<code>rclone copy</code> はファイルを追加しますが、<code>rclone sync</code> は宛先のファイルを削除する場合があります。</p>
+<p>rclone では <code>rclone config</code> を実行し、S3、プロバイダー Other を選び、キーを対話形式で入力します。エンドポイントとリージョンを指定し、force_path_style と no_system_metadata を有効にし、disable_checksum を true にして rclone の独自 MD5 メタデータを無効にします（S3 の Content-MD5 は転送を検証します）。ACL とサーバー側暗号化は未設定にします。<code>rclone copy</code> はファイルを追加しますが、<code>rclone sync</code> は宛先のファイルを削除する場合があります。</p>
 <h3 id="s3-backups">バックアップとその他の用途</h3>
 <p>restic を使う場合は <strong>Backups</strong> フォルダーを <code>backups</code> として公開し、読み書きキーを作成します。<code>AWS_ACCESS_KEY_ID</code> と <code>AWS_SECRET_ACCESS_KEY</code> は保護された認証情報ストアから読み込みます。リポジトリのパスワードは S3 キーとは別です。安全に保管し、専用の空のフォルダーだけを初期化してください。</p>
 <pre><code>restic -r s3:https://s3.files.example.com/backups -o s3.region=us-east-1 -o s3.bucket-lookup=path init

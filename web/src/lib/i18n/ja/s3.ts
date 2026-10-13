@@ -63,5 +63,6 @@ export default {
   "Enter a key description of at most 160 characters": "キーの説明を 160 文字以内で入力してください",
   "The key's end date must be in the future": "キーの有効期限は現在より後にしてください",
   "This bucket already has 100 keys": "このバケットにはすでに 100 個のキーがあります",
-  "Object is outside the bucket": "オブジェクトがバケットの範囲外です"
+  "Object is outside the bucket": "オブジェクトがバケットの範囲外です",
+  "The account no longer has access": "アカウントにアクセス権限がなくなりました"
 };

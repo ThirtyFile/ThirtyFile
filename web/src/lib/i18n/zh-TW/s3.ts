@@ -63,5 +63,6 @@ export default {
   "Enter a key description of at most 160 characters": "請輸入不超過 160 字元的金鑰說明",
   "The key's end date must be in the future": "金鑰到期日必須晚於目前時間",
   "This bucket already has 100 keys": "此 bucket 已有 100 個金鑰",
-  "Object is outside the bucket": "物件不在 bucket 範圍內"
+  "Object is outside the bucket": "物件不在 bucket 範圍內",
+  "The account no longer has access": "帳號已失去存取權"
 };

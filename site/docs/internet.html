@@ -207,6 +207,7 @@ networks:
         </ul>
       <h2 id="sftp-port">SFTP uses a separate TCP port</h2>
 <p>SFTP does not go through an HTTP reverse proxy. Publish its port (2022 by default) in Docker and allow that port through your firewall. Connect with your server hostname, not the HTTPS path. Verify the host key fingerprint from the control panel before trusting the first connection. See <a href="protocols.html#sftp">SFTP setup</a>.</p>
+<p>The <a href="protocols.html#s3-setup">S3 endpoint</a> needs its own hostname, such as <code>s3.files.example.com</code>, with an HTTPS certificate and a proxy route to the same ThirtyFile HTTP port. Preserve the original Host header and do not rewrite the path or signed query parameters. Path-style URLs place the bucket name in the path, not the hostname.</p>
         <nav class="next" aria-label="More guides">
           <a href="settings.html"><span>Previous</span>Settings</a>
           <a class="forward" href="backup.html"><span>Next</span>Upgrade and backup</a>

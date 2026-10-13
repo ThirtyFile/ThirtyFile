@@ -247,7 +247,7 @@ export function PublishBucketMenu({ nodeId, onPublish }: { nodeId: string; onPub
 export function S3FolderSection({ nodeId }: { nodeId: string }) {
   const q = useQuery(s3FolderQuery(nodeId));
   const [open, setOpen] = useState(false);
-  if (!q.data?.can_publish) return null;
+  if (!q.data || (!q.data.can_publish && q.data.buckets.length === 0)) return null;
   return (
     <section className="grid gap-2 border-t pt-3">
       <h3 className="text-xs font-medium">{t("S3 buckets")}</h3>

@@ -283,7 +283,9 @@ async fn access(conn: &mut SqliteConnection, user: &User, node: &Node) -> AppRes
         if let Some(root) = &user.protocol_root {
             let (permitted,): (bool,) = sqlx::query_as("WITH RECURSIVE up(id,parent_id,trash) AS (SELECT id,parent_id,trashed_at IS NOT NULL FROM nodes WHERE id=?1 UNION ALL SELECT n.id,n.parent_id,n.trashed_at IS NOT NULL FROM nodes n JOIN up ON n.id=up.parent_id) SELECT EXISTS(SELECT 1 FROM up WHERE id=?2) AND NOT EXISTS(SELECT 1 FROM up WHERE trash)")
                 .bind(&node.id).bind(root).fetch_one(&mut *conn).await?;
-            if permitted { best = Some(Role::Manager); }
+            if permitted {
+                best = Some(Role::Manager);
+            }
         }
     }
     // A row for each folder on the way up, and one more for each grant there that applies

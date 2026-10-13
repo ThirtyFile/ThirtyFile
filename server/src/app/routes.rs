@@ -44,7 +44,10 @@ pub fn router(state: AppState) -> Router {
         // gzip / brotli for JSON, HTML, JS, CSS and SVG (see `Compressible`); file contents and other downloads are never compressed
         // Level 4: brotli's default (11) spends far more CPU per response than it saves on JSON and HTML; gzip 4 is likewise the sweet spot
         .layer(CompressionLayer::new().gzip(true).br(true).quality(CompressionLevel::Precise(4)).compress_when(Compressible))
-        .layer(TraceLayer::new_for_http())
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(|req: &axum::http::Request<axum::body::Body>| tracing::debug_span!("http_request", method = %req.method(), path = req.uri().path())),
+        )
         // A bug hit by one request answers that request with an error instead of stopping the server for everyone
         .layer(tower_http::catch_panic::CatchPanicLayer::new())
         // Outermost, so a request that panicked is recorded too: gives each request an id and records the errors

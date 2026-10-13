@@ -166,6 +166,9 @@ async fn store_file(st: &AppState, user: &User, parent: &Node, name: &str, tmp: 
         let (created, written) = match child_named(&mut tx, &folder.id, name).await? {
             Some(n) if n.is_folder() => return Err(AppError::new(StatusCode::METHOD_NOT_ALLOWED, "A folder has this name")),
             Some(n) => {
+                if scope.is_some() && n.name != name {
+                    return Err(AppError::conflict("Object keys that differ only in case conflict in this space"));
+                }
                 let n = tree::node_for(&mut tx, user, &n.id, Need::Write).await?;
                 // The same content again (clients often save a file twice): nothing changes
                 if staged.hash().is_some() && n.blob_hash.as_deref() == staged.hash() {

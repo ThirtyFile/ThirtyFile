@@ -135,7 +135,7 @@ get report.csv</code></pre>
 aws configure set s3.addressing_style path --profile thirtyfile
 aws --profile thirtyfile --endpoint-url https://s3.files.example.com s3 ls s3://backups/
 aws --profile thirtyfile --endpoint-url https://s3.files.example.com s3 cp report.csv s3://backups/report.csv</code></pre>
-<p>使用 rclone 时运行 <code>rclone config</code>，选择 S3、提供商 Other，交互输入密钥，设置端点和区域，启用 force_path_style，根据客户端需要设置 no_check_bucket，并将 ACL 和服务器端加密留空。<code>rclone copy</code> 可增加文件；<code>rclone sync</code> 可能移除目标文件。</p>
+<p>使用 rclone 时运行 <code>rclone config</code>，选择 S3、提供商 Other，交互输入密钥，设置端点和区域，启用 force_path_style 和 no_system_metadata，将 disable_checksum 设为 true 以停用 rclone 自定义 MD5 元数据（S3 Content-MD5 仍会验证传输），并将 ACL 和服务器端加密留空。<code>rclone copy</code> 可增加文件；<code>rclone sync</code> 可能移除目标文件。</p>
 <h3 id="s3-backups">备份和其他用途</h3>
 <p>使用 restic 时，将<strong>备份</strong>文件夹发布为 <code>backups</code>，并创建读写密钥。从受保护的凭据存储区加载 <code>AWS_ACCESS_KEY_ID</code> 和 <code>AWS_SECRET_ACCESS_KEY</code>。Repository 密码与 S3 密钥不同，请妥善保管。只在专用的空文件夹中初始化。</p>
 <pre><code>restic -r s3:https://s3.files.example.com/backups -o s3.region=us-east-1 -o s3.bucket-lookup=path init

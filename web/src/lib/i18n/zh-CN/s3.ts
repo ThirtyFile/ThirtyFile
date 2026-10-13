@@ -63,5 +63,6 @@ export default {
   "Enter a key description of at most 160 characters": "请输入不超过 160 字符的密钥说明",
   "The key's end date must be in the future": "密钥到期日必须晚于当前时间",
   "This bucket already has 100 keys": "此存储桶已有 100 个密钥",
-  "Object is outside the bucket": "对象不在存储桶范围内"
+  "Object is outside the bucket": "对象不在存储桶范围内",
+  "The account no longer has access": "账号已失去访问权限"
 };

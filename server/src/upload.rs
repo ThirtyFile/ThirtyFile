@@ -750,7 +750,8 @@ pub async fn clean_tmp(st: &AppState) -> AppResult<usize> {
     let older_than = |t: Option<std::time::SystemTime>, secs: u64| t.is_some_and(|t| t < now - std::time::Duration::from_secs(secs));
     let mut removed = 0;
     for (name, path, modified) in files {
-        let stale = if name.starts_with("upload-") { !known.contains(&name) && older_than(modified, 3600) } else { !known.contains(&name) && older_than(modified, 86400) };
+        let stale =
+            if name.starts_with("upload-") { !known.contains(&name) && older_than(modified, 3600) } else { !known.contains(&name) && older_than(modified, 86400) };
         if stale && tokio::fs::remove_file(path).await.is_ok() {
             removed += 1;
         }
