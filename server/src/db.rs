@@ -1304,7 +1304,9 @@ mod tests {
         let v040 = migrations_in(&dir.join("v0.4.0"), &ours[..1], None).await;
         assert_eq!(v040.iter().map(|m| m.version).collect::<Vec<_>>(), [1]);
         let db = open(&path, 16, &v040).await.unwrap();
-        crate::settings::bootstrap_admin(&db, Some("upgrade-test"), None).await.unwrap();
+        // Seed only columns present in 0.4.0. The current account creator also writes later account fields.
+        let hash = crate::auth::hash_password("upgrade-test".into()).await.unwrap();
+        sqlx::query("INSERT INTO users (id, username, password_hash, role, created_at) VALUES (1, 'admin', ?, 'admin', 0)").bind(hash).execute(&db).await.unwrap();
         set_setting(&mut db.acquire().await.unwrap(), "upgrade-test", "kept").await.unwrap();
         db.close().await;
 
