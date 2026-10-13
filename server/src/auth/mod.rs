@@ -107,7 +107,7 @@ pub fn cookie_header(st: &AppState, name: &str, value: &str, path: &str, max_age
     format!("{name}={value}; Path={path}; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}")
 }
 
-pub const USER_COLS: &str = "u.id, u.username, u.display_name, u.role, u.can_write, u.can_delete, u.can_share, u.quota_bytes, u.root_id, u.must_change_password";
+pub const USER_COLS: &str = "u.id, u.username, u.display_name, u.role, u.guest, u.can_write, u.can_delete, u.can_share, u.quota_bytes, CASE WHEN u.guest THEN NULL ELSE u.root_id END AS root_id, u.must_change_password";
 
 /// What an account may do (`users.role`)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, sqlx::Type)]
@@ -138,6 +138,8 @@ pub struct User {
     /// Shown next to the username; may be blank
     pub display_name: String,
     pub role: UserRole,
+    /// Outside account: only explicitly shared access, without a personal space or sharing privileges.
+    pub guest: bool,
     pub can_write: bool,
     pub can_delete: bool,
     pub can_share: bool,
@@ -172,7 +174,7 @@ pub struct User {
 
 impl User {
     pub fn is_admin(&self) -> bool {
-        self.role == UserRole::Admin
+        self.role == UserRole::Admin && !self.guest
     }
 
     /// Tests: the root folder of the user's personal space, which test users have

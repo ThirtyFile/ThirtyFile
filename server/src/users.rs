@@ -25,6 +25,7 @@ pub struct NewUser<'a> {
     /// Argon2 hash (see `auth::hash_password`); hashed by the caller before taking the write lock, as it takes ~100 ms
     pub password_hash: &'a str,
     pub role: crate::auth::UserRole,
+    pub guest: bool,
     pub can_write: bool,
     pub can_delete: bool,
     pub can_share: bool,
@@ -47,13 +48,14 @@ pub struct NewUser<'a> {
 pub async fn create_user(conn: &mut sqlx::SqliteConnection, u: NewUser<'_>) -> AppResult<i64> {
     let id = crate::db::next_id(conn, crate::db::Counted::Users).await?;
     sqlx::query(
-        "INSERT INTO users (id, username, password_hash, role, can_write, can_delete, can_share, quota_bytes, created_at, source, provisioned_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO users (id, username, password_hash, role, guest, can_write, can_delete, can_share, quota_bytes, created_at, source, provisioned_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(id)
     .bind(u.username)
     .bind(u.password_hash)
     .bind(u.role)
+    .bind(u.guest)
     .bind(u.can_write)
     .bind(u.can_delete)
     .bind(u.can_share)
@@ -63,7 +65,7 @@ pub async fn create_user(conn: &mut sqlx::SqliteConnection, u: NewUser<'_>) -> A
     .bind(u.provisioned_by)
     .execute(&mut *conn)
     .await?;
-    if let Some(location) = u.personal_space {
+    if let Some(location) = u.personal_space.filter(|_| !u.guest) {
         crate::personal::create_or_wait(conn, u.space_folders, id, u.username, location).await?;
     }
     Ok(id)
