@@ -1,8 +1,8 @@
 // Sharing a folder by link, seen by a visitor who isn't signed in: the password, browsing, downloading, and the link
-// stopping once it is deleted
+// stopping once it is deleted; and sharing a folder with a contributor, who changes only what they add
 import { readFile } from "node:fs/promises";
 import { devices, expect, test } from "@playwright/test";
-import { answer, makeFolder, makeUser, signIn, uploadFile } from "./helpers";
+import { USER_PASSWORD, answer, makeFolder, makeUser, signIn, uploadFile } from "./helpers";
 
 test("a visitor unlocks a shared folder with its password, opens a folder in it and downloads a file", async ({ page, browser, baseURL }) => {
   await signIn(page);
@@ -104,4 +104,46 @@ test("Share with… picks a person with the keyboard alone", async ({ page }) =>
   await page.keyboard.press("Enter");
   expect((await added).ok()).toBe(true);
   expect(JSON.stringify(await (await page.request.get(`/api/nodes/${dir}/access`)).json())).toContain(kim);
+});
+
+test("a contributor adds a file and renames it, but can't rename or delete someone else's", async ({ page }) => {
+  await signIn(page);
+  const dir = await makeFolder(page, "Hand in");
+  await uploadFile(page, dir, "brief.txt", "The brief");
+  const username = await makeUser(page, "contrib");
+  const [user] = (await (await page.request.get(`/api/admin/users?q=${username}`)).json()) as { id: number }[];
+  const granted = await page.request.post(`/api/nodes/${dir}/access`, { data: { principal_type: "user", principal_id: user.id, role: "contributor" } });
+  expect(granted.ok()).toBe(true);
+
+  // Signed in as the contributor, in the Windows style (its toolbar names the commands)
+  expect((await page.request.post("/api/auth/logout")).ok()).toBe(true);
+  expect((await page.request.post("/api/auth/login", { data: { username, password: USER_PASSWORD } })).ok()).toBe(true);
+  expect((await page.request.put("/api/auth/password", { data: { current: USER_PASSWORD, new: `${USER_PASSWORD}-2` } })).ok()).toBe(true);
+  expect((await page.request.put("/api/auth/style", { data: { style: "windows" } })).ok()).toBe(true);
+  await uploadFile(page, dir, "my part.txt", "My part");
+  await page.evaluate(() => localStorage.setItem("tf-view", JSON.stringify("list")));
+  await page.goto(`/files/${dir}`);
+  const row = (name: string) => page.locator("[data-node-id]").filter({ has: page.getByText(name, { exact: true }) });
+  const rename = page.getByRole("button", { name: "Rename", exact: true });
+  const remove = page.getByRole("button", { name: "Delete", exact: true });
+
+  // Someone else's file: neither renamed nor deleted
+  await row("brief.txt").click();
+  await expect(rename).toBeDisabled();
+  await expect(remove).toBeDisabled();
+
+  // Their own: renamed
+  await row("my part.txt").click();
+  await expect(remove).toBeEnabled();
+  await rename.click();
+  const box = page.getByRole("textbox", { name: "New name" });
+  await box.fill("final part.txt");
+  const renamed = answer(page, "PATCH", /^\/api\/nodes\/[^/]+$/);
+  await box.press("Enter");
+  expect((await renamed).ok()).toBe(true);
+  await expect(row("final part.txt")).toBeVisible();
+
+  // Both selected: Delete waits for a selection that is all theirs
+  await row("brief.txt").click({ modifiers: ["ControlOrMeta"] });
+  await expect(remove).toBeDisabled();
 });

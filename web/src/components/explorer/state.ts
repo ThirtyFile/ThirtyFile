@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
 import type { ListNav } from "@/components/FileList";
 import { useClipboard } from "@/lib/clipboard";
-import { capsOf } from "@/lib/drives";
+import { capsFor, capsOf } from "@/lib/drives";
 import { takeArrival } from "@/lib/columns";
 import { openMenuByKey } from "@/lib/contextMenus";
 import { focusIsFree } from "@/lib/focus";
@@ -23,7 +23,9 @@ import type { ExplorerProps } from "../Explorer";
 export function useExplorerState(p: ExplorerProps) {
   const me = useMe();
   // In a folder, available actions depend on the role; list pages (search, recent, etc.) mix several locations, so the server decides
-  const caps = p.role ? capsOf(p.role, me, p.readOnly, p.linkMakers) : { write: me.can_write, del: me.can_delete, share: me.can_share, manage: false };
+  const folderCaps = p.role
+    ? capsOf(p.role, me, p.readOnly, p.linkMakers)
+    : { add: me.can_write, write: me.can_write, del: me.can_delete, share: me.can_share, manage: false, ownWrite: false, ownDel: false };
   const qc = useQueryClient();
   const navigate = useNavigate();
   const tabs = useTabActions();
@@ -50,7 +52,7 @@ export function useExplorerState(p: ExplorerProps) {
   const undoLabel = useUndoLabel();
 
   // New folder and paste only touch the database; uploading and creating files need to write to the storage service, so they're disabled while offline
-  const canCreate = !!p.folderId && caps.write;
+  const canCreate = !!p.folderId && folderCaps.add;
   const canUpload = canCreate && !p.offline;
   const list = p.list;
   const total = list ? Math.max(0, list.total) : p.items.length;
@@ -132,6 +134,8 @@ export function useExplorerState(p: ExplorerProps) {
   /** What the commands work on */
   const picked: Picked = { ids: selectedIds, span, count };
   const single = !span && selectedNodes.length === 1 ? selectedNodes[0] : null;
+  // What can be done with the selection: a contributor's own items only (all of them loaded, so not a span)
+  const caps = capsFor(folderCaps, span ? [] : selectedNodes, me);
   const allFavorite = selectedNodes.length > 0 && selectedNodes.every((n) => n.is_favorite);
 
   // Clear the selection when switching folders: a folder by its id (renaming the folder shown doesn't leave it), the

@@ -306,7 +306,7 @@ export function AccessDialog({ nodeId, onClose }: { nodeId: string; onClose(): v
 
   const info = q.data;
   const personalRoot = info?.drive.kind === "personal" && info.is_drive_root;
-  const roles: Role[] = info?.is_drive_root && info.drive.kind === "team" ? ["viewer", "editor", "manager", "owner"] : ["viewer", "editor", "manager"];
+  const roles: Role[] = info?.is_drive_root && info.drive.kind === "team" ? ["viewer", "contributor", "editor", "manager", "owner"] : ["viewer", "contributor", "editor", "manager"];
   const title = info ? (info.is_drive_root ? t("Members of “{name}”", { name: info.drive.name }) : t("Share “{name}”", { name: info.node.name })) : t("Manage access");
 
   return (

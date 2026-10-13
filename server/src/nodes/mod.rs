@@ -1491,4 +1491,63 @@ mod tests {
         let r = crate::folders::scan(&env.st, &space.drive).await.unwrap();
         assert_eq!((r.added, r.changed, r.removed), (0, 0, 0), "the index agrees with the disk: {r:?}");
     }
+
+    #[tokio::test]
+    async fn a_contributor_adds_items_and_changes_moves_and_deletes_only_their_own() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let ben = env.user("ben", true).await;
+        let st = || State(env.st.clone());
+        let library = env.folder(&amy, amy.root(), "Library").await;
+        env.grant(&library, &ben, "contributor").await;
+        let amys = env.file(&amy, &library, "amy.txt").await;
+        let refused = |r: AppResult<()>| r.unwrap_err().status;
+        let rename_to = |id: &str, name: &str| {
+            let (st, ben, id) = (env.st.clone(), ben.clone(), id.to_string());
+            let req = Json(serde_json::from_value(serde_json::json!({ "name": name })).unwrap());
+            async move { rename(State(st), ben, Path(id), req).await.map(|_| ()) }
+        };
+
+        // He adds a folder and files
+        let req = Json(serde_json::from_value(serde_json::json!({ "parent_id": library, "name": "Ben's" })).unwrap());
+        let Json(mine) = create_folder(st(), ben.clone(), req).await.unwrap();
+        let bens = env.file(&ben, &library, "ben.txt").await;
+
+        // He renames, moves, copies and deletes his own; Amy's he can only copy
+        rename_to(&bens, "ben 2.txt").await.unwrap();
+        assert_eq!(refused(rename_to(&amys, "mine.txt").await), StatusCode::FORBIDDEN);
+        assert_eq!(refused(move_nodes(st(), ben.clone(), batch(&[&amys], &mine.id)).await.map(|_| ())), StatusCode::FORBIDDEN);
+        let _ = move_nodes(st(), ben.clone(), batch(&[&bens], &mine.id)).await.unwrap();
+        let _ = copy_nodes(st(), ben.clone(), batch(&[&amys], &mine.id)).await.unwrap();
+        assert_eq!(refused(trash(st(), ben.clone(), ids(&[&amys])).await.map(|_| ())), StatusCode::FORBIDDEN);
+        let _ = trash(st(), ben.clone(), ids(&[&bens])).await.unwrap();
+        let _ = restore(st(), ben.clone(), ids(&[&bens])).await.unwrap();
+        let _ = trash(st(), ben.clone(), ids(&[&bens])).await.unwrap();
+        let _ = delete_forever(st(), ben.clone(), ids(&[&bens])).await.unwrap();
+        assert!(!name_of(&env, &amys).await.2);
+
+        // His folder holding something Amy added keeps its name his way, but stays where it is with what is in it
+        let amys_inside = env.file(&amy, &mine.id, "notes.txt").await;
+        rename_to(&mine.id, "Ben's things").await.unwrap();
+        let err = trash(st(), ben.clone(), ids(&[&mine.id])).await.unwrap_err();
+        assert_eq!((err.status, err.message.as_str()), (StatusCode::FORBIDDEN, "\"Ben's things\" holds items other people added, so you can't move or delete it"));
+        let shelf = env.folder(&amy, &library, "Shelf").await;
+        assert_eq!(refused(move_nodes(st(), ben.clone(), batch(&[&mine.id], &shelf)).await.map(|_| ())), StatusCode::FORBIDDEN);
+        // Once it holds only his, it moves
+        let _ = trash(st(), amy.clone(), ids(&[&amys_inside])).await.unwrap();
+        let _ = delete_forever(st(), amy.clone(), ids(&[&amys_inside])).await.unwrap();
+        let _ = move_nodes(st(), ben.clone(), batch(&[&mine.id], &shelf)).await.unwrap();
+
+        // No share links, no giving access; the folder itself (Amy's) stays hers
+        let link = Json(serde_json::from_value(serde_json::json!({ "node_id": amys })).unwrap());
+        assert_eq!(crate::shares::create(st(), ben.clone(), link).await.unwrap_err().status, StatusCode::FORBIDDEN);
+        let give = Json(serde_json::from_value(serde_json::json!({ "principal_type": "user", "principal_id": amy.id, "role": "viewer" })).unwrap());
+        assert_eq!(crate::drives::grant(st(), ben.clone(), Path(library.clone()), give).await.unwrap_err().status, StatusCode::FORBIDDEN);
+        assert_eq!(refused(rename_to(&library, "Ours").await), StatusCode::FORBIDDEN);
+
+        // An account without Delete can't delete even its own
+        let ben = User { can_delete: false, ..ben.clone() };
+        let last = env.file(&ben, &library, "last.txt").await;
+        assert_eq!(trash(st(), ben.clone(), ids(&[&last])).await.unwrap_err().status, StatusCode::FORBIDDEN);
+    }
 }
