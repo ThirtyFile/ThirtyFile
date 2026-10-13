@@ -10,6 +10,7 @@ export type DialogState =
   | { t: "trash"; picked: Picked }
   | { t: "share"; node: Node }
   | { t: "s3"; nodeId: string }
+  | { t: "ftp"; nodeId: string }
   | { t: "access"; nodeId: string };
 
 /** Inputs that take no typing: shortcuts keep working while one has the focus */

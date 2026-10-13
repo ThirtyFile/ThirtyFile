@@ -33,6 +33,7 @@ describe("Traditional Chinese", () => {
   test("protocol activity translates its detail and preserves user-chosen source text", async () => {
     const { tServer } = await load("zh-TW");
     expect(tServer("through SFTP")).toBe(fill(ZH["through {protocolSource}"], { protocolSource: "SFTP" }));
+    expect(tServer("through FTP receive folder My files")).toBe(fill(ZH["through {protocolSource}"], { protocolSource: fill(ZH["FTP receive folder {name}"], { name: "My files" }) }));
     expect(tServer("Replaced the existing file; through My files")).toBe(
       fill(ZH["{detail}; through {protocolSource}"], { detail: ZH["Replaced the existing file"], protocolSource: "My files" }),
     );

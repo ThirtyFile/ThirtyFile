@@ -170,6 +170,9 @@ pub struct User {
     #[sqlx(skip)]
     #[serde(skip)]
     pub sftp_credential: Option<sftp::SftpCredential>,
+    #[sqlx(skip)]
+    #[serde(skip)]
+    pub ftp_credential: Option<crate::ftp::credentials::Credential>,
 }
 
 impl User {

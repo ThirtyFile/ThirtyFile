@@ -32,6 +32,7 @@ import { Toggle, Section, SettingsFrame } from "@/admin/SettingsFrame";
 import { SftpSettings } from "@/admin/system/SftpSettings";
 
 import { S3Settings } from "@/admin/system/S3Settings";
+import { FtpSettings } from "@/admin/system/FtpSettings";
 
 const GB = 1024 ** 3;
 
@@ -157,6 +158,7 @@ export function GeneralSettingsPage() {
           <Section title={t("Apps and protocols")}>
             <SftpSettings />
             <S3Settings />
+            <FtpSettings />
           </Section>
           <Section title={t("Website")}>
             <div className="flex items-start gap-4 p-4">

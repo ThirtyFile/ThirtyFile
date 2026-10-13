@@ -150,7 +150,31 @@ restic -r s3:https://s3.files.example.com/backups -o s3.region=us-east-1 -o s3.b
 <p>Supported operations are ListBuckets (the key's own bucket only), HeadBucket, GetBucketLocation, ListObjects/V2, HEAD, ranged and conditional GET, PUT, COPY within the same bucket, DELETE and batch deletion, multipart create/upload/complete/abort/list, and presigned GET/PUT. Presigned URLs last at most seven days and stop immediately when the key expires or is revoked. A read-only key cannot PUT even through a presigned URL.</p>
 <p>ACLs, bucket creation through S3, bucket policies, lifecycle, Object Lock, S3 versioning, custom metadata, object tags, server-side encryption settings and virtual-hosted URLs are not offered. Unsupported operations answer NotImplemented. Keep clocks within 15 minutes of the server; wrong signatures share the sign-in failure limit.</p>
 <h2 id="ftp">FTP receive folders</h2>
-<p>An FTP receive server is not available. It is planned only for a concrete need from a scanner or camera that cannot use SFTP. An existing FTP server can be added as a storage location; that is a different feature.</p>
+<p>FTP receive folders let scanners and other devices upload to one folder with their own credentials. They are off by default and separate from adding an existing FTP server as a storage location. Devices do not use your account or app password.</p>
+<h3 id="ftp-setup">Enable FTP and explicit FTPS</h3>
+<p>In <strong>Control panel › General › Apps and protocols</strong>, enable <strong>FTP receive folders</strong>. Mount a PEM certificate chain and private key readable by user 1000. Add these options to your Docker Compose service and restart it:</p>
+<pre><code>services:
+  thirtyfile:
+    ports:
+      - "2121:2121"
+      - "30000-30009:30000-30009"
+    volumes:
+      - ./ftp-tls:/ftp-tls:ro
+    environment:
+      THIRTYFILE_FTP_ADDR: 0.0.0.0:2121
+      THIRTYFILE_FTP_PASSIVE: 30000-30009
+      THIRTYFILE_FTP_PASSIVE_HOST: ftp.files.example.com
+      THIRTYFILE_FTP_CERT: /ftp-tls/fullchain.pem
+      THIRTYFILE_FTP_KEY: /ftp-tls/privkey.pem</code></pre>
+<p>The default control address is <code>0.0.0.0:21</code>; this example uses port 2121. Publish both the control port and the complete passive range with identical inside/outside port numbers. For NAT, forward them to the server and set the passive hostname to its public DNS name or IPv4 address. FTP does not go through an HTTP reverse proxy. Use explicit FTPS (AUTH TLS), validate the server certificate, and encrypt the data connection (PROT P). Implicit FTPS and active-mode transfers are not offered.</p>
+<p>Public connections require encryption. For an old device on a trusted LAN only, an administrator can allow plaintext FTP from a directly connected private or loopback peer. This sends passwords and content without encryption. Keep that listener on the trusted LAN; do not put plaintext behind a TCP proxy or an Internet port forward. Reverse proxy headers cannot change this policy. Without a certificate, only these explicitly allowed private connections can connect. A port or certificate error is shown in the control panel and retried; it does not stop the website. Disabled FTP does not open its port or read certificates.</p>
+<h3 id="ftp-devices">Give a device its own receive folder</h3>
+<p>Right-click a folder and choose <strong>Make FTP receive folder…</strong>, or use the folder's details/properties. Administrators can publish team folders; space managers need the matching FTP policy. Personal spaces, guest accounts and spaces with share links turned off cannot be published. Give each device a descriptive name and optional end date. Save the generated device username and password now: the password is shown only once.</p>
+<p>Use passive mode on the device, your server hostname and control port, its device username/password, and <code>/</code> as the upload directory. The published folder follows its identity when renamed or moved. Uploads are accepted by default; listing and downloading are separate options, both off by default. Enable only what that device needs. SIZE, MDTM and file metadata need download permission. Device access never permits deleting, moving, renaming, changing permissions, or shell commands. Use devices that save with STOR; resumable/append uploads and temporary-name-then-rename workflows are not supported.</p>
+<p><strong>Control panel › FTP receive folders</strong> lists every publication, creator, destination, permissions, expiry and last use. Edit it to stop access, rotate its password, or delete its credentials after confirming your identity. A changed policy or rotated password invalidates existing sessions too. Reconnect with the new password after rotation; files remain. Access also stops when the publication expires, its folder is trashed, its creator is disabled or loses publication rights, or space sharing is turned off. A parent publication never crosses a nested restricted-folder boundary, including for administrators.</p>
+<h3 id="ftp-limits">Transfer limits and records</h3>
+<p>Uploads stay private until committed. Failed or aborted transfers remove temporary content and preserve the old file; a successful same-name upload keeps earlier versions under the space's version policy. Space/account quotas, read-only spaces and the per-file upload limit apply. Activity records name the creator and receive folder without storing credentials.</p>
+<p>A receive folder allows five simultaneous sessions. The server allows 128 control connections, gives sign-in 30 seconds, ends idle control sessions after two minutes, and stops stalled data after 30 seconds. Sessions last at most one hour. Listings are capped at 10,000 entries; use smaller receiving folders for devices. Wrong passwords share the website sign-in address budget. Passive connections must come from the same peer as their control connection; FTP bounce/FXP and symbolic links are refused. This service is intended for receiving files from compatible devices, not a general-purpose FTP account.</p>
 <h2 id="use-cases">Examples</h2>
 <p>A server can upload a nightly report with an SSH key and an SFTP script. A designer can transfer a large project with Cyberduck. For rclone, run <code>rclone config</code>, choose SFTP, set the hostname and port, verify the host key, and use an app password or SSH private key; avoid putting credentials in command history.</p>
         <nav class="next" aria-label="More guides">

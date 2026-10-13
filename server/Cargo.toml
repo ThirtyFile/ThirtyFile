@@ -73,6 +73,10 @@ httpdate = "1"
 jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
 s3s = "0.17"
 async-trait = "0.1.92"
+# Share one TLS session cache between control and passive connections; do not accept proxy-protocol headers.
+libunftp = { version = "=0.23.1", path = "vendor/libunftp", default-features = false, features = ["aws_lc_rs", "experimental"] }
+unftp-core = "0.1.0"
+rustls-pemfile = "2.2"
 md-5 = "0.11"
 http-body-util = "0.1.5"
 

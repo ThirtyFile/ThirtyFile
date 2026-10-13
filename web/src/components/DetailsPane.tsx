@@ -1,4 +1,5 @@
 import { S3FolderSection } from "@/components/S3Buckets";
+import { FtpFolderSection } from "@/components/FtpFolders";
 import { useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { TagIcon, XIcon } from "lucide-react";
@@ -200,6 +201,7 @@ export function DetailsPane({ selected, folder, onClose, count, whole }: { selec
             </DropdownMenu>
           )}
           {ready && node.kind === "folder" && <S3FolderSection nodeId={node.id} />}
+          {ready && node.kind === "folder" && <FtpFolderSection nodeId={node.id} />}
           <History node={node} query={history} />
           {error && (
             <ErrorState compact message={error.message} onRetry={() => Promise.all([info.error && info.refetch(), shares.error && shares.refetch(), contents.error && contents.refetch()])} />
