@@ -4,7 +4,6 @@
 use std::{collections::HashMap, sync::{Arc, OnceLock, Mutex, Weak}};
 use s3s::{S3Request, S3Response, S3Result, s3_error, dto::*};
 use tokio::io::AsyncWriteExt;
-use tokio_util::io::ReaderStream;
 use crate::{access, state::AppState, util::{now, new_id}};
 use super::credentials::{Identity, request_identity};
 
@@ -20,7 +19,7 @@ fn lock(id: &str) -> Arc<tokio::sync::Mutex<()>> {
 struct Upload { id: String, bucket_id: String, key_id: String, object_key: String, created_at: i64 }
 
 #[derive(sqlx::FromRow)]
-struct StoredPart { upload_id: String, number: i32, file_id: String, size: i64, md5: String, created_at: i64 }
+struct StoredPart { number: i32, file_id: String, size: i64, md5: String, created_at: i64 }
 
 fn path(st: &AppState, id: &str) -> std::path::PathBuf { st.tmp_dir().join(format!("s3-part-{id}")) }
 
@@ -104,12 +103,13 @@ pub async fn complete(st: &AppState, req: S3Request<CompleteMultipartUploadInput
     let selected = req.input.multipart_upload.and_then(|u| u.parts).ok_or_else(|| s3_error!(InvalidPart))?;
     if selected.is_empty() || selected.len() > 10000 { return Err(s3_error!(InvalidPart)); }
     let mut parts = Vec::with_capacity(selected.len()); let mut previous = 0; let mut size = 0u64;
+    let selected_len = selected.len();
     for (index, selected) in selected.iter().enumerate() {
         let number = selected.part_number.ok_or_else(|| s3_error!(InvalidPart))?;
         if number <= previous { return Err(s3_error!(InvalidPartOrder)); } previous = number;
         let part: StoredPart = sqlx::query_as("SELECT * FROM s3_parts WHERE upload_id = ? AND number = ?").bind(&req.input.upload_id).bind(number).fetch_optional(&st.db).await.map_err(super::internal)?.ok_or_else(|| s3_error!(InvalidPart))?;
         if selected.e_tag.as_ref().map(ETag::value) != Some(part.md5.as_str()) { return Err(s3_error!(InvalidPart)); }
-        if index + 1 != selected.len() && part.size < 5 * 1024 * 1024 { return Err(s3_error!(EntityTooSmall)); }
+        if index + 1 != selected_len && part.size < 5 * 1024 * 1024 { return Err(s3_error!(EntityTooSmall)); }
         size = size.checked_add(part.size as u64).ok_or_else(|| s3_error!(EntityTooLarge))?;
         parts.push(part);
     }

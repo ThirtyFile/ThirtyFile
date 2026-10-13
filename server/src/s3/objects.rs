@@ -53,7 +53,7 @@ pub async fn get(st: &AppState, req: S3Request<GetObjectInput>) -> S3Result<S3Re
     out.content_type = Some(node.mime.parse().unwrap_or_default());
     if !node.is_folder() {
         let source = Source::resolve(st, &node).await.map_err(super::map_error)?;
-        out.body = Some(StreamingBlob::wrap(ReaderStream::with_capacity(source.open(st, range.start, range.end - range.start).await.map_err(super::internal)?, 256 * 1024)));
+        out.body = Some(StreamingBlob::from(s3s::Body::http_body_unsync(axum::body::Body::from_stream(ReaderStream::with_capacity(source.open(st, range.start, range.end - range.start).await.map_err(super::internal)?, 256 * 1024)))));
     } else { out.body = Some(StreamingBlob::from_bytes(bytes::Bytes::new())); }
     let ranged = req.input.range.is_some();
     if ranged { out.content_range = Some(format!("bytes {}-{}/{size}", range.start, range.end - 1)); }

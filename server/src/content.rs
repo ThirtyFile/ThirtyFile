@@ -200,7 +200,7 @@ pub async fn create(conn: &mut SqliteConnection, staged: &Staged, owner: i64, fo
             .execute(&mut *conn)
             .await?;
             tree::adjust_usage(conn, folder.drive(), blob.size).await?;
-            Ok((id, Written { extra, removed: Default::default() }))
+            Ok::<_, AppError>((id, Written { extra, removed: Default::default() }))
         }
         Kind::Folder(path) => {
             let id = fsops::place_file(conn, path, owner, folder, name).await?;
@@ -226,7 +226,7 @@ pub async fn replace(conn: &mut SqliteConnection, st: &AppState, staged: &Staged
         Kind::Store(blob) => {
             let extra = tree::commit_blob(conn, blob).await?;
             let removed = tree::set_content(conn, policy, existing, &blob.hash, blob.size, by).await?;
-            Ok(Written { extra, removed })
+            Ok::<_, AppError>(Written { extra, removed })
         }
         Kind::Folder(path) => {
             let removed = fsops::replace_file(conn, policy, path, existing, by).await?;

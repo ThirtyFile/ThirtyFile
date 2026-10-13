@@ -55,10 +55,6 @@ pub async fn publisher(conn: &mut SqliteConnection, user: &User, node_id: &str, 
     Ok(node)
 }
 
-pub async fn find_bucket(conn: &mut SqliteConnection, name: &str) -> AppResult<Option<Bucket>> {
-    Ok(sqlx::query_as("SELECT * FROM s3_buckets WHERE name = ?").bind(name).fetch_optional(conn).await?)
-}
-
 pub async fn identity(st: &AppState, access_key: &str, write: bool) -> S3Result<Identity> {
     let cfg = super::config::load(st).await.map_err(super::map_error)?;
     if !cfg.enabled { return Err(s3_error!(AccessDenied, "S3 access is disabled")); }

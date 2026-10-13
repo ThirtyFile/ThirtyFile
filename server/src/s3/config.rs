@@ -41,3 +41,5 @@ pub async fn save(State(st): State<AppState>, _admin: Admin, Json(mut config): J
     tx.commit().await?;
     Ok(Json(config))
 }
+
+pub async fn options(State(st): State<AppState>, _user: crate::auth::User) -> AppResult<Json<Config>> { Ok(Json(load(&st).await?)) }

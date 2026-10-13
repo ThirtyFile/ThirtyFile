@@ -28,7 +28,7 @@ pub fn map_error(e: AppError) -> S3Error {
         StatusCode::FORBIDDEN | StatusCode::UNAUTHORIZED => S3ErrorCode::AccessDenied,
         StatusCode::PAYLOAD_TOO_LARGE => S3ErrorCode::EntityTooLarge,
         StatusCode::CONFLICT => S3ErrorCode::InvalidRequest,
-        StatusCode::INSUFFICIENT_STORAGE => S3ErrorCode::QuotaExceeded,
+        StatusCode::INSUFFICIENT_STORAGE => S3ErrorCode::Custom("QuotaExceeded".into()),
         StatusCode::BAD_REQUEST | StatusCode::METHOD_NOT_ALLOWED => S3ErrorCode::InvalidArgument,
         _ => S3ErrorCode::InternalError,
     };
@@ -119,4 +119,18 @@ impl s3s::S3 for Service {
 
 pub async fn maintain(st: &AppState) {
     if let Err(e) = multipart::cleanup(st).await { tracing::warn!("S3 multipart cleanup failed: {e}"); }
+    if let Err(e) = expiry_notices(st).await { tracing::warn!("S3 expiry notification failed: {}", e.message); }
+}
+
+async fn expiry_notices(st: &AppState) -> crate::error::AppResult<()> {
+    let mut tx = crate::db::begin_write(&st.db).await?;
+    let rows: Vec<(String, i64, String, String, String, i64, bool)> = sqlx::query_as("SELECT k.id,b.creator_id,b.node_id,b.name,k.description,k.expires_at,k.writable FROM s3_keys k JOIN s3_buckets b ON b.id=k.bucket_id WHERE k.enabled=1 AND b.enabled=1 AND k.expiry_notified=0 AND k.expires_at>? AND k.expires_at<=? LIMIT 1000").bind(crate::util::now()).bind(crate::util::now()+crate::notify::EXPIRY_NOTICE).fetch_all(&mut *tx).await?;
+    let mut outgoing = Vec::new();
+    for (id, creator, node, bucket, description, expiry, writable) in rows {
+        outgoing.extend(crate::notify::add(&mut tx, &[creator], &crate::notify::Notice { kind: "access_expiring", node_id: Some(node), data: serde_json::json!({"name":format!("S3: {bucket} ({description})"), "item":"folder", "role":if writable {"editor"} else {"viewer"},"expires_at":expiry}) }).await?);
+        sqlx::query("UPDATE s3_keys SET expiry_notified=1 WHERE id=?").bind(id).execute(&mut *tx).await?;
+    }
+    tx.commit().await?;
+    crate::notify::send_later(st, outgoing);
+    Ok(())
 }

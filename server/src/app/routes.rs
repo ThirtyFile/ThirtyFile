@@ -180,6 +180,7 @@ fn account_api() -> Router<AppState> {
 /// Spaces, who has access, what happened in them, and share links (with what visitors of a link reach)
 fn sharing_api() -> Router<AppState> {
     Router::new()
+        .route("/s3/options", get(crate::s3::config::options))
         .route("/s3/buckets", get(crate::s3::manage::list).post(crate::s3::manage::create))
         .route("/s3/buckets/{id}", patch(crate::s3::manage::update).delete(crate::s3::manage::delete))
         .route("/s3/buckets/{id}/keys", post(crate::s3::manage::new_key))

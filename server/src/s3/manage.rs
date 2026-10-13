@@ -76,16 +76,16 @@ async fn managed(st: &AppState, user: &User, id: &str) -> AppResult<Bucket> {
 #[derive(Deserialize)]
 pub struct Enabled { pub enabled: bool }
 
-pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<String>, Json(req): Json<Enabled>) -> AppResult<()> {
+pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<String>, Json(req): Json<Enabled>) -> AppResult<Json<serde_json::Value>> {
     managed(&st, &user, &id).await?;
     sqlx::query("UPDATE s3_buckets SET enabled = ? WHERE id = ?").bind(req.enabled).bind(id).execute(&st.db).await?;
-    Ok(())
+    Ok(Json(serde_json::json!({"ok": true})))
 }
 
-pub async fn delete(State(st): State<AppState>, user: User, Path(id): Path<String>) -> AppResult<()> {
+pub async fn delete(State(st): State<AppState>, user: User, Path(id): Path<String>) -> AppResult<Json<serde_json::Value>> {
     managed(&st, &user, &id).await?;
     sqlx::query("DELETE FROM s3_buckets WHERE id = ?").bind(id).execute(&st.db).await?;
-    Ok(())
+    Ok(Json(serde_json::json!({"ok": true})))
 }
 
 #[derive(Deserialize)]
@@ -112,16 +112,16 @@ pub async fn new_key(State(st): State<AppState>, user: User, Path(bucket_id): Pa
     Ok(Json(CreatedKey { key, secret_key }))
 }
 
-pub async fn revoke_key(State(st): State<AppState>, user: User, Path((bucket, key)): Path<(String, String)>, Json(req): Json<Enabled>) -> AppResult<()> {
+pub async fn revoke_key(State(st): State<AppState>, user: User, Path((bucket, key)): Path<(String, String)>, Json(req): Json<Enabled>) -> AppResult<Json<serde_json::Value>> {
     managed(&st, &user, &bucket).await?;
     sqlx::query("UPDATE s3_keys SET enabled = ? WHERE id = ? AND bucket_id = ?").bind(req.enabled).bind(key).bind(bucket).execute(&st.db).await?;
-    Ok(())
+    Ok(Json(serde_json::json!({"ok": true})))
 }
 
-pub async fn delete_key(State(st): State<AppState>, user: User, Path((bucket, key)): Path<(String, String)>) -> AppResult<()> {
+pub async fn delete_key(State(st): State<AppState>, user: User, Path((bucket, key)): Path<(String, String)>) -> AppResult<Json<serde_json::Value>> {
     managed(&st, &user, &bucket).await?;
     sqlx::query("DELETE FROM s3_keys WHERE id = ? AND bucket_id = ?").bind(key).bind(bucket).execute(&st.db).await?;
-    Ok(())
+    Ok(Json(serde_json::json!({"ok": true})))
 }
 
 pub async fn admin_list(st: State<AppState>, Admin(user): Admin, q: Query<ListQuery>) -> AppResult<Json<FolderBuckets>> { list(st, user, q).await }

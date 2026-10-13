@@ -41,7 +41,7 @@ pub async fn rooted_parent(st: &AppState, user: &User, root: &str, key: &str) ->
     let mut folder = tree::folder_for(&mut *st.db.acquire().await?, user, root, Need::Add).await?;
     for part in parts {
         if folder.in_folder_space() { crate::folders::sync_folder(st, &folder).await; }
-        let child = child_named(&mut st.db.acquire().await?, &folder.id, &part).await?;
+        let child = child_named(&mut *st.db.acquire().await?, &folder.id, &part).await?;
         if child.is_none() {
             // Under the common write lock, recheck the scope before adding anything.
             let _w = st.write_lock.lock().await;

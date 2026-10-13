@@ -1,4 +1,5 @@
 /** Traditional Chinese dictionary, split by feature and merged here. Keys are the English source text (plurals as "single|plural"); tc() keys are "context::English". */
+import s3 from "./s3";
 import server from "./server";
 import settings from "./settings";
 import spaces from "./spaces";
@@ -30,4 +31,4 @@ import replicas from "./replicas";
 
 export const LANG = "zh-TW";
 
-export const DICT: Record<string, string> = { ...server, ...settings, ...spaces, ...users, ...explorer, ...sharing, ...viewer, ...login, ...notices, ...core, ...sso, ...wording, ...accessibility, ...undo, ...largeFolders, ...accountSecurity, ...shareLinks, ...conflicts, ...details, ...dragAndDrop, ...webdav, ...search, ...archives, ...addressBar, ...notifications, ...folderSpaces, ...backups, ...replicas };
+export const DICT: Record<string, string> = { ...s3, ...server, ...settings, ...spaces, ...users, ...explorer, ...sharing, ...viewer, ...login, ...notices, ...core, ...sso, ...wording, ...accessibility, ...undo, ...largeFolders, ...accountSecurity, ...shareLinks, ...conflicts, ...details, ...dragAndDrop, ...webdav, ...search, ...archives, ...addressBar, ...notifications, ...folderSpaces, ...backups, ...replicas };
