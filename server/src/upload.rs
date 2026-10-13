@@ -654,8 +654,9 @@ async fn replaced_file(conn: &mut sqlx::SqliteConnection, user: &User, upload: &
 /// Creates the file (or gives the file it replaces the new content) while holding the write lock; returns the file's
 /// id and what to finish after the commit
 async fn commit_upload(st: &AppState, up: &Uploader, upload: &Upload, staged: &content::Staged, size: i64) -> AppResult<(String, content::Written)> {
-    let user = &up.user;
     let mut tx = crate::db::begin_write(&st.db).await?;
+    let current = crate::auth::current_user(&mut tx, &up.user).await?;
+    let user = &current;
     // The account's upload permission may have been removed while the upload was running
     if !user.can_write && !user.is_admin() {
         return Err(AppError::forbidden("You no longer have permission to upload files"));

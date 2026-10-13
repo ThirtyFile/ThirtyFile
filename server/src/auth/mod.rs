@@ -107,7 +107,7 @@ pub fn cookie_header(st: &AppState, name: &str, value: &str, path: &str, max_age
     format!("{name}={value}; Path={path}; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}")
 }
 
-pub const USER_COLS: &str = "u.id, u.username, u.display_name, u.role, u.guest, u.can_write, u.can_delete, u.can_share, u.quota_bytes, CASE WHEN u.guest THEN NULL ELSE u.root_id END AS root_id, u.must_change_password";
+pub const USER_COLS: &str = "u.id, u.username, u.display_name, u.role, u.guest, u.can_write, u.can_delete, CASE WHEN u.guest THEN 0 ELSE u.can_share END AS can_share, u.quota_bytes, CASE WHEN u.guest THEN NULL ELSE u.root_id END AS root_id, u.must_change_password";
 
 /// What an account may do (`users.role`)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, sqlx::Type)]
@@ -182,6 +182,39 @@ impl User {
     pub fn root(&self) -> &str {
         self.root_id.as_deref().expect("the user has a personal space")
     }
+}
+
+/// Refreshes account restrictions in the operation's transaction while retaining verified protocol scope.
+/// A request never gains permissions that its authenticated actor did not have when it started.
+pub async fn current_user(conn: &mut sqlx::SqliteConnection, actor: &User) -> AppResult<User> {
+    let sql = format!("SELECT {USER_COLS} FROM users u WHERE u.id = ? AND u.disabled = 0");
+    let mut current: User = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(actor.id).fetch_optional(&mut *conn).await?.ok_or_else(AppError::unauthorized)?;
+    current.guest |= actor.guest;
+    if !actor.is_admin() || current.guest {
+        current.role = UserRole::User;
+    }
+    current.can_write &= actor.can_write;
+    current.can_delete &= actor.can_delete;
+    current.can_share &= actor.can_share;
+    if current.guest {
+        current.root_id = None;
+        current.can_share = false;
+    }
+    current.shared_root = actor.shared_root.clone();
+    current.session_id = actor.session_id.clone();
+    current.activity_source = actor.activity_source.clone();
+    current.protocol_root = actor.protocol_root.clone();
+    current.protocol_key = actor.protocol_key.clone();
+    current.sftp_credential = actor.sftp_credential.clone();
+    Ok(current)
+}
+
+pub async fn require_admin(conn: &mut sqlx::SqliteConnection, actor: &User) -> AppResult<User> {
+    let current = current_user(conn, actor).await?;
+    if !current.is_admin() {
+        return Err(AppError::forbidden("Administrator permission required"));
+    }
+    Ok(current)
 }
 
 /// A session's "last used" time and address are updated at most this often, so requests don't each write to the database

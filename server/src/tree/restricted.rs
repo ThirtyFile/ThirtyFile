@@ -53,9 +53,10 @@ pub fn visible_to_sql(id: i64, node: &str) -> String {
            FROM nodes p JOIN visible_up ON p.id = visible_up.parent_id
          ) SELECT 1 FROM visible_up JOIN nodes vn ON vn.id = visible_up.id JOIN drives vd ON vd.id = vn.drive_id
            LEFT JOIN grants g ON g.node_id = visible_up.id AND {principal}
-           WHERE vd.disabled = 0 AND ((g.id IS NOT NULL AND (visible_up.inherited OR (visible_up.parent_id IS NULL AND g.role = 'owner')))
-             OR (vd.kind = 'company' AND EXISTS(SELECT 1 FROM users WHERE id = {id} AND role = 'admin' AND disabled = 0))
-             OR (vd.kind <> 'personal' AND EXISTS(SELECT 1 FROM users WHERE id = {id} AND role = 'admin' AND disabled = 0)
+           WHERE vd.disabled = 0 AND NOT (vd.kind = 'personal' AND vd.owner_id = {id} AND EXISTS(SELECT 1 FROM users WHERE id = {id} AND guest))
+             AND ((g.id IS NOT NULL AND (visible_up.inherited OR (visible_up.parent_id IS NULL AND g.role = 'owner')))
+             OR (vd.kind = 'company' AND EXISTS(SELECT 1 FROM users WHERE id = {id} AND role = 'admin' AND NOT guest AND disabled = 0))
+             OR (vd.kind <> 'personal' AND EXISTS(SELECT 1 FROM users WHERE id = {id} AND role = 'admin' AND NOT guest AND disabled = 0)
                  AND EXISTS(SELECT 1 FROM visible_up WHERE restricted))))"
     )
 }
@@ -71,7 +72,7 @@ pub fn scopes_visible_sql(user: i64, scopes: &str) -> String {
         SELECT 1 FROM drives d LEFT JOIN grants g ON g.node_id = d.root_id
           AND g.role = 'owner' AND {principal}
         WHERE d.id = json_extract(boundary.value, '$.drive') AND d.disabled = 0 AND (g.id IS NOT NULL
-          OR (d.kind <> 'personal' AND EXISTS(SELECT 1 FROM users WHERE id = {user} AND role = 'admin' AND disabled = 0)))))))"
+          OR (d.kind <> 'personal' AND EXISTS(SELECT 1 FROM users WHERE id = {user} AND role = 'admin' AND NOT guest AND disabled = 0)))))))"
     )
 }
 
