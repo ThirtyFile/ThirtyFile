@@ -1109,6 +1109,7 @@ mod tests {
                     username: &format!("bulk{i}@example.com"),
                     password_hash: &hash,
                     role: crate::auth::UserRole::User,
+                    guest: false,
                     can_write: true,
                     can_delete: true,
                     can_share: true,

@@ -200,6 +200,7 @@ pub async fn bootstrap_admin(db: &SqlitePool, password: Option<&str>, space_fold
             username: "admin",
             password_hash: &password_hash,
             role: crate::auth::UserRole::Admin,
+            guest: false,
             can_write: true,
             can_delete: true,
             can_share: true,
