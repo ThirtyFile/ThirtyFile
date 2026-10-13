@@ -56,8 +56,6 @@ export default {
   "Members of “{name}”": "「{name}」のメンバー",
   "Share “{name}”": "「{name}」を共有",
   "Manage access": "アクセスの管理",
-  "Members can access all files in this space.": "メンバーはこのスペース内のすべてのファイルにアクセスできます。",
-  "People you share with can access this item (for a folder, everything in it). It appears in their Shared with me.": "共有した相手は、この項目（フォルダーの場合はその中のすべて）にアクセスできます。相手の「共有アイテム」に表示されます。",
   "A personal space can't be shared as a whole. Right-click a folder in it and choose Share with….": "個人用スペースは全体を共有できません。その中のフォルダーを右クリックして、「ユーザーと共有…」を選択してください。",
   "short::Expiration": "期限",
   "{role}: {hint}": "{role}：{hint}",

@@ -14,6 +14,10 @@ pub trait Item: Sync {
     fn name(&self) -> &str;
     /// The space it is in
     fn space(&self) -> Option<&str>;
+    /// The original parent, when a move has already updated the node in the database.
+    fn parent(&self) -> Option<&str> {
+        None
+    }
 }
 
 // ───────────── Background log writer ─────────────
@@ -92,12 +96,13 @@ pub fn spawn_writer(st: AppState, mut rx: tokio::sync::mpsc::Receiver<LogEvent>)
 
 async fn write_batch(st: &AppState, batch: &[LogEvent]) {
     let _w = st.write_lock.lock().await;
-    let written: Result<(), sqlx::Error> = async {
+    let written: AppResult<()> = async {
         let mut tx = crate::db::begin_write(&st.db).await?;
         for e in batch {
             match e {
                 LogEvent::ShareAccess { at, share_id, owner_id, node_id, node_name, event, ip, user_agent } => {
-                    sqlx::query("INSERT INTO share_access (at, share_id, owner_id, node_id, node_name, event, ip, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+                    let scopes = crate::tree::saved_scopes(&mut tx, node_id.as_deref()).await?;
+                    sqlx::query("INSERT INTO share_access (at, share_id, owner_id, node_id, node_name, event, ip, user_agent, restricted_scopes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
                         .bind(at)
                         .bind(share_id)
                         .bind(owner_id)
@@ -106,6 +111,7 @@ async fn write_batch(st: &AppState, batch: &[LogEvent]) {
                         .bind(event)
                         .bind(ip)
                         .bind(user_agent)
+                        .bind(scopes)
                         .execute(&mut *tx)
                         .await?;
                 }
@@ -124,11 +130,12 @@ async fn write_batch(st: &AppState, batch: &[LogEvent]) {
                 LogEvent::Error(e) => super::errors::write_error(&mut tx, st, e).await?,
             }
         }
-        tx.commit().await
+        tx.commit().await?;
+        Ok(())
     }
     .await;
     if let Err(e) = written {
-        tracing::warn!("Failed to write {} log events: {e}", batch.len());
+        tracing::warn!("Failed to write {} log events: {}", batch.len(), e.message);
     }
 }
 
@@ -208,7 +215,16 @@ pub async fn record_activity(conn: &mut SqliteConnection, user: &User, node: Opt
         }
         None => detail.to_string(),
     };
-    sqlx::query("INSERT INTO activity (at, user_id, username, drive_id, node_id, node_name, action, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    let mut scopes: Vec<serde_json::Value> =
+        serde_json::from_str(&crate::tree::saved_scopes(conn, node.map(|n| n.id())).await?).map_err(crate::error::AppError::internal)?;
+    let parents: Vec<serde_json::Value> =
+        serde_json::from_str(&crate::tree::saved_scopes(conn, node.and_then(|n| n.parent())).await?).map_err(crate::error::AppError::internal)?;
+    for parent in parents {
+        if !scopes.contains(&parent) {
+            scopes.push(parent);
+        }
+    }
+    sqlx::query("INSERT INTO activity (at, user_id, username, drive_id, node_id, node_name, action, detail, restricted_scopes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
         .bind(now())
         .bind(user.id)
         .bind(&user.username)
@@ -217,6 +233,7 @@ pub async fn record_activity(conn: &mut SqliteConnection, user: &User, node: Opt
         .bind(node.map(|n| n.name()).unwrap_or_default())
         .bind(action)
         .bind(detail)
+        .bind(serde_json::to_string(&scopes).map_err(crate::error::AppError::internal)?)
         .execute(conn)
         .await?;
     Ok(())

@@ -111,7 +111,7 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
     let hash = crate::auth::hash_password(password.clone()).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    let current = crate::auth::user_by_id(&st, &mut tx, user.id).await?.ok_or_else(AppError::unauthorized)?;
+    let current = crate::auth::current_user(&mut tx, &user).await?;
     let cfg = super::config::from_connection(&mut tx).await?;
     if !cfg.enabled {
         return Err(AppError::forbidden("FTP access is disabled"));
@@ -143,8 +143,8 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
     Ok(Json(Created { folder, password }))
 }
 
-async fn managed(st: &AppState, conn: &mut sqlx::SqliteConnection, user: &User, id: &str) -> AppResult<Folder> {
-    let current = crate::auth::user_by_id(st, conn, user.id).await?.ok_or_else(AppError::unauthorized)?;
+async fn managed(conn: &mut sqlx::SqliteConnection, user: &User, id: &str) -> AppResult<Folder> {
+    let current = crate::auth::current_user(conn, user).await?;
     if current.guest {
         return Err(AppError::forbidden("Guest accounts can't publish receive folders"));
     }
@@ -173,7 +173,7 @@ pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<Strin
     let req = req.change;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    managed(&st, &mut tx, &user, &id).await?;
+    managed(&mut tx, &user, &id).await?;
     sqlx::query("UPDATE ftp_receive_folders SET name=?,enabled=?,allow_list=?,allow_read=?,expires_at=?,generation=generation+1 WHERE id=?")
         .bind(req.name.trim())
         .bind(req.enabled)
@@ -198,7 +198,7 @@ pub async fn rotate(State(st): State<AppState>, user: User, Path(id): Path<Strin
     let hash = crate::auth::hash_password(password.clone()).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    let mut folder = managed(&st, &mut tx, &user, &id).await?;
+    let mut folder = managed(&mut tx, &user, &id).await?;
     sqlx::query("UPDATE ftp_receive_folders SET password_hash=?,generation=generation+1 WHERE id=?").bind(&hash).bind(id).execute(&mut *tx).await?;
     folder.password_hash = hash;
     folder.generation += 1;
@@ -210,7 +210,7 @@ pub async fn delete(State(st): State<AppState>, user: User, Path(id): Path<Strin
     confirm(&st, &user, req.password, req.code.as_deref()).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    managed(&st, &mut tx, &user, &id).await?;
+    managed(&mut tx, &user, &id).await?;
     sqlx::query("DELETE FROM ftp_receive_folders WHERE id=?").bind(id).execute(&mut *tx).await?;
     crate::logs::record_activity(&mut tx, &user, None, "settings", "Removed FTP receive folder").await?;
     tx.commit().await?;

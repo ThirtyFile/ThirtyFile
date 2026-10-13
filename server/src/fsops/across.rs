@@ -405,7 +405,7 @@ async fn move_items_across(st: &AppState, user: &User, dest: &Node, items: Vec<V
         turn.take().await;
         let result = {
             let _w = st.write_lock.lock().await;
-            commit_move(st, user, dest, &nodes, &placed).await
+            commit_move(st, user, dest, &nodes, &placed, held).await
         };
         match result {
             Ok((extras, remove)) => {
@@ -494,9 +494,27 @@ pub(super) async fn placed_for_good(placed: &Placed) {
 
 /// The index side of a move; returns content no longer used and (for items now in the content store) what to remove
 /// from disk (paths below the space's folder, folders before what is in them)
-pub(super) async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: &[Node], placed: &Placed) -> AppResult<(Vec<BlobRef>, Vec<Copied>)> {
+pub(super) async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: &[Node], placed: &Placed, held: bool) -> AppResult<(Vec<BlobRef>, Vec<Copied>)> {
     let mut tx = crate::db::begin_write(&st.db).await?;
     let top = &nodes[0];
+    // Account removal explicitly preserves a personal space for an administrator with both scan locks held and
+    // its moving flag set. Ordinary file operations and protocol actors never enter this maintenance path.
+    let administrative = held
+        && user.is_admin()
+        && user.protocol_root.is_none()
+        && user.sftp_credential.is_none()
+        && tree::get_drive(&mut tx, top.drive()).await?.is_some_and(|d| d.kind == tree::SpaceKind::Personal && d.moving);
+    if administrative {
+        let current = crate::auth::user_by_id(st, &mut tx, user.id).await?.ok_or_else(|| AppError::forbidden("Administrator permission required"))?;
+        if !current.is_admin() {
+            return Err(AppError::forbidden("Administrator permission required"));
+        }
+        crate::drives::manageable_drive(&mut tx, &current, dest.drive()).await?;
+    } else {
+        tree::node_for(&mut tx, user, &dest.id, tree::Need::Add).await?;
+        tree::node_for(&mut tx, user, &top.id, tree::Need::Move).await?;
+        tree::require_subtree(&mut tx, user, top, tree::Need::Move).await?;
+    }
     // Everything must still be as it was when the content was copied: items added to a folder of the content store
     // meanwhile would be left behind
     let changed = || AppError::conflict(format!("\"{}\" changed while it was being moved. Try again.", top.name));
@@ -629,6 +647,17 @@ async fn copy_items_across(st: &AppState, user: &User, dest: &Node, plans: Vec<V
 pub(super) async fn commit_copy(st: &AppState, user: &User, dest: &Node, nodes: &[Node], placed: &Placed) -> AppResult<Vec<BlobRef>> {
     let mut tx = crate::db::begin_write(&st.db).await?;
     let top = &nodes[0];
+    tree::node_for(&mut tx, user, &dest.id, tree::Need::Add).await?;
+    tree::node_for(&mut tx, user, &top.id, tree::Need::Read).await?;
+    tree::require_subtree(&mut tx, user, top, tree::Need::Read).await?;
+    // A restriction may have been added while bytes were copied. Refuse the old plan rather than publishing a
+    // newly restricted item under a copy made from stale metadata.
+    for n in nodes {
+        let current = tree::node_for(&mut tx, user, &n.id, tree::Need::Read).await?;
+        if current.restricted != n.restricted {
+            return Err(AppError::conflict("Access changed while the folder was being copied. Try again."));
+        }
+    }
     still_there(&mut tx, dest).await?;
     let mut ids: HashMap<&str, String> = HashMap::new();
     let mut extras = Vec::new();
@@ -649,6 +678,7 @@ pub(super) async fn commit_copy(st: &AppState, user: &User, dest: &Node, nodes: 
                 let id = new_id();
                 let full = if rel.is_empty() { dest_rel.clone() } else { format!("{dest_rel}/{rel}") };
                 insert_at(&mut tx, &id, user.id, At { parent: &parent, drive: dest.drive(), name: if i == 0 { &name } else { &n.name }, rel: &full }, &s).await?;
+                sqlx::query("UPDATE nodes SET restricted = ? WHERE id = ?").bind(n.restricted).bind(&id).execute(&mut *tx).await?;
                 bytes += s.size;
                 ids.insert(n.id.as_str(), id);
             }
@@ -669,8 +699,8 @@ pub(super) async fn commit_copy(st: &AppState, user: &User, dest: &Node, nodes: 
                 }
                 let id = new_id();
                 sqlx::query(
-                    "INSERT INTO nodes (id, owner_id, parent_id, kind, name, blob_hash, size, mime, drive_id, created_at, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO nodes (id, owner_id, parent_id, kind, name, blob_hash, size, mime, drive_id, created_at, updated_at, restricted)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 )
                 .bind(&id)
                 .bind(user.id)
@@ -683,6 +713,7 @@ pub(super) async fn commit_copy(st: &AppState, user: &User, dest: &Node, nodes: 
                 .bind(dest.drive())
                 .bind(ts)
                 .bind(ts)
+                .bind(n.restricted)
                 .execute(&mut *tx)
                 .await?;
                 ids.insert(n.id.as_str(), id);

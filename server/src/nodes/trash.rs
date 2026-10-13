@@ -74,8 +74,9 @@ pub async fn list_trash(State(st): State<AppState>, user: User, Query(q): Query<
     let mine = if q.mine == Some(true) { "AND n.trashed_by = ?5" } else { "" };
     let sql = format!(
         "SELECT {NODE_COLS}, (SELECT username FROM users WHERE id = n.trashed_by) AS deleted_by FROM nodes n
-         WHERE n.trash_root = 1 AND n.drive_id IN (SELECT value FROM json_each(?1)) AND {NOT_PURGING} {keyset} {mine}
-         ORDER BY n.trashed_at DESC, n.id DESC LIMIT ?4"
+         WHERE n.trash_root = 1 AND n.drive_id IN (SELECT value FROM json_each(?1)) AND {NOT_PURGING} AND {} {keyset} {mine}
+         ORDER BY n.trashed_at DESC, n.id DESC LIMIT ?4",
+        trash_visible(&user)
     );
     #[derive(sqlx::FromRow)]
     struct Row {
@@ -126,6 +127,11 @@ pub(super) async fn trash_role(conn: &mut SqliteConnection, user: &User, node: &
     Ok(role)
 }
 
+fn trash_visible(user: &User) -> String {
+    let visible = tree::visible_sql(user, "n.id");
+    if user.is_admin() { format!("({visible} OR EXISTS(SELECT 1 FROM drives WHERE id = n.drive_id AND kind <> 'personal' AND NOT disabled))") } else { visible }
+}
+
 /// A trashed item and where it goes back to (`Place`). The user needs `need` on the folder there as well: a folder
 /// that was merely shared with them gives no rights over the owner's parent folder, so they can't restore or destroy
 /// the shared folder itself, only items inside it.
@@ -140,6 +146,7 @@ pub(super) async fn trash_root(conn: &mut SqliteConnection, user: &User, id: &st
     }
     let role = trash_role(conn, user, &node).await?.ok_or_else(not_found)?;
     tree::allows_on(conn, user, role, need, &node).await?;
+    tree::require_subtree(conn, user, &node, need).await?;
     if node.space_read_only {
         return Err(tree::read_only_error(&node));
     }
@@ -412,8 +419,9 @@ pub async fn empty_trash_preview(State(st): State<AppState>, user: User) -> AppR
     let drive_ids = empty_trash_drives(&mut c, &user).await?;
     let rows: Vec<(String, String, i64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT d.kind, d.name, COUNT(*) FROM nodes n JOIN drives d ON d.id = n.drive_id
-         WHERE n.trash_root = 1 AND n.drive_id IN (SELECT value FROM json_each(?)) AND {NOT_PURGING}
-         GROUP BY d.id ORDER BY CASE d.kind WHEN 'personal' THEN 0 WHEN 'company' THEN 1 ELSE 2 END, d.name"
+         WHERE n.trash_root = 1 AND n.drive_id IN (SELECT value FROM json_each(?)) AND {NOT_PURGING} AND {}
+         GROUP BY d.id ORDER BY CASE d.kind WHEN 'personal' THEN 0 WHEN 'company' THEN 1 ELSE 2 END, d.name",
+        trash_visible(&user)
     )))
     .bind(serde_json::to_string(&drive_ids).unwrap())
     .fetch_all(&mut *c)
@@ -425,11 +433,22 @@ pub async fn empty_trash_preview(State(st): State<AppState>, user: User) -> AppR
 /// the page follows; its result is how many items were in the trash (`deleted`)
 pub async fn empty_trash(State(st): State<AppState>, user: User) -> AppResult<Json<Job>> {
     let pending = jobs::reserve(&st, user.id, "empty_trash", Limit::Changes)?;
-    let drive_ids = empty_trash_drives(&mut *st.db.acquire().await?, &user).await?;
     let rows = {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
-        let select = format!("SELECT id FROM nodes n WHERE n.trash_root = 1 AND n.drive_id IN (SELECT value FROM json_each(?1)) AND {NOT_PURGING}");
+        let current = crate::auth::current_user(&mut tx, &user).await?;
+        let user = current;
+        let drive_ids = empty_trash_drives(&mut tx, &user).await?;
+        let select = format!(
+            "SELECT id FROM nodes n WHERE n.trash_root = 1 AND n.drive_id IN (SELECT value FROM json_each(?1)) AND {NOT_PURGING} AND {}",
+            trash_visible(&user)
+        );
+        let selected: Vec<(String,)> =
+            sqlx::query_as(sqlx::AssertSqlSafe(select.as_str())).bind(serde_json::to_string(&drive_ids).unwrap()).fetch_all(&mut *tx).await?;
+        for (id,) in selected {
+            let node = tree::get_node(&mut tx, &id).await?.ok_or_else(|| AppError::conflict("The trash changed"))?;
+            tree::require_subtree(&mut tx, &user, &node, Need::Delete).await?;
+        }
         let rows = changes::purge_selected(&mut tx, &select, &serde_json::to_string(&drive_ids).unwrap()).await?;
         let total = rows.len();
         if total > 0 {

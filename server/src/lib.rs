@@ -45,6 +45,7 @@ mod privileges;
 mod redact;
 mod replicas;
 mod reset;
+mod restrictions;
 mod s3;
 mod secrets;
 mod sessions;

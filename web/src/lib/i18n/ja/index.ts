@@ -1,4 +1,5 @@
 import ftp from "./ftp";
+import restrictedFolders from "./restrictedFolders";
 import sftp from "./sftp";
 /** Japanese dictionary, split by feature and merged here (the same files as zh-TW). Keys are the English source text (plurals as "single|plural"); tc() keys are "context::English". */
 import s3 from "./s3";
@@ -33,4 +34,4 @@ import replicas from "./replicas";
 
 export const LANG = "ja";
 
-export const DICT: Record<string, string> = { ...ftp, ...s3, ...sftp, ...server, ...settings, ...spaces, ...users, ...explorer, ...sharing, ...viewer, ...login, ...notices, ...core, ...sso, ...wording, ...accessibility, ...undo, ...largeFolders, ...accountSecurity, ...shareLinks, ...conflicts, ...details, ...dragAndDrop, ...webdav, ...search, ...archives, ...addressBar, ...notifications, ...folderSpaces, ...backups, ...replicas };
+export const DICT: Record<string, string> = { ...ftp, ...restrictedFolders, ...s3, ...sftp, ...server, ...settings, ...spaces, ...users, ...explorer, ...sharing, ...viewer, ...login, ...notices, ...core, ...sso, ...wording, ...accessibility, ...undo, ...largeFolders, ...accountSecurity, ...shareLinks, ...conflicts, ...details, ...dragAndDrop, ...webdav, ...search, ...archives, ...addressBar, ...notifications, ...folderSpaces, ...backups, ...replicas };

@@ -56,8 +56,6 @@ export default {
   "Members of “{name}”": "「{name}」的成員",
   "Share “{name}”": "共用「{name}」",
   "Manage access": "管理存取權",
-  "Members can access all files in this space.": "成員可以存取這個空間中的所有檔案。",
-  "People you share with can access this item (for a folder, everything in it). It appears in their Shared with me.": "被共用的人可以存取這個項目（資料夾含其中所有內容），會出現在他們的「與我共用」。",
   "A personal space can't be shared as a whole. Right-click a folder in it and choose Share with….": "個人空間無法整個共用。請在其中的資料夾上按右鍵，選擇「共用給…」。",
   "short::Expiration": "期限",
   "{role}: {hint}": "{role}：{hint}",

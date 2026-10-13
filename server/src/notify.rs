@@ -64,6 +64,8 @@ pub struct Notice {
 /// An email to send once the change that caused it is saved
 #[derive(Debug)]
 pub struct Outgoing {
+    user_id: i64,
+    scopes: String,
     to: String,
     /// The recipient's saved language and the one they last used (`i18n::recipient`)
     chosen_lang: String,
@@ -98,23 +100,46 @@ pub async fn add(conn: &mut SqliteConnection, users: &[i64], notice: &Notice) ->
     .fetch_all(&mut *conn)
     .await?;
     let data = notice.data.to_string();
+    let scopes = crate::tree::saved_scopes(conn, notice.node_id.as_deref()).await?;
     let mut emails = Vec::new();
     for r in rows {
+        if !notice_allowed(conn, r.id, notice, &scopes).await? {
+            continue;
+        }
         if r.in_app {
-            sqlx::query("INSERT INTO notifications (user_id, kind, data, node_id, created_at) VALUES (?, ?, ?, ?, ?)")
+            sqlx::query("INSERT INTO notifications (user_id, kind, data, node_id, created_at, restricted_scopes) VALUES (?, ?, ?, ?, ?, ?)")
                 .bind(r.id)
                 .bind(notice.kind)
                 .bind(&data)
                 .bind(&notice.node_id)
                 .bind(now())
+                .bind(&scopes)
                 .execute(&mut *conn)
                 .await?;
         }
         if r.by_email && !r.email.is_empty() {
-            emails.push(Outgoing { to: r.email, chosen_lang: r.chosen_lang, lang: r.lang, tz_offset: r.tz_offset, notice: notice.clone() });
+            emails.push(Outgoing {
+                user_id: r.id,
+                scopes: scopes.clone(),
+                to: r.email,
+                chosen_lang: r.chosen_lang,
+                lang: r.lang,
+                tz_offset: r.tz_offset,
+                notice: notice.clone(),
+            });
         }
     }
     Ok(emails)
+}
+
+async fn notice_allowed(conn: &mut SqliteConnection, user: i64, notice: &Notice, scopes: &str) -> AppResult<bool> {
+    let visible = crate::tree::visible_to_sql(user, "?1");
+    let scopes_visible = crate::tree::scopes_visible_sql(user, "?2");
+    let sql = format!(
+        "SELECT (?1 IS NULL OR NOT EXISTS(SELECT 1 FROM nodes WHERE id = ?1) OR {visible}) AND {scopes_visible} AND EXISTS(SELECT 1 FROM users WHERE id = {user} AND NOT disabled)"
+    );
+    let (allowed,): (bool,) = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(&notice.node_id).bind(scopes).fetch_one(conn).await?;
+    Ok(allowed)
 }
 
 /// The people a grant gives access to: the user, or the members of the group (access for everyone isn't announced)
@@ -370,6 +395,13 @@ pub fn send_later(st: &AppState, mut emails: Vec<Outgoing>) {
         let base = st.system.read().public_url.clone();
         let default = crate::i18n::system_default(&st);
         for e in emails {
+            let allowed = match st.db.acquire().await {
+                Ok(mut c) => notice_allowed(&mut c, e.user_id, &e.notice, &e.scopes).await.unwrap_or(false),
+                Err(_) => false,
+            };
+            if !allowed {
+                continue;
+            }
             let lang = crate::i18n::recipient(&e.chosen_lang, &e.lang, default);
             let (subject, body) = render(&e.notice, lang, e.tz_offset, &site, &base);
             if let Err(err) = crate::mail::send(&cfg, &site, &crate::mail::Message { to: &e.to, subject: &subject, body: &body }).await {
@@ -551,17 +583,24 @@ pub struct ListQuery {
 /// The newest notifications and how many are unread. Also remembers the language and time zone the person uses, for emails
 pub async fn list(State(st): State<AppState>, user: User, headers: HeaderMap, Query(q): Query<ListQuery>) -> AppResult<Json<Value>> {
     let mut c = st.db.acquire().await?;
-    let items: Vec<Item> =
-        sqlx::query_as("SELECT id, kind, data, node_id, created_at, read_at IS NOT NULL AS read FROM notifications WHERE user_id = ? ORDER BY id DESC LIMIT ?")
-            .bind(user.id)
-            .bind(LIST_LIMIT)
-            .fetch_all(&mut *c)
-            .await?;
-    let (unread, lang, tz_offset): (i64, String, i64) =
-        sqlx::query_as("SELECT (SELECT COUNT(*) FROM notifications WHERE user_id = ?1 AND read_at IS NULL), lang, tz_offset FROM users WHERE id = ?1")
-            .bind(user.id)
-            .fetch_one(&mut *c)
-            .await?;
+    let visible = format!(
+        "{} AND (node_id IS NULL OR NOT EXISTS(SELECT 1 FROM nodes WHERE id = node_id) OR {})",
+        crate::tree::scopes_visible_sql(user.id, "restricted_scopes"),
+        crate::tree::visible_sql(&user, "node_id")
+    );
+    let items: Vec<Item> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT id, kind, data, node_id, created_at, read_at IS NOT NULL AS read FROM notifications WHERE user_id = ? AND {visible} ORDER BY id DESC LIMIT ?"
+    )))
+    .bind(user.id)
+    .bind(LIST_LIMIT)
+    .fetch_all(&mut *c)
+    .await?;
+    let (unread, lang, tz_offset): (i64, String, i64) = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT (SELECT COUNT(*) FROM notifications WHERE user_id = ?1 AND read_at IS NULL AND {visible}), lang, tz_offset FROM users WHERE id = ?1"
+    )))
+    .bind(user.id)
+    .fetch_one(&mut *c)
+    .await?;
     drop(c);
     let used_lang = get_cookie(&headers, "tf_lang").filter(|l| Lang::parse(l).is_some()).unwrap_or(&lang).to_string();
     let used_tz = q.tz.map_or(tz_offset, |t| t.clamp(-14 * 60, 14 * 60));

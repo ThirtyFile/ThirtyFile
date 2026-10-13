@@ -39,6 +39,8 @@ pub struct Folder {
 }
 
 pub async fn publisher(conn: &mut sqlx::SqliteConnection, user: &User, id: &str, managers: bool) -> AppResult<Node> {
+    let current = auth::current_user(conn, user).await?;
+    let user = &current;
     if user.guest {
         return Err(AppError::forbidden("Guest accounts can't publish receive folders"));
     }
@@ -80,8 +82,7 @@ pub async fn actor_in_transaction(conn: &mut sqlx::SqliteConnection, actor: &Use
     if !cfg.enabled {
         return Err(AppError::forbidden("FTP access is disabled"));
     }
-    let sql = format!("SELECT {} FROM users u WHERE u.id=? AND u.disabled=0", auth::USER_COLS);
-    let mut current: User = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(actor.id).fetch_optional(&mut *conn).await?.ok_or_else(AppError::unauthorized)?;
+    let mut current = auth::current_user(conn, actor).await?;
     publisher(conn, &current, &row.node_id, cfg.managers_publish).await?;
     if matches!(need, Need::Delete | Need::Move | Need::Share) {
         return Err(AppError::forbidden("FTP receive folders only accept uploads"));

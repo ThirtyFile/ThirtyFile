@@ -10,6 +10,39 @@ use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
 struct Client;
 
+#[tokio::test]
+async fn restricted_folders_are_hidden_from_native_listings_and_open_handles_recheck_access() {
+    let env = testutil::env().await;
+    let owner = env.user("owner", true).await;
+    let member = env.user("member", true).await;
+    let folder = env.folder(&owner, owner.root(), "Department").await;
+    let hidden = env.folder(&owner, &folder, "HR").await;
+    let secret = env.upload(&owner, &hidden, "payroll.txt", b"confidential").await;
+    env.upload(&owner, &folder, "minutes.txt", b"public").await;
+    env.grant(&folder, &member, "editor").await;
+    let _listener = on(&env).await;
+    let credential = token(&env, &member, "write").await;
+    let (_ssh, sftp) = client(&env, &member, &credential).await;
+    let mut opened = sftp.open("/Shared with me/Department/HR/payroll.txt").await.unwrap();
+    let req = serde_json::from_value(serde_json::json!({"restricted":true,"expected":false,"confirmed":true})).unwrap();
+    let _ = crate::restrictions::change(axum::extract::State(env.st.clone()), owner.clone(), axum::extract::Path(hidden.clone()), axum::Json(req)).await.unwrap();
+    let names = sftp.read_dir("/Shared with me/Department").await.unwrap().map(|e| e.file_name()).collect::<Vec<_>>();
+    assert_eq!(names, vec!["minutes.txt"]);
+    assert!(sftp.metadata("/Shared with me/Department/HR").await.is_err());
+    assert!(sftp.open("/Shared with me/Department/HR/payroll.txt").await.is_err());
+    use tokio::io::AsyncReadExt;
+    assert!(opened.read(&mut [0; 32]).await.is_err());
+    assert!(sftp.rename("/Shared with me/Department/HR", "/Shared with me/Department/renamed").await.is_err());
+    assert!(sftp.remove_file("/Shared with me/Department/HR/payroll.txt").await.is_err());
+    env.grant(&hidden, &member, "viewer").await;
+    let bytes = sftp.read("/Shared with me/Department/HR/payroll.txt").await.unwrap();
+    assert_eq!(&bytes[..], b"confidential");
+    env.revoke(&hidden, &member).await;
+    assert!(sftp.read("/Shared with me/Department/HR/payroll.txt").await.is_err());
+    assert!(crate::tree::get_node(&mut *env.st.db.acquire().await.unwrap(), &secret).await.unwrap().is_some());
+    sftp.close().await.unwrap();
+}
+
 impl client::Handler for Client {
     type Error = russh::Error;
     async fn check_server_key(&mut self, _: &PublicKeyOrCertificate) -> Result<bool, Self::Error> {

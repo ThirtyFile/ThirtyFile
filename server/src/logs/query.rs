@@ -137,13 +137,14 @@ pub struct ActivityQuery {
 /// out. Administrators read the log without a space, so this keeps the names in personal spaces from them.
 pub(crate) async fn query_activity(st: &AppState, q: &ActivityQuery, me: i64, limit: i64) -> AppResult<Vec<ActivityRow>> {
     let private = format!("(a.private_to IS NOT NULL AND a.private_to <> {me})");
+    let visible = crate::tree::scopes_visible_sql(me, "a.restricted_scopes");
     let mut f = Filters::new(format!(
         "SELECT * FROM (
            SELECT a.id, a.at, a.username, a.drive_id, d.name AS drive_name, a.action, {private} AS private,
                   CASE WHEN {private} THEN NULL ELSE a.node_id END AS node_id,
                   CASE WHEN {private} THEN '' ELSE a.node_name END AS node_name,
                   CASE WHEN {private} THEN '' ELSE a.detail END AS detail
-           FROM activity a LEFT JOIN drives d ON d.id = a.drive_id
+           FROM activity a LEFT JOIN drives d ON d.id = a.drive_id WHERE {visible}
          ) a"
     ));
     f.eq("a.drive_id", q.drive_id.as_deref())
@@ -210,7 +211,8 @@ pub struct AccessQuery {
 /// Visit records: only those of links `owner_id` created, if given. For the administrator `admin`, visits to links
 /// someone else made in someone else's personal space (or in a space that is gone) don't say which link or item they
 /// were, and the keyword search doesn't look at what they leave out.
-pub(crate) async fn query_access(st: &AppState, q: &AccessQuery, owner_id: Option<i64>, admin: Option<i64>, limit: i64) -> AppResult<Vec<AccessRow>> {
+pub(crate) async fn query_access(st: &AppState, q: &AccessQuery, owner_id: Option<i64>, admin: Option<i64>, me: i64, limit: i64) -> AppResult<Vec<AccessRow>> {
+    let visible = crate::tree::scopes_visible_sql(me, "a.restricted_scopes");
     let private = match admin {
         Some(me) => format!("(a.owner_id IS NOT {me} AND a.private_to IS NOT NULL AND a.private_to <> {me})"),
         None => "0".to_string(),
@@ -221,7 +223,7 @@ pub(crate) async fn query_access(st: &AppState, q: &AccessQuery, owner_id: Optio
                   CASE WHEN {private} THEN '' ELSE a.share_id END AS share_id,
                   CASE WHEN {private} THEN NULL ELSE a.node_id END AS node_id,
                   CASE WHEN {private} THEN '' ELSE a.node_name END AS node_name
-           FROM share_access a LEFT JOIN users u ON u.id = a.owner_id
+           FROM share_access a LEFT JOIN users u ON u.id = a.owner_id WHERE {visible}
          ) a"
     ));
     f.eq("a.owner_id", owner_id)

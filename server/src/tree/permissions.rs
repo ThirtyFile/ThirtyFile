@@ -101,7 +101,7 @@ pub fn allows(user: &User, role: Role, need: Need) -> AppResult<()> {
         Need::Add => role >= Role::Contributor && (user.can_write || user.is_admin()),
         Need::Write | Need::Move => role >= Role::Editor && (user.can_write || user.is_admin()),
         Need::Delete => role >= Role::Editor && (user.can_delete || user.is_admin()),
-        Need::Share => role >= Role::Editor && (user.can_share || user.is_admin()),
+        Need::Share => !user.guest && role >= Role::Editor && (user.can_share || user.is_admin()),
     };
     if ok {
         return Ok(());
@@ -126,7 +126,19 @@ pub fn is_own(user: &User, node: &Node) -> bool {
 pub async fn allows_on(conn: &mut SqliteConnection, user: &User, role: Role, need: Need, node: &Node) -> AppResult<()> {
     let current = crate::auth::sftp::current_user(conn, user, need != Need::Read).await?;
     let user = current.as_ref().unwrap_or(user);
-    let role = if current.is_some() { live_role_on(conn, user, node).await?.ok_or_else(|| AppError::not_found("Item not found"))? } else { role };
+    let current = crate::auth::current_user(conn, user).await?;
+    let user = &current;
+    let (mut fresh_role, in_trash) = access(conn, user, node).await?;
+    if fresh_role.is_none()
+        && in_trash
+        && user.is_admin()
+        && let Some(drive) = get_drive(conn, node.drive()).await?
+        && drive.kind != super::SpaceKind::Personal
+    {
+        // Administrators may manage the trash of team spaces without membership; ordinary reads still require it.
+        fresh_role = Some(Role::Manager);
+    }
+    let role = fresh_role.ok_or_else(|| AppError::not_found("Item not found"))?.min(role);
     let refused = match allows(user, role, need) {
         Ok(()) => return Ok(()),
         Err(e) => e,
@@ -252,12 +264,18 @@ pub fn may_link(user: &User, role: Role, drive: &super::Drive) -> AppResult<()> 
 
 /// SQL for "the grant `g` applies to the user and hasn't expired", with the numbers of the query's parameters holding
 /// the user's id and the current time
-fn principal_match(user: u8, now: u8) -> String {
+pub(super) fn principal_match(user: u8, now: u8) -> String {
+    principal_sql(&format!("?{user}"), &format!("?{now}"))
+}
+
+pub(crate) fn principal_sql(user: &str, now: &str) -> String {
     format!(
-        "(g.expires_at IS NULL OR g.expires_at > ?{now})
-    AND (g.principal_type = 'everyone'
-      OR (g.principal_type = 'user' AND g.principal_id = ?{user})
-      OR (g.principal_type = 'group' AND g.principal_id IN (SELECT group_id FROM group_members WHERE user_id = ?{user})))"
+        "(g.expires_at IS NULL OR g.expires_at > {now})
+    AND (NOT EXISTS(SELECT 1 FROM users WHERE id = {user} AND guest = 1)
+      OR (g.expires_at IS NOT NULL AND g.role IN ('viewer','contributor','editor')))
+    AND ((g.principal_type = 'everyone' AND NOT EXISTS(SELECT 1 FROM users WHERE id = {user} AND guest = 1))
+      OR (g.principal_type = 'user' AND g.principal_id = {user})
+      OR (g.principal_type = 'group' AND g.principal_id IN (SELECT group_id FROM group_members WHERE user_id = {user})))"
     )
 }
 
@@ -276,8 +294,10 @@ pub async fn live_role_on(conn: &mut SqliteConnection, user: &User, node: &Node)
 
 /// The user's role on a node (see `role_on`), and whether it or a folder it is in is in the trash
 async fn access(conn: &mut SqliteConnection, user: &User, node: &Node) -> AppResult<(Option<Role>, bool)> {
+    let current = crate::auth::current_user(conn, user).await?;
+    let user = &current;
     let Some(drive) = get_drive(conn, node.drive()).await? else { return Ok((None, false)) };
-    if drive.disabled {
+    if drive.disabled || (user.guest && drive.kind == super::SpaceKind::Personal && drive.owner_id == Some(user.id)) {
         return Ok((None, false));
     }
     // Administrators manage the company shared space (personal spaces are unaffected, for privacy)
@@ -292,19 +312,25 @@ async fn access(conn: &mut SqliteConnection, user: &User, node: &Node) -> AppRes
             best = Some(Role::Manager);
         }
     }
-    // A row for each folder on the way up, and one more for each grant there that applies
+    // Keep walking above the inheritance boundary to check trash and retain space owners, while ordinary grants
+    // stop at the nearest restricted folder. An item's uploader is not a space owner.
     let sql = format!(
-        "WITH RECURSIVE up(id, parent_id, trashed) AS (
-           SELECT id, parent_id, trashed_at IS NOT NULL FROM nodes WHERE id = ?1
-           UNION ALL SELECT n.id, n.parent_id, n.trashed_at IS NOT NULL FROM nodes n JOIN up ON n.id = up.parent_id
+        "WITH RECURSIVE up(id, parent_id, trashed, restricted, inherited) AS (
+           SELECT id, parent_id, trashed_at IS NOT NULL, restricted, 1 FROM nodes WHERE id = ?1
+           UNION ALL SELECT n.id, n.parent_id, n.trashed_at IS NOT NULL, n.restricted, up.inherited AND NOT up.restricted
+           FROM nodes n JOIN up ON n.id = up.parent_id
          )
-         SELECT g.role, up.trashed FROM up LEFT JOIN grants g ON g.node_id = up.id AND {}",
+         SELECT g.role, up.trashed, up.restricted FROM up LEFT JOIN grants g ON g.node_id = up.id
+           AND (up.inherited OR (up.parent_id IS NULL AND g.role = 'owner')) AND {}",
         principal_match(2, 3)
     );
-    let rows: Vec<(Option<Role>, bool)> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(&node.id).bind(user.id).bind(now()).fetch_all(conn).await?;
+    let rows: Vec<(Option<Role>, bool, bool)> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(&node.id).bind(user.id).bind(now()).fetch_all(conn).await?;
     let mut in_trash = false;
-    for (r, trashed) in rows {
+    for (r, trashed, restricted) in rows {
         best = best.max(r);
+        if restricted && user.is_admin() && drive.kind != super::SpaceKind::Personal {
+            best = best.max(Some(Role::Manager));
+        }
         in_trash |= trashed;
     }
     Ok((best, in_trash))
@@ -314,12 +340,12 @@ async fn access(conn: &mut SqliteConnection, user: &User, node: &Node) -> AppRes
 /// owner there; None when one of them doesn't end (or they manage it through no grant)
 pub async fn manages_until(conn: &mut SqliteConnection, user: &User, node: &Node) -> AppResult<Option<i64>> {
     let sql = format!(
-        "WITH RECURSIVE up(id, parent_id) AS (
-           SELECT id, parent_id FROM nodes WHERE id = ?1
-           UNION ALL SELECT n.id, n.parent_id FROM nodes n JOIN up ON n.id = up.parent_id
+        "WITH RECURSIVE up(id, parent_id, restricted, inherited) AS (
+           SELECT id, parent_id, restricted, 1 FROM nodes WHERE id = ?1
+           UNION ALL SELECT n.id, n.parent_id, n.restricted, up.inherited AND NOT up.restricted FROM nodes n JOIN up ON n.id = up.parent_id
          )
          SELECT CASE WHEN COUNT(*) = COUNT(g.expires_at) THEN MAX(g.expires_at) END
-         FROM grants g JOIN up ON g.node_id = up.id WHERE g.role IN ('manager', 'owner') AND {}",
+         FROM grants g JOIN up ON g.node_id = up.id WHERE (up.inherited OR (up.parent_id IS NULL AND g.role = 'owner')) AND g.role IN ('manager', 'owner') AND {}",
         principal_match(2, 3)
     );
     let (until,): (Option<i64>,) = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(&node.id).bind(user.id).bind(now()).fetch_one(conn).await?;
@@ -329,7 +355,7 @@ pub async fn manages_until(conn: &mut SqliteConnection, user: &User, node: &Node
 /// Whether a grant to this principal gives the user access: it names them, a group of theirs, or everyone
 pub async fn grant_applies_to(conn: &mut SqliteConnection, user: &User, principal_type: PrincipalType, principal_id: i64) -> AppResult<bool> {
     Ok(match principal_type {
-        PrincipalType::Everyone => true,
+        PrincipalType::Everyone => !user.guest,
         PrincipalType::User => principal_id == user.id,
         PrincipalType::Group => {
             let (n,): (i64,) =
@@ -362,11 +388,16 @@ pub async fn node_for(conn: &mut SqliteConnection, user: &User, id: &str, need: 
         None
     };
     let user = current.as_ref().unwrap_or(user);
+    let current = crate::auth::current_user(conn, user).await?;
+    let user = &current;
     let (n, role) = node_with_role(conn, user, id).await?;
-    if let Some(root) = &user.protocol_root
-        && !crate::access::inside(conn, root, &n.id).await?
-    {
-        return Err(AppError::forbidden("Object is outside the bucket"));
+    if let Some(root) = &user.protocol_root {
+        if !crate::access::inside(conn, root, &n.id).await? {
+            return Err(AppError::forbidden("Object is outside the bucket"));
+        }
+        if !super::within_publication(conn, root, &n.id).await? {
+            return Err(AppError::not_found("Item not found"));
+        }
     }
     allows_on(conn, user, role, need, &n).await?;
     if matches!(need, Need::Add | Need::Write | Need::Move | Need::Delete) && n.space_read_only {
@@ -404,6 +435,8 @@ pub async fn owned_node(conn: &mut SqliteConnection, user: &User, id: &str) -> A
 
 /// Spaces the user can access (space-level grants) and their roles
 pub async fn user_drives(conn: &mut SqliteConnection, user: &User) -> AppResult<Vec<(Drive, Role)>> {
+    let current = crate::auth::current_user(conn, user).await?;
+    let user = &current;
     #[derive(sqlx::FromRow)]
     struct Row {
         #[sqlx(flatten)]
@@ -412,7 +445,7 @@ pub async fn user_drives(conn: &mut SqliteConnection, user: &User) -> AppResult<
     }
     let sql = format!(
         "SELECT {DRIVE_COLS}, g.role FROM drives d JOIN grants g ON g.node_id = d.root_id
-         WHERE d.disabled = 0 AND {}",
+         WHERE d.disabled = 0 AND NOT (d.kind = 'personal' AND d.owner_id = ?1 AND EXISTS(SELECT 1 FROM users WHERE id = ?1 AND guest = 1)) AND {}",
         principal_match(1, 2)
     );
     let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(user.id).bind(now()).fetch_all(&mut *conn).await?;
@@ -467,16 +500,21 @@ pub async fn shared_with_me_outside(conn: &mut SqliteConnection, user: &User, me
     let sql = format!(
         "SELECT {NODE_COLS}, g.role, COALESCE((SELECT username FROM users WHERE id = g.granted_by), '') AS sharer
          FROM grants g JOIN nodes n ON n.id = g.node_id JOIN drives d ON d.id = n.drive_id
-         WHERE n.parent_id IS NOT NULL AND n.trashed_at IS NULL AND d.disabled = 0 AND {}
+         WHERE n.parent_id IS NOT NULL AND n.trashed_at IS NULL AND d.disabled = 0
+           AND NOT(d.kind = 'personal' AND d.owner_id = ?1 AND EXISTS(SELECT 1 FROM users WHERE id = ?1 AND guest = 1)) AND {} AND {}
          ORDER BY g.created_at DESC",
-        principal_match(1, 2)
+        principal_match(1, 2),
+        super::visible_sql(user, "n.id")
     );
     let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(user.id).bind(now()).fetch_all(&mut *conn).await?;
     let mut map: HashMap<String, (Node, Role, String)> = HashMap::new();
     for r in rows {
         let role = r.role;
         if member_of.iter().any(|d| d == r.node.drive()) {
-            continue;
+            let path = super::path_of(conn, &r.node.id).await?;
+            if super::visible_path_start(conn, user, &path).await? == 0 {
+                continue;
+            }
         }
         map.entry(r.node.id.clone()).and_modify(|e| e.1 = e.1.max(role)).or_insert((r.node, role, r.sharer));
     }

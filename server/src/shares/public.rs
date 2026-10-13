@@ -188,7 +188,7 @@ pub(super) async fn shared_node(st: &AppState, share: &Share, root: &Node, id: &
     }
     let mut c = st.db.acquire().await?;
     match tree::get_node(&mut c, id).await? {
-        Some(n) if n.trashed_at.is_none() && tree::is_within(&mut c, &n.id, &share.node_id).await? => {
+        Some(n) if n.trashed_at.is_none() && tree::within_publication(&mut c, &share.node_id, &n.id).await? => {
             if let Some(s) = st.part::<crate::shares::Memory>().links.lock().get_mut(&share.id).filter(|s| s.writes == writes && s.within.len() < SEEN_ITEMS) {
                 s.within.insert(n.id.clone(), n.clone());
             }
@@ -363,7 +363,7 @@ pub async fn public_children(
     if !node.is_folder() {
         return Err(AppError::bad_request("This isn't a folder"));
     }
-    let children = list_children(&mut *st.db.acquire().await?, &node.id, &q.paged()).await?;
+    let children = list_children(&mut *st.db.acquire().await?, &node.id, &q.paged().published()).await?;
     Ok(Json(children.map(|nodes| nodes.iter().map(public_node_json).collect())))
 }
 
@@ -522,7 +522,10 @@ pub(super) async fn serve_public_download(
     // reached doesn't use up the link
     let mut res = match roots.as_slice() {
         [one] if !one.is_folder() => serve_blob(st, headers, node_blob(st, one).await?, true).await?,
-        _ => downloads::zip_response(st, roots.clone(), tz).await?,
+        _ => {
+            let user = auth::user_by_id(st, &mut *st.db.acquire().await?, share.owner_id).await?.ok_or_else(gone)?;
+            downloads::zip_response_checked(st, roots.clone(), tz, Some(downloads::ZipAccess { user, publication: Some(share.node_id.clone()) })).await?
+        }
     };
     if !continuation {
         count_download(st, &share).await?;

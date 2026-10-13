@@ -66,9 +66,11 @@ function Usage({ d }: { d: Drive }) {
         />
       </div>
       <div className="truncate text-[11px] text-muted-foreground">
-        {d.quota_bytes > 0
-          ? t("{free} free of {total}", { free: formatBytes(Math.max(0, d.quota_bytes - d.used_bytes)), total: formatBytes(d.quota_bytes) })
-          : t("{used} used · No quota", { used: formatBytes(d.used_bytes) })}
+        {d.partial_usage
+          ? t("{used} in visible files", { used: formatBytes(d.used_bytes) })
+          : d.quota_bytes > 0
+            ? t("{free} free of {total}", { free: formatBytes(Math.max(0, d.quota_bytes - d.used_bytes)), total: formatBytes(d.quota_bytes) })
+            : t("{used} used · No quota", { used: formatBytes(d.used_bytes) })}
         {d.kind !== "personal" && ` · ${d.kind === "company" && d.member_count <= 1 ? t("Everyone") : tc("drive", "{n} member|{n} members", { n: d.member_count })}`}
       </div>
     </>
