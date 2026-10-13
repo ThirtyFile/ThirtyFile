@@ -15,6 +15,7 @@ import { backupsApi } from "@/api/backups";
 import { replicasApi } from "@/api/replicas";
 import { tagsApi } from "@/api/tags";
 import { smartFoldersApi } from "@/api/smartFolders";
+import { sftpApi } from "@/api/sftp";
 
 export * from "@/api/types";
 export { SORT_KEYS } from "@/api/files";
@@ -38,4 +39,5 @@ export const api = {
   ...replicasApi,
   ...tagsApi,
   ...smartFoldersApi,
+  ...sftpApi,
 };

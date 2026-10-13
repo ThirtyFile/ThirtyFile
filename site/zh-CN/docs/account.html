@@ -57,6 +57,7 @@
           <a href="sharing.html">分享</a>
           <a href="account.html" aria-current="page">你的账号</a>
           <a href="webdav.html">映射为网络驱动器</a>
+          <a href="protocols.html">SFTP、S3 和 FTP</a>
           <p>管理</p>
           <a href="users.html">用户与空间</a>
           <a href="sign-in.html">单点登录</a>
@@ -87,6 +88,7 @@
             <li><a href="#style">界面风格</a></li>
             <li><a href="#history">登录历史</a></li>
             <li><a href="#notifications">通知</a></li>
+            <li><a href="#sftp-keys">SFTP 的 SSH 密钥</a></li>
           </ol>
         </details>
         <h2 id="password">密码</h2>
@@ -160,12 +162,14 @@ curl -u "amy:tfa_…" -o report.pdf "https://drive.example.com/api/files/&lt;fil
         <p>铃铛上的数字表示未读通知数。点击通知可打开对应项目。列表底部提供<strong>全部标为已读</strong>和<strong>清除全部</strong>。通知保留 90 天。</p>
         <p>铃铛列表底部或账号菜单中的<strong>通知设置</strong>可以分别开启或关闭每类应用内通知和邮件通知。邮件发送到这里填写的<strong>邮箱地址</strong>。使用单点登录时，首次会填入外部账号提供的地址，之后可以修改。留空则不收邮件。密码重置链接也发到这个地址，因此修改地址需要当前密码（两步验证账号还需验证码；无密码账号需在登录后 10 分钟内修改），原邮箱也会收到变更通知。同一地址每 15 分钟最多收到五封同类邮件；应用内通知全部保留。</p>
         <div class="note">只有管理员配置邮件服务器后才会发送邮件（参阅<a href="users.html#email">通知邮件</a>）。邮件采用<a href="#language">你选择的语言</a>；没有选择时使用管理员设置的默认语言，否则使用你最后使用 ThirtyFile 时的语言。时间按你的时区显示。</div>
+
+      <h2 id="sftp-keys">SFTP 的 SSH 密钥</h2>
+<p>管理员启用 SFTP 和 SSH 密钥后，在<strong>账号菜单 › SFTP 密钥</strong>为公钥命名，并确认当前密码和双因素验证码。私钥保留在自己的设备。移除不再使用的密钥后，其现有连接也会失去访问权。请参阅 <a href="protocols.html#sftp">SFTP 访问</a>。</p>
         <nav class="next" aria-label="更多指南">
           <a href="sharing.html"><span>上一篇</span>分享</a>
           <a class="forward" href="webdav.html"><span>下一篇</span>映射为网络驱动器</a>
         </nav>
-
-      </main>
+</main>
     </div>
     <footer class="site-footer">
       <div class="wrap">

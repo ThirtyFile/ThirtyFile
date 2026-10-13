@@ -30,6 +30,13 @@ describe("English", () => {
 });
 
 describe("Traditional Chinese", () => {
+  test("protocol activity translates its detail and preserves user-chosen source text", async () => {
+    const { tServer } = await load("zh-TW");
+    expect(tServer("through SFTP")).toBe(fill(ZH["through {protocolSource}"], { protocolSource: "SFTP" }));
+    expect(tServer("Replaced the existing file; through My files")).toBe(
+      fill(ZH["{detail}; through {protocolSource}"], { detail: ZH["Replaced the existing file"], protocolSource: "My files" }),
+    );
+  });
   test("t and tc look up the dictionary and fall back to English", async () => {
     const { t, lang } = await load("zh-TW");
     expect(lang).toBe("zh-TW");

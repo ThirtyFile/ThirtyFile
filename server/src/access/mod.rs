@@ -13,10 +13,12 @@
 
 mod changes;
 mod paths;
+mod read;
 mod write;
 
 pub use changes::*;
 pub use paths::*;
+pub use read::*;
 pub use write::*;
 
 use std::collections::HashMap;

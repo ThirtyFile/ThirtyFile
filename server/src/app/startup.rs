@@ -19,6 +19,9 @@ pub struct Settings {
     /// Listen address
     #[arg(long, env = "THIRTYFILE_ADDR", default_value = "0.0.0.0:8080")]
     pub addr: String,
+    /// SSH file transfer listen address; access is enabled separately in Control panel
+    #[arg(long, env = "THIRTYFILE_SFTP_ADDR", default_value = "0.0.0.0:2022")]
+    pub sftp_addr: String,
     /// Data directory (database, files, thumbnails)
     #[arg(long, env = "THIRTYFILE_DATA", default_value = "./data")]
     pub data: PathBuf,
@@ -79,6 +82,7 @@ pub struct Server {
     addr: String,
     log_writer: logs::LogWriter,
     _lock: Option<std::fs::File>,
+    sftp_addr: String,
 }
 
 /// Opens the database of the data folder, with the key of the secrets saved in it
@@ -186,7 +190,7 @@ pub async fn start(cfg: Settings, storage: PathBuf, db: sqlx::SqlitePool) -> Res
     #[cfg(target_os = "linux")]
     watch::spawn_watchers(state.clone());
 
-    Ok(Server { state, addr: cfg.addr, log_writer, _lock: lock })
+    Ok(Server { state, addr: cfg.addr, log_writer, _lock: lock, sftp_addr: cfg.sftp_addr })
 }
 
 /// What the features' parts start with: settings, and what startup loaded from the database
@@ -223,6 +227,7 @@ pub fn parts(l: Loaded) -> Parts {
         .with(locations::Memory::default())
         .with(folders::Memory::default())
         .with(location_tools::Memory::default())
+        .with(crate::sftp::Memory::default())
         .with(shares::Memory::default());
     #[cfg(target_os = "linux")]
     let parts = parts.with(watch::Memory::default());
@@ -244,8 +249,10 @@ impl Server {
         let app = self.router();
 
         let listener = tokio::net::TcpListener::bind(&self.addr).await?;
+        let sftp = crate::sftp::supervise(self.state.clone(), &self.sftp_addr);
         tracing::info!("ThirtyFile started: http://{}", self.addr);
         serve(listener, app).await?;
+        sftp.finish().await;
         // Background loops end, giving back the connections they hold
         crate::util::stop_background();
         // Sign-in and share access events still queued are written before exiting

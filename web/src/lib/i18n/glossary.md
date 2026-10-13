@@ -20,6 +20,12 @@ GitHub, Microsoft, Google, Keycloak, Authentik, Excel, Word, PowerPoint, NAS.
 
 ## Terms
 
+| English              | zh-TW        | zh-CN        | ja                             |
+| -------------------- | ------------ | ------------ | ------------------------------ |
+| SSH public key       | SSH 公開金鑰 | SSH 公钥     | SSH 公開キー                   |
+| SSH private key      | SSH 私密金鑰 | SSH 私钥     | SSH 秘密キー                   |
+| host key fingerprint | 主機金鑰指紋 | 主机密钥指纹 | ホストキーのフィンガープリント |
+
 | English                                       | zh-TW                    | zh-CN                    | ja                                        |
 | --------------------------------------------- | ------------------------ | ------------------------ | ----------------------------------------- |
 | file                                          | 檔案                     | 文件                     | ファイル                                  |

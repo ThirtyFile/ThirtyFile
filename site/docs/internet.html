@@ -57,6 +57,7 @@
           <a href="sharing.html">Sharing</a>
           <a href="account.html">Your account</a>
           <a href="webdav.html">Mapping it as a drive</a>
+          <a href="protocols.html">SFTP, S3 and FTP</a>
           <p>Administration</p>
           <a href="users.html">Users and spaces</a>
           <a href="sign-in.html">Single sign-on</a>
@@ -83,6 +84,7 @@
             <li><a href="#compose-caddy">Caddy in the same Docker Compose file</a></li>
             <li><a href="#traefik">Traefik</a></li>
             <li><a href="#checklist">Before you open it to the world</a></li>
+            <li><a href="#sftp-port">SFTP uses a separate TCP port</a></li>
           </ol>
         </details>
         <h2 id="steps">Three things to do</h2>
@@ -203,11 +205,13 @@ networks:
           <li>Set up a <a href="backup.html">backup</a>.</li>
           <li>Decide who may sign in. See <a href="sign-in.html#who">Single sign-on</a>.</li>
         </ul>
+      <h2 id="sftp-port">SFTP uses a separate TCP port</h2>
+<p>SFTP does not go through an HTTP reverse proxy. Publish its port (2022 by default) in Docker and allow that port through your firewall. Connect with your server hostname, not the HTTPS path. Verify the host key fingerprint from the control panel before trusting the first connection. See <a href="protocols.html#sftp">SFTP setup</a>.</p>
         <nav class="next" aria-label="More guides">
           <a href="settings.html"><span>Previous</span>Settings</a>
           <a class="forward" href="backup.html"><span>Next</span>Upgrade and backup</a>
         </nav>
-      </main>
+</main>
     </div>
     <footer class="site-footer">
       <div class="wrap">

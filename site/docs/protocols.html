@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en" data-root=".." data-page="protocols">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SFTP, S3 and FTP · ThirtyFile</title>
+    <meta name="description" content="SFTP, S3 and FTP — ThirtyFile file access." />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/protocols.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/protocols.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/protocols.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/protocols.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/protocols.html" />
+    <link rel="icon" href="../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">Skip to content</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="Site">
+          <a href="../index.html#features" class="hide-small">Features</a>
+          <a href="index.html" aria-current="page">Guides</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">Language </span><span class="lang-name">English</span></summary>
+            <ul>
+              <li><a href="protocols.html" hreflang="en" lang="en" aria-current="true">English</a></li>
+              <li><a href="../zh-TW/docs/protocols.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
+              <li><a href="../zh-CN/docs/protocols.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+              <li><a href="../ja/docs/protocols.html" hreflang="ja" lang="ja">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="Guides">
+        <details open>
+          <summary>All guides</summary>
+          <p>Get started</p>
+          <a href="index.html">Install</a>
+          <a href="first-steps.html">First steps</a>
+          <p>Everyday use</p>
+          <a href="files.html">Working with files</a>
+          <a href="preview.html">Preview and editing</a>
+          <a href="sharing.html">Sharing</a>
+          <a href="account.html">Your account</a>
+          <a href="webdav.html">Mapping it as a drive</a>
+          <a href="protocols.html" aria-current="page">SFTP, S3 and FTP</a>
+          <p>Administration</p>
+          <a href="users.html">Users and spaces</a>
+          <a href="sign-in.html">Single sign-on</a>
+          <a href="storage.html">Storage locations</a>
+          <a href="logs.html">Logs and branding</a>
+          <p>Running it</p>
+          <a href="settings.html">Settings</a>
+          <a href="internet.html">Putting it on the internet</a>
+          <a href="backup.html">Upgrade and backup</a>
+          <a href="help.html">Troubleshooting</a>
+          <p>The project</p>
+          <a href="contributing.html">Contributing</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+<h1>SFTP, S3 and FTP</h1>
+<p>Programs can work with ThirtyFile's files over standard protocols. SFTP is available when an administrator enables it. S3 buckets and FTP receive folders are separate features; their availability is described below.</p>
+        <details class="guide-toc">
+          <summary>On this page</summary>
+          <ol>
+            <li><a href="#choosing">Which one to use</a></li>
+            <li><a href="#sftp">SFTP</a></li>
+            <li><a href="#s3">S3 buckets</a></li>
+            <li><a href="#ftp">FTP receive folders</a></li>
+            <li><a href="#use-cases">Examples</a></li>
+          </ol>
+        </details>
+<h2 id="choosing">Which one to use</h2>
+<p>Use <a href="webdav.html">WebDAV</a> to map your spaces as a drive. Use SFTP for encrypted file transfers with WinSCP, FileZilla, Cyberduck, OpenSSH or rclone. SFTP shows the same tree and follows the same permissions as WebDAV.</p>
+<h2 id="sftp">SFTP</h2>
+<p>Under <strong>Control panel › General › Apps and protocols</strong>, turn on <strong>Allow SFTP access</strong>. It is off by default. The port is set at startup with <code>THIRTYFILE_SFTP_ADDR</code> (default <code>0.0.0.0:2022</code>). Publish it separately in Docker Compose; it does not go through an HTTP reverse proxy.</p>
+<pre><code>services:
+  thirtyfile:
+    environment:
+      THIRTYFILE_SFTP_ADDR: 0.0.0.0:2022
+    ports:
+      - "8080:8080"
+      - "2022:2022"</code></pre>
+<p>Add these entries to your existing Compose service, keeping its image and volumes. Restart with <code>docker compose up -d</code>. Open the chosen TCP port in the firewall only where it is needed.</p>
+<h3 id="connecting">Connecting</h3>
+<p>Choose SFTP in your client, your server hostname, port 2022, your ThirtyFile username and an <a href="account.html#app-passwords">app password</a>. Your account password does not work here. A read-only app password cannot change files, even for an administrator. Check the <strong>host key fingerprint</strong> shown in the control panel before trusting the first connection.</p>
+<pre><code>sftp -P 2022 amy@files.example.com
+# After connecting:
+ls
+cd "My files"
+put report.csv
+get report.csv</code></pre>
+<h3 id="ssh-keys">SSH public keys</h3>
+<p>An administrator also enables <strong>Allow SSH keys</strong>. Under <strong>Account menu › SFTP keys</strong>, add a name and your SSH public key. Confirm your current password and two-factor code when requested. Keep the private key on your device. The dialog shows the fingerprint and last use; removing a key stops its access, including existing sessions.</p>
+<pre><code>sftp -i ~/.ssh/id_ed25519 -P 2022 amy@files.example.com</code></pre>
+<h3 id="limits">What SFTP supports</h3>
+<p>ThirtyFile roles and sharing control access. Unix owner changes and permission changes such as <code>chmod 600</code> are rejected; modes supplied when creating an item are advisory. With rclone, set <code>disable_hashcheck = true</code>, because shell commands for remote checksums are unavailable. Ask your administrator for the expected host key fingerprint if you cannot access the control panel.</p>
+<p>List and download files, upload, resume at an offset, make folders, rename, move, and remove items (to the trash). Writes are staged and committed when the file closes: quotas, upload limits, versions and activity records apply. A disconnected unfinished write is discarded. Times sent by clients are accepted but ignored. There is no shell, command execution, rsync over SSH, forwarding or symbolic links. Each account may have five sessions, with 32 open handles per session and a five-minute idle timeout.</p>
+<p>The server generates an ed25519 host key in the data folder on first start. Keep it in data backups. Replacing it changes the fingerprint and clients should ask you to verify the change.</p>
+<h2 id="s3">S3 buckets</h2>
+<p>Publishing a folder as a bucket with its own Access Keys is a separate feature under development. It does not use your SFTP app password. Connecting ThirtyFile to an existing S3 storage location is already described in <a href="storage.html#types">Storage locations</a>.</p>
+<h2 id="ftp">FTP receive folders</h2>
+<p>An FTP receive server is not available. It is planned only for a concrete need from a scanner or camera that cannot use SFTP. An existing FTP server can be added as a storage location; that is a different feature.</p>
+<h2 id="use-cases">Examples</h2>
+<p>A server can upload a nightly report with an SSH key and an SFTP script. A designer can transfer a large project with Cyberduck. For rclone, run <code>rclone config</code>, choose SFTP, set the hostname and port, verify the host key, and use an app password or SSH private key; avoid putting credentials in command history.</p>
+        <nav class="next" aria-label="More guides">
+          <a href="webdav.html"><span>Previous</span>Mapping it as a drive</a>
+          <a class="forward" href="users.html"><span>Next</span>Users and spaces</a>
+        </nav>
+</main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">Guides</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">Source code</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">Report a problem</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker image</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../assets/site.js"></script>
+  </body>
+</html>

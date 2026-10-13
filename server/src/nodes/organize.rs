@@ -437,17 +437,58 @@ pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
 
 pub async fn trash(State(st): State<AppState>, user: User, Json(req): Json<BatchReq>) -> AppResult<Json<Value>> {
     let ids = req.ids()?;
-    let locks = fsops::lock_seen(&st, &user, &ids.iter().map(String::as_str).collect::<Vec<_>>()).await?;
+    trash_ids(&st, &user, &ids, false).await
+}
+
+/// File protocols remove only empty directories; the web's recursive trash keeps its usual behavior.
+pub async fn trash_empty_folder(st: &AppState, user: &User, id: &str) -> AppResult<()> {
+    trash_ids(st, user, &[id.to_string()], true).await.map(|_| ())
+}
+
+async fn trash_ids(st: &AppState, user: &User, ids: &[String], empty_only: bool) -> AppResult<Json<Value>> {
+    let locks = fsops::lock_seen(st, user, &ids.iter().map(String::as_str).collect::<Vec<_>>()).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    for id in &outermost(&mut tx, &ids).await? {
-        let node = tree::node_for(&mut tx, &user, id, Need::Delete).await?;
+    for id in &outermost(&mut tx, ids).await? {
+        let node = tree::node_for(&mut tx, user, id, Need::Delete).await?;
         locks.check(&node)?;
-        trash_one(&mut tx, &user, &locks, &node, "").await?;
+        if empty_only {
+            if !node.is_folder() {
+                return Err(AppError::bad_request("This isn't a folder"));
+            }
+            let (has_children,): (bool,) =
+                sqlx::query_as("SELECT EXISTS(SELECT 1 FROM nodes WHERE parent_id = ? AND trashed_at IS NULL)").bind(&node.id).fetch_one(&mut *tx).await?;
+            if has_children {
+                return Err(AppError::conflict("The folder isn't empty"));
+            }
+            empty_on_disk(&node).await?;
+        }
+        trash_one(&mut tx, user, &locks, &node, "").await?;
+        if empty_only && node.in_folder_space() {
+            // If an external writer added something during the rename, roll the transaction and disk move back.
+            let moved = tree::get_node(&mut tx, &node.id).await?.ok_or_else(|| AppError::not_found("Item not found"))?;
+            empty_on_disk(&moved).await?;
+        }
     }
     tx.commit().await?;
     locks.committed();
     Ok(Json(json!({ "ok": true })))
+}
+
+async fn empty_on_disk(node: &Node) -> AppResult<()> {
+    if !node.in_folder_space() {
+        return Ok(());
+    }
+    let n = node.clone();
+    fsops::on_disk(node.drive(), std::time::Duration::from_secs(5), move || {
+        let path = n.fs_pinned().and_then(|p| p.dir()).map_err(|_| AppError::conflict("The folder isn't empty"))?;
+        let mut entries = std::fs::read_dir(path.as_path()).map_err(|_| AppError::conflict("The folder isn't empty"))?;
+        if entries.next().is_some() {
+            return Err(AppError::conflict("The folder isn't empty"));
+        }
+        Ok(())
+    })
+    .await
 }
 
 /// Moves an item (the user may delete it) and everything in it to the trash; `detail` goes into the activity log
