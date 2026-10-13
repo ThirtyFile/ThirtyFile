@@ -76,6 +76,11 @@ pub async fn node_history(State(st): State<AppState>, user: User, Path(id): Path
         }
         qb.push(")");
     }
+    qb.push(format!(
+        " AND {} AND (a.node_id IS NULL OR NOT EXISTS(SELECT 1 FROM nodes WHERE id = a.node_id) OR {})",
+        tree::scopes_visible_sql(user.id, "a.restricted_scopes"),
+        tree::visible_sql(&user, "a.node_id")
+    ));
     qb.push(" ORDER BY a.id DESC LIMIT ").push_bind(HISTORY_LIMIT);
     Ok(Json(qb.build_query_as().fetch_all(&mut *c).await?))
 }
@@ -97,5 +102,5 @@ pub async fn share_access(State(st): State<AppState>, user: User, Query(mut q): 
     };
     let owner = if user.is_admin() || others { None } else { Some(user.id) };
     let limit = page_size(q.limit);
-    Ok(page(query_access(&st, &q, owner, user.is_admin().then_some(user.id), limit).await?, limit, |r| r.id))
+    Ok(page(query_access(&st, &q, owner, user.is_admin().then_some(user.id), user.id, limit).await?, limit, |r| r.id))
 }

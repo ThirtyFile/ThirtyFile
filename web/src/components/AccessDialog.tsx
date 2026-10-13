@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { GlobeIcon, Loader2Icon, UserIcon, UsersIcon, XIcon } from "lucide-react";
+import { GlobeIcon, Loader2Icon, LockKeyholeIcon, UserIcon, UsersIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Grant, type LinkMakers, type Principal, type PrincipalType, type Role } from "@/api";
 import { affected, invalidate, keys } from "@/api/queryKeys";
@@ -338,9 +338,7 @@ export function AccessDialog({ nodeId, onClose }: { nodeId: string; onClose(): v
         <DialogHeader>
           <DialogTitle className="truncate pr-8">{title}</DialogTitle>
           <DialogDescription>
-            {info?.is_drive_root
-              ? t("Members can access all files in this space.")
-              : t("People you share with can access this item (for a folder, everything in it). It appears in their Shared with me.")}
+            {info?.is_drive_root ? t("Members inherit access except in restricted folders.") : t("People with access can open this item. Restricted folders stop inherited access.")}
           </DialogDescription>
         </DialogHeader>
 
@@ -358,6 +356,9 @@ export function AccessDialog({ nodeId, onClose }: { nodeId: string; onClose(): v
           <p className="rounded-md bg-muted/60 p-3 text-sm text-muted-foreground">{t("A personal space can't be shared as a whole. Right-click a folder in it and choose Share with….")}</p>
         ) : (
           <>
+            {!info.is_drive_root && info.node.kind === "folder" && (
+              <FolderRestriction nodeId={nodeId} name={info.node.name} restricted={!!info.node.restricted} canChoose={!!info.can_restrict} />
+            )}
             {info.can_manage && (
               <form
                 className="grid gap-2"
@@ -450,5 +451,54 @@ export function AccessDialog({ nodeId, onClose }: { nodeId: string; onClose(): v
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+function FolderRestriction({ nodeId, name, restricted, canChoose }: { nodeId: string; name: string; restricted: boolean; canChoose: boolean }) {
+  const qc = useQueryClient();
+  const preview = useQuery({ queryKey: keys.restriction(nodeId), queryFn: () => api.restrictionPreview(nodeId), enabled: canChoose });
+  const [ask, question] = useConfirm();
+  const save = useMutation({
+    mutationFn: (next: boolean) => api.setRestriction(nodeId, next, restricted),
+    onSuccess: () => {
+      void refreshFiles(qc, { all: true, access: [nodeId], contents: true, trash: true });
+      void qc.invalidateQueries({ queryKey: keys.restriction(nodeId) });
+      toast.success(t("Access updated"));
+    },
+    onError: (error) => toast.error(error.message),
+  });
+  const choose = async () => {
+    const current = await preview.refetch();
+    if (!current.data || current.error) return;
+    const names = current.data.inherited.map((g) => `${g.principal_type === "everyone" ? t("Everyone") : tServer(g.name)} (${ROLE_LABEL[g.role]})`).join(", ");
+    const description = restricted
+      ? t("Access from parent folders will apply again: {people}. Direct grants remain. Confirm who should have access before continuing.", { people: names || t("No inherited grants") })
+      : t(
+          "These inherited grants will stop: {people}. Direct grants remain. Space owners keep access, and administrators retain access in team and company spaces. Parent share links and buckets will no longer include this folder.",
+          { people: names || t("No inherited grants") },
+        );
+    if (
+      await ask({ title: restricted ? t("Restore inherited access to “{name}”?", { name }) : t("Restrict “{name}”?", { name }), description, confirmText: t("Change"), destructive: true })
+    ) {
+      save.mutate(!restricted);
+    }
+  };
+  if (!restricted && !canChoose) return null;
+  return (
+    <div className="grid gap-2 rounded-md border bg-muted/30 p-3">
+      {question}
+      <p className="flex items-center gap-2 text-sm font-medium">
+        <LockKeyholeIcon className="size-4 shrink-0" />
+        {restricted ? t("Restricted folder") : t("Inherited folder access")}
+      </p>
+      <p className="text-xs text-muted-foreground">{t("A restricted folder keeps its place in the tree. Grants above it stop here. Space managers need explicit access.")}</p>
+      {canChoose && (
+        <Button variant="outline" size="sm" className="justify-self-start" disabled={save.isPending || preview.isFetching} onClick={() => void choose()}>
+          {(save.isPending || preview.isFetching) && <Loader2Icon className="animate-spin" />}
+          {restricted ? t("Restore inherited access") : t("Restrict folder")}
+        </Button>
+      )}
+      <ErrorText>{preview.error?.message}</ErrorText>
+    </div>
   );
 }

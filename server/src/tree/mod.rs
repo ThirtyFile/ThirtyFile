@@ -5,10 +5,12 @@ mod blobs;
 pub mod changes;
 mod permissions;
 mod quota;
+mod restricted;
 
 pub use blobs::*;
 pub use permissions::*;
 pub use quota::*;
+pub use restricted::*;
 
 use std::collections::HashMap;
 
@@ -96,6 +98,9 @@ impl crate::logs::Item for Node {
     }
     fn space(&self) -> Option<&str> {
         self.drive_id.as_deref()
+    }
+    fn parent(&self) -> Option<&str> {
+        self.parent_id.as_deref()
     }
 }
 

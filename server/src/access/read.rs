@@ -33,7 +33,7 @@ pub async fn list_page(st: &AppState, user: &User, folder: &str, after: Option<S
         crate::folders::sync_opened(st, &node).await;
     }
     let mut c = st.db.acquire().await?;
-    let mut list = crate::nodes::list_children(&mut c, folder, &crate::nodes::ListQuery::page(after, 128)).await?;
+    let mut list = crate::nodes::list_children(&mut c, folder, &crate::nodes::ListQuery::page(after, 128).visible_to(user)).await?;
     let next = list.next().map(str::to_string);
     Ok((std::mem::take(list.items_mut()), next))
 }

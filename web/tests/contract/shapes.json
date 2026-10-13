@@ -1,6 +1,7 @@
 {
   "AccessInfo": {
     "can_manage": false,
+    "can_restrict": false,
     "direct": [
       {
         "created_at": 0,
@@ -91,6 +92,7 @@
     "name": "",
     "offline": null,
     "owner_name": "",
+    "partial_usage": false,
     "quota_bytes": 0,
     "read_only": false,
     "role": "",

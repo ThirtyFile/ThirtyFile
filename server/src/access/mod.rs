@@ -30,12 +30,29 @@ use sqlx::SqliteConnection;
 use crate::{error::AppResult, tree};
 
 /// (used, available) bytes of a space with a quota, remembered per space for one answer (`cache`); None without one
-pub async fn space_room(conn: &mut SqliteConnection, cache: &mut HashMap<String, Option<(i64, i64)>>, drive_id: &str) -> AppResult<Option<(i64, i64)>> {
+pub async fn space_room(
+    conn: &mut SqliteConnection,
+    user: &crate::auth::User,
+    cache: &mut HashMap<String, Option<(i64, i64)>>,
+    drive_id: &str,
+) -> AppResult<Option<(i64, i64)>> {
     if let Some(q) = cache.get(drive_id) {
         return Ok(*q);
     }
     let q = match tree::get_drive(conn, drive_id).await? {
         Some(d) => {
+            let (restricted,): (bool,) =
+                sqlx::query_as("SELECT EXISTS(SELECT 1 FROM nodes WHERE drive_id = ? AND restricted)").bind(&d.id).fetch_one(&mut *conn).await?;
+            let root = tree::get_node(conn, &d.root_id).await?;
+            if restricted
+                && !match root {
+                    Some(root) => tree::space_owner(conn, user, &root).await?,
+                    None => false,
+                }
+            {
+                cache.insert(drive_id.to_string(), None);
+                return Ok(None);
+            }
             let limit = tree::drive_quota(conn, &d).await?;
             (limit > 0).then(|| (d.used_bytes, (limit - d.used_bytes).max(0)))
         }

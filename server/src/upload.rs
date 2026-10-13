@@ -204,6 +204,9 @@ pub async fn create_as(st: &AppState, up: &Uploader, headers: &HeaderMap) -> App
     {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
+        if let Some(s) = &up.share {
+            check_in_share(&mut tx, s, &parent_id).await?;
+        }
         let parent = tree::folder_for(&mut tx, user, &parent_id, tree::Need::Add).await?;
         // Refused before anything is sent, rather than when the upload is put in place
         if parent.in_folder_space() {
@@ -273,7 +276,7 @@ pub async fn create_as(st: &AppState, up: &Uploader, headers: &HeaderMap) -> App
 
 /// The folder is inside the shared folder (and, for a link that only accepts files, is the shared folder itself)
 async fn check_in_share(conn: &mut sqlx::SqliteConnection, share: &ShareUpload, folder: &str) -> AppResult<()> {
-    let inside = if share.drop_only { folder == share.root } else { tree::is_within(conn, folder, &share.root).await? };
+    let inside = if share.drop_only { folder == share.root } else { tree::within_publication(conn, &share.root, folder).await? };
     if !inside {
         return Err(AppError::not_found("Item not found"));
     }
@@ -493,7 +496,7 @@ async fn finish(st: &AppState, up: &Uploader, upload: Upload, guard: ActiveGuard
                 Ok(mut c) => tree::get_node(&mut c, id).await.ok().flatten(),
                 Err(_) => None,
             };
-            crate::logs::record_share_access(&st, &share.id, up.user.id, node.as_ref().map(|n| n as _), "upload", &share.visitor);
+            crate::logs::record_share_access(&st, &share.id, up.user.id, node.as_ref().map(|n| n as _), "upload", &share.visitor).await;
             // The link's creator is told the file arrived
             if let Some(node) = &node
                 && let Err(e) = crate::notify::link_upload(&st, up.user.id, &share.id, node).await
@@ -661,6 +664,7 @@ async fn commit_upload(st: &AppState, up: &Uploader, upload: &Upload, staged: &c
     // Through a share link, the file goes into the folder as it is now: still inside the shared folder, and still
     // writable by the link's creator; it never falls back to the creator's own files
     if let Some(s) = &up.share {
+        check_in_share(&mut tx, s, &upload.parent_id).await?;
         let target = tree::folder_for(&mut tx, user, &upload.parent_id, tree::Need::Add).await?;
         check_in_share(&mut tx, s, &target.id).await?;
     }
@@ -680,8 +684,15 @@ async fn commit_upload(st: &AppState, up: &Uploader, upload: &Upload, staged: &c
     if parent.in_folder_space() && !crate::content::path_folders_exist(&mut tx, &parent.id, &upload.rel_path).await? {
         tree::check_quota_except(&mut tx, parent.drive(), size, Some(&upload.id)).await?;
     }
+    // An uploaded folder may reuse existing subfolders. Every existing step must still be writable before disk
+    // folders are made, and the final target is checked again, including share-link inheritance boundaries.
+    let mut checked = parent.clone();
+    for part in upload.rel_path.split('/').filter(|p| !p.is_empty()) {
+        let Some(next) = tree::find_child(&mut tx, &checked.id, part).await? else { break };
+        checked = tree::folder_for(&mut tx, user, &next.id, tree::Need::Add).await?;
+    }
     let folder_id = crate::content::ensure_folders(&mut tx, upload.owner_id, &parent.id, &upload.rel_path, &upload.batch).await?;
-    let folder = tree::get_node(&mut tx, &folder_id).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
+    let folder = tree::folder_for(&mut tx, user, &folder_id, tree::Need::Add).await?;
     let replaced = replaced_file(&mut tx, user, upload, &folder.id).await?;
     // Checked again now: an upload idle for a day stopped holding its space (it may be taken by now), and a folder
     // moved to another space meanwhile must have room there. Its own reservation isn't counted twice.

@@ -279,6 +279,9 @@ pub async fn update(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
         let mut tx = crate::db::begin_write(&st.db).await?;
         still_admin(&mut tx, me.id).await?;
         let (was_guest, current_role): (bool, UserRole) = sqlx::query_as("SELECT guest, role FROM users WHERE id = ?").bind(id).fetch_one(&mut *tx).await?;
+        if was_guest != target.guest || current_role != target.role {
+            return Err(AppError::conflict("This account's type changed. Reload it and confirm your identity again before saving."));
+        }
         if req.guest.unwrap_or(was_guest) && role.unwrap_or(current_role) == UserRole::Admin {
             return Err(AppError::bad_request("Guests can't be administrators"));
         }

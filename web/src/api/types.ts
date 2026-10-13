@@ -24,6 +24,8 @@ export interface Node {
   tags?: number[];
   /** Listings of folders only (the navigation pane): whether it has folders in it */
   has_folders?: boolean;
+  /** Stops inherited grants at this folder. Missing in older fixtures means unrestricted. */
+  restricted?: boolean;
 }
 
 /** The colours a tag can have: the server keeps the name, each style and theme draws it in its own shade */
@@ -173,6 +175,7 @@ export interface Drive {
   root_id: string;
   role: Role | null;
   used_bytes: number;
+  partial_usage?: boolean;
   quota_bytes: number;
   owner_name: string;
   member_count: number;
@@ -715,8 +718,14 @@ export interface AccessInfo {
   is_drive_root: boolean;
   my_role: Role | null;
   can_manage: boolean;
+  can_restrict?: boolean;
   direct: Grant[];
   inherited: Grant[];
+}
+
+export interface RestrictionPreview {
+  restricted: boolean;
+  inherited: { principal_type: PrincipalType; principal_id: number; name: string; role: Role }[];
 }
 
 export interface Principal {

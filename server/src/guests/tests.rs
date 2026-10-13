@@ -323,3 +323,95 @@ async fn guest_http_and_webdav_read_write_only_explicitly_shared_files_and_expir
     assert_eq!(client.get(&path).basic_auth(&outside.username, Some(&token)).send().await.unwrap().status(), StatusCode::NOT_FOUND);
     assert_eq!(client.get(format!("{}/api/files/{file}/content", server.base)).header("cookie", &cookie).send().await.unwrap().status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn guest_directory_hides_principals_in_a_restricted_child_until_the_guest_is_explicitly_invited() {
+    let env = testutil::env().await;
+    let admin = env.admin().await;
+    let outside = guest(&env, "outside").await;
+    let unrelated = env.user("secret-person", true).await;
+    let department = env.folder(&admin, admin.root(), "Department").await;
+    let hr = env.folder(&admin, &department, "HR").await;
+    sqlx::query("UPDATE nodes SET restricted=1 WHERE id=?").bind(&hr).execute(&env.st.db).await.unwrap();
+    let secret = group(&env, &admin, "SecretGroup", &[unrelated.id]).await;
+    let _ = grant(&env, &admin, &department, "user", outside.id, "viewer", Some(now() + 86400)).await.unwrap();
+    let _ = grant(&env, &admin, &hr, "user", unrelated.id, "viewer", None).await.unwrap();
+    let _ = grant(&env, &admin, &hr, "group", secret, "viewer", None).await.unwrap();
+    for invited in [false, true, false] {
+        if invited {
+            let _ = grant(&env, &admin, &hr, "user", outside.id, "viewer", Some(now() + 86400)).await.unwrap();
+        } else {
+            sqlx::query("DELETE FROM grants WHERE node_id=? AND principal_type='user' AND principal_id=?")
+                .bind(&hr)
+                .bind(outside.id)
+                .execute(&env.st.db)
+                .await
+                .unwrap();
+        }
+        let Json(rows) = drives::directory(State(env.st.clone()), outside.clone(), Query(serde_json::from_value(json!({"q":""})).unwrap())).await.unwrap();
+        let rows = serde_json::to_value(rows).unwrap();
+        for name in ["secret-person", "SecretGroup"] {
+            assert_eq!(rows.as_array().unwrap().iter().any(|p| p["name"] == name), invited, "directory visibility for {name}");
+        }
+        assert_eq!(crate::tree::node_for(&mut env.st.db.acquire().await.unwrap(), &outside, &hr, crate::tree::Need::Read).await.is_ok(), invited);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_unconfirmed_standard_update_queued_before_conversion_cannot_restore_guest_privileges() {
+    let env = testutil::env().await;
+    let admin = env.admin().await;
+    let target = env.user("outside", true).await;
+    let lock = env.st.write_lock.lock().await;
+    let st = env.st.clone();
+    let actor = admin.clone();
+    let id = target.id;
+    let waiting =
+        tokio::spawn(
+            async move { crate::admin::update(State(st), Admin(actor), Path(id), req(json!({"guest":false,"display_name":"Queued standard update"}))).await },
+        );
+    // The request is already live while conversion holds the writer. Both schedules must refuse privilege restoration.
+    tokio::task::yield_now().await;
+    let mut tx = crate::db::begin_write(&env.st.db).await.unwrap();
+    let p = preview_in(&mut tx, target.id).await.unwrap();
+    convert(&mut tx, target.id, Some(&p.revision)).await.unwrap();
+    sqlx::query("UPDATE users SET guest=1 WHERE id=?").bind(target.id).execute(&mut *tx).await.unwrap();
+    tx.commit().await.unwrap();
+    drop(lock);
+    assert!(waiting.await.unwrap().is_err());
+    let current = auth::user_by_id(&env.st, &mut env.st.db.acquire().await.unwrap(), target.id).await.unwrap().unwrap();
+    assert!(current.guest && current.root_id.is_none());
+}
+
+#[tokio::test(flavor="multi_thread",worker_threads=2)]
+async fn existing_public_links_and_signed_s3_keys_stop_on_conversion_without_deleting_their_data() {
+    use aws_sdk_s3::config::{BehaviorVersion,Credentials,Region,RequestChecksumCalculation};
+    let env=testutil::env().await;
+    let admin=env.admin().await;
+    let alice=env.user("alice",true).await;
+    let shared=env.folder(&admin,&env.st.shared_root().unwrap(),"Published").await;
+    let _=grant(&env,&admin,&shared,"user",alice.id,"manager",None).await.unwrap();
+    let file=env.stored_file(&alice,&shared,"shared.txt",b"keep published content").await;
+    let Json(link)=crate::shares::create(State(env.st.clone()),alice.clone(),req(json!({"node_id":file}))).await.unwrap();
+    let link=serde_json::to_value(link).unwrap()["id"].as_str().unwrap().to_owned();
+    assert!(crate::shares::check_stream_access(&env.st,&link).await.is_ok());
+    let _=crate::s3::config::save(State(env.st.clone()),Admin(admin.clone()),req(json!({"enabled":true,"hostname":"127.0.0.1","region":"us-east-1","managers_publish":true}))).await.unwrap();
+    let Json(bucket)=crate::s3::manage::create(State(env.st.clone()),alice.clone(),req(json!({"node_id":shared,"name":"guest-conversion"}))).await.unwrap();
+    let Json(key)=crate::s3::manage::new_key(State(env.st.clone()),alice.clone(),Path(bucket.id.clone()),req(json!({"description":"Conversion regression","writable":true,"expires_at":null}))).await.unwrap();
+    let server=http(&env).await;
+    let client=aws_sdk_s3::Client::from_conf(aws_sdk_s3::Config::builder()
+        .behavior_version(BehaviorVersion::latest()).region(Region::new("us-east-1"))
+        .credentials_provider(Credentials::new(&key.key.access_key,&key.secret_key,None,None,"contract"))
+        .endpoint_url(&server.base).force_path_style(true)
+        .request_checksum_calculation(RequestChecksumCalculation::WhenRequired).build());
+    assert!(client.head_object().bucket(&bucket.name).key("shared.txt").send().await.is_ok());
+    let _=convert_to_guest(&env,&admin,&alice).await.unwrap();
+    assert!(crate::shares::check_stream_access(&env.st,&link).await.is_err());
+    assert!(client.head_object().bucket(&bucket.name).key("shared.txt").send().await.is_err());
+    assert!(client.put_object().bucket(&bucket.name).key("forbidden.txt").body(aws_sdk_s3::primitives::ByteStream::from_static(b"must not commit")).send().await.is_err());
+    assert!(crate::s3::credentials::identity(&env.st,&key.key.access_key,true).await.is_err());
+    let current=auth::user_by_id(&env.st,&mut env.st.db.acquire().await.unwrap(),alice.id).await.unwrap().unwrap();
+    assert_eq!(crate::access::read_at(&env.st,&current,&file,0,64).await.unwrap(),b"keep published content");
+    let (links,buckets,keys):(i64,i64,i64)=sqlx::query_as("SELECT (SELECT COUNT(*) FROM shares WHERE owner_id=?1),(SELECT COUNT(*) FROM s3_buckets WHERE creator_id=?1),(SELECT COUNT(*) FROM s3_keys)").bind(alice.id).fetch_one(&env.st.db).await.unwrap();
+    assert_eq!((links,buckets,keys),(1,1,1));
+}

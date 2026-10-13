@@ -43,4 +43,5 @@ export default {
   "New access given to guests must end within {days} days": "授予访客的新访问权必须在 {days} 天内到期",
   "changed to guest": "改为访客",
   "changed to standard account": "改为普通账号",
+  "This account's type changed. Reload it and confirm your identity again before saving.": "账号类型已更改，请重新加载并再次确认身份后再保存。",
 };

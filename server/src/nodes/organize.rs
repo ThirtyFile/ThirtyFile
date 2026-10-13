@@ -228,6 +228,7 @@ pub async fn move_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
     let mut across_items = 0usize;
     for id in &ids {
         let mut node = tree::node_for(&mut tx, &user, id, Need::Move).await?;
+        tree::require_subtree(&mut tx, &user, &node, Need::Move).await?;
         changes::refuse_busy(&mut tx, &node.id).await?;
         locks.check(&node)?;
         not_root(&node)?;
@@ -325,6 +326,20 @@ pub(super) fn locked_ids<'a>(dest: &'a str, ids: &'a [String]) -> Vec<&'a str> {
     std::iter::once(dest).chain(ids.iter().map(String::as_str)).collect()
 }
 
+/// An explicit name applies only when copying one item.
+fn copy_name(req: &BatchReq, ids: &[String], dest: &Node) -> AppResult<Option<String>> {
+    Ok(match req.name.as_deref().filter(|_| ids.len() == 1) {
+        Some(n) => {
+            let n = crate::util::validate_name(n)?;
+            if dest.in_folder_space() {
+                fsops::check_name(&n)?;
+            }
+            Some(n)
+        }
+        None => None,
+    })
+}
+
 /// Copies items in the index; what goes to or from a folder space is returned, for its content to be copied next
 pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult<Option<fsops::Across>> {
     let (st, user) = (st.clone(), user.clone());
@@ -335,23 +350,14 @@ pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
     let user = crate::auth::current_user(&mut tx, &user).await?;
     let dest = tree::folder_for(&mut tx, &user, req.dest()?, Need::Add).await?;
     locks.check(&dest)?;
-    // The name asked for one item's copy (else each copy has its original's)
-    let named = match req.name.as_deref().filter(|_| ids.len() == 1) {
-        Some(n) => {
-            let n = crate::util::validate_name(n)?;
-            if dest.in_folder_space() {
-                fsops::check_name(&n)?;
-            }
-            Some(n)
-        }
-        None => None,
-    };
+    let named = copy_name(req, &ids, &dest)?;
     let mut plans = Vec::new();
     let mut replaced = Vec::new();
     let mut total = 0i64;
     let mut items = 0usize;
     for id in &ids {
         let node = tree::node_for(&mut tx, &user, id, Need::Read).await?;
+        tree::require_subtree(&mut tx, &user, &node, Need::Read).await?;
         changes::refuse_busy(&mut tx, &node.id).await?;
         locks.check(&node)?;
         not_root(&node)?;
@@ -406,7 +412,7 @@ pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
                 let Some(parent) = n.parent_id.as_ref().and_then(|p| ids.get(p)) else { continue };
                 (parent.clone(), n.name.clone())
             };
-            rows.push(json!([new_id, parent, n.kind, name, n.blob_hash, n.size, n.mime]));
+            rows.push(json!([new_id, parent, n.kind, name, n.blob_hash, n.size, n.mime, n.restricted]));
             if let Some(hash) = &n.blob_hash {
                 blobs.push((hash.clone(), n.size, n.blob_location.clone().unwrap_or_else(|| "local".into())));
             }
@@ -414,10 +420,10 @@ pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
         }
         // One statement for the whole subtree, in depth order (parents are inserted before their children)
         sqlx::query(
-            "INSERT INTO nodes (id, owner_id, parent_id, kind, name, blob_hash, size, mime, drive_id, created_at, updated_at)
+            "INSERT INTO nodes (id, owner_id, parent_id, kind, name, blob_hash, size, mime, drive_id, created_at, updated_at, restricted)
              SELECT json_extract(value, '$[0]'), ?2, json_extract(value, '$[1]'), json_extract(value, '$[2]'),
                     json_extract(value, '$[3]'), json_extract(value, '$[4]'), json_extract(value, '$[5]'),
-                    json_extract(value, '$[6]'), ?3, ?4, ?4
+                    json_extract(value, '$[6]'), ?3, ?4, ?4, json_extract(value, '$[7]')
              FROM json_each(?1) ORDER BY key",
         )
         .bind(serde_json::to_string(&rows).unwrap())
@@ -498,6 +504,7 @@ async fn empty_on_disk(node: &Node) -> AppResult<()> {
 
 /// Moves an item (the user may delete it) and everything in it to the trash; `detail` goes into the activity log
 pub(super) async fn trash_one(conn: &mut SqliteConnection, user: &User, locks: &fsops::SpaceLocks, node: &Node, detail: &str) -> AppResult<()> {
+    tree::require_subtree(conn, user, node, Need::Delete).await?;
     not_root(node)?;
     changes::refuse_busy(conn, &node.id).await?;
     let (trash_id, at) = (new_id(), now());
@@ -569,6 +576,9 @@ pub async fn conflicts(State(st): State<AppState>, user: User, Json(req): Json<C
     if let Some(dest) = &req.dest_id {
         let dest = tree::folder_for(&mut c, &user, dest, Need::Read).await?;
         for (name, existing) in tree::find_children(&mut c, &dest.id, &req.names).await? {
+            if tree::role_on(&mut c, &user, &existing).await?.is_none() {
+                continue;
+            }
             out.push(Conflict { id: None, name, kind: None, size: None, updated_at: None, existing });
         }
         for id in &req.ids {
@@ -578,6 +588,9 @@ pub async fn conflicts(State(st): State<AppState>, user: User, Json(req): Json<C
                 continue;
             }
             if let Some(existing) = tree::find_child(&mut c, &dest.id, &node.name).await?.filter(|e| e.id != node.id) {
+                if tree::role_on(&mut c, &user, &existing).await?.is_none() {
+                    continue;
+                }
                 out.push(Conflict {
                     id: Some(node.id.clone()),
                     name: node.name.clone(),
@@ -594,6 +607,9 @@ pub async fn conflicts(State(st): State<AppState>, user: User, Json(req): Json<C
             // Into a folder that will be made: nothing there yet
             let Some(parent) = existing_folder(&mut c, &place).await? else { continue };
             if let Some(existing) = tree::find_child(&mut c, &parent, &node.name).await? {
+                if tree::role_on(&mut c, &user, &existing).await?.is_none() {
+                    continue;
+                }
                 out.push(Conflict {
                     id: Some(node.id.clone()),
                     name: node.name.clone(),

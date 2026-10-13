@@ -285,3 +285,28 @@ async fn an_upload_refused_for_its_size_leaves_no_folders_on_the_disk() {
     assert_eq!(made, 0);
     assert!(env.dir.join("blobs/users/amy").is_dir() && !env.dir.join("blobs/users/amy/Trip").exists(), "no folder is left on the disk");
 }
+
+#[tokio::test]
+async fn restricting_a_folder_cancels_inherited_uploads_and_relative_paths_without_touching_disk() {
+    let env = testutil::env().await;
+    let owner = env.admin().await;
+    let editor = env.user("editor", true).await;
+    let disk = env.folder_space("Department").await;
+    let hr = env.folder(&owner, &disk.root, "HR").await;
+    env.grant(&disk.root, &editor, "editor").await;
+    let original = env.upload(&owner, &hr, "contracts.txt", b"original").await;
+    let pending = start(&env, &editor, &hr, "", "contracts.txt", 8).await.unwrap();
+    send(&env, &editor, &pending, 0, b"re").await.unwrap();
+    let req = serde_json::from_value(serde_json::json!({"restricted":true,"expected":false,"confirmed":true})).unwrap();
+    let _ = crate::restrictions::change(State(env.st.clone()), owner.clone(), Path(hr.clone()), axum::Json(req)).await.unwrap();
+    assert!(send(&env, &editor, &pending, 2, b"placed").await.is_err());
+    assert_eq!(std::fs::read(disk.dir.join("HR/contracts.txt")).unwrap(), b"original");
+    assert_eq!(env.node_at(&disk.drive, "HR/contracts.txt").await.unwrap().0, original);
+    let nested = start(&env, &editor, &disk.root, "HR/New", "leaked.txt", 3).await.unwrap();
+    assert!(send(&env, &editor, &nested, 0, b"bad").await.is_err());
+    assert!(!disk.dir.join("HR/New").exists());
+    env.grant(&hr, &editor, "editor").await;
+    let allowed = start(&env, &editor, &disk.root, "HR/New", "allowed.txt", 3).await.unwrap();
+    send(&env, &editor, &allowed, 0, b"yes").await.unwrap();
+    assert_eq!(std::fs::read(disk.dir.join("HR/New/allowed.txt")).unwrap(), b"yes");
+}

@@ -43,4 +43,5 @@ export default {
   "New access given to guests must end within {days} days": "新しくゲストに付与する権限の有効期限は {days} 日以内",
   "changed to guest": "ゲストに変更",
   "changed to standard account": "通常のアカウントに変更",
+  "This account's type changed. Reload it and confirm your identity again before saving.": "アカウントの種類が変更されました。再読み込みし、もう一度本人確認を行ってから保存してください。",
 };
