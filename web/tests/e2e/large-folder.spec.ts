@@ -165,8 +165,10 @@ test("going up to a folder far down a large folder shows and selects the folder 
   // Into the last item (by its address: it isn't loaded), then up again
   await page.goto(`/files/${last}`);
   await expect(page.getByText("No files here yet")).toBeVisible();
+  const restored = part(page, big, 1000);
   await page.keyboard.press("Alt+ArrowUp");
   await page.waitForURL(`**/files/${big}`);
+  expect((await restored).ok()).toBe(true);
   const left = page.locator("[data-node-id]").filter({ hasText: "zz last" });
   await expect(left).toHaveAttribute("aria-selected", "true");
   await expect(left).toBeInViewport();
