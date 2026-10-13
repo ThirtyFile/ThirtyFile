@@ -408,7 +408,7 @@ function list(v: string, depth: number, loose: boolean): string | undefined {
 /** Translate a parameter value: known terms, names ThirtyFile made, lists of known terms, and nested messages */
 function fragment(name: string, v: string, depth: number): string {
   // Protocol context includes names chosen by users; keep it verbatim, even when it matches a known term.
-  if (name === "source") return v;
+  if (name === "protocolSource") return v;
   const hit = exact!.get(v);
   if (hit !== undefined) return hit;
   if (MADE_NAME.test(v) && depth < 2) {

@@ -182,7 +182,7 @@ ENV PATH=/usr/local/bin \
     THIRTYFILE_ADDR=0.0.0.0:8080
 
 VOLUME ["/data", "/storage"]
-EXPOSE 8080
+EXPOSE 8080 2022
 
 # Requests /api/health on the address from THIRTYFILE_ADDR (no need to change this when the port changes)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --start-interval=2s --retries=3 CMD ["thirtyfile", "health"]

@@ -87,6 +87,7 @@
             <li><a href="#style">Interface style</a></li>
             <li><a href="#history">Sign-in history</a></li>
             <li><a href="#notifications">Notifications</a></li>
+            <li><a href="#sftp-keys">SSH keys for SFTP</a></li>
           </ol>
         </details>
 
@@ -168,11 +169,13 @@ curl -u "amy:tfa_…" -o report.pdf "https://drive.example.com/api/files/&lt;fil
         <p>A number on the bell counts the ones you haven't read. Click one to open what it is about. <strong>Mark all as read</strong> and <strong>Clear all</strong> are at the bottom of the list. Notifications are kept for 90 days.</p>
         <p><strong>Notification settings</strong>, at the bottom of the bell's list or in the account menu, turns each kind on or off, in the app and by email separately. Emails go to the <strong>email address</strong> you enter there. If you sign in with single sign-on, the address that account gives is filled in the first time, and you can change it. Leave it blank to get no emails. Password reset links go to this address too, so changing it asks for your current password (and with two-factor sign-in a code; accounts without a password change it within 10 minutes of signing in), and the previous address gets an email about the change. At most five emails of one kind go to an address within 15 minutes; the notifications in the app are all kept.</p>
         <div class="note">Emails are only sent once an administrator has set up an email server (<a href="users.html#email">Notification emails</a>). They are written in the <a href="#language">language you chose</a>; without a choice, in the default language your administrator set, or else in the language you last used ThirtyFile in. Times are in your time zone.</div>
+      <h2 id="sftp-keys">SSH keys for SFTP</h2>
+<p>When SFTP and SSH keys are enabled by an administrator, open <strong>Account menu › SFTP keys</strong>, give your public key a name and confirm your current password and two-factor code. The private key stays on your device. Remove a key you no longer use; its current sessions lose access too. See <a href="protocols.html#sftp">SFTP access</a>.</p>
         <nav class="next" aria-label="More guides">
           <a href="sharing.html"><span>Previous</span>Sharing</a>
           <a class="forward" href="webdav.html"><span>Next</span>Mapping it as a drive</a>
         </nav>
-      </main>
+</main>
     </div>
     <footer class="site-footer">
       <div class="wrap">
