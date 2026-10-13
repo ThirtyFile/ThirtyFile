@@ -459,28 +459,31 @@ async fn trash_ids(st: &AppState, user: &User, ids: &[String], empty_only: bool)
     let locks = fsops::lock_seen(st, user, &ids.iter().map(String::as_str).collect::<Vec<_>>()).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    let user = crate::auth::current_user(&mut tx, user).await?;
-    for id in &outermost(&mut tx, ids).await? {
-        let node = tree::node_for(&mut tx, &user, id, Need::Delete).await?;
+    let mut access = tree::TrashAccess::new(&mut tx, user).await?;
+    let selected = outermost(access.parts().0, ids).await?;
+    for id in &selected {
+        let node = access.node(id).await?;
+        let (conn, user) = access.parts();
         locks.check(&node)?;
         if empty_only {
             if !node.is_folder() {
                 return Err(AppError::bad_request("This isn't a folder"));
             }
             let (has_children,): (bool,) =
-                sqlx::query_as("SELECT EXISTS(SELECT 1 FROM nodes WHERE parent_id = ? AND trashed_at IS NULL)").bind(&node.id).fetch_one(&mut *tx).await?;
+                sqlx::query_as("SELECT EXISTS(SELECT 1 FROM nodes WHERE parent_id = ? AND trashed_at IS NULL)").bind(&node.id).fetch_one(&mut *conn).await?;
             if has_children {
                 return Err(AppError::conflict("The folder isn't empty"));
             }
             empty_on_disk(&node).await?;
         }
-        trash_one(&mut tx, &user, &locks, &node, "").await?;
+        trash_one(conn, user, &locks, &node, "").await?;
         if empty_only && node.in_folder_space() {
             // If an external writer added something during the rename, roll the transaction and disk move back.
-            let moved = tree::get_node(&mut tx, &node.id).await?.ok_or_else(|| AppError::not_found("Item not found"))?;
+            let moved = tree::get_node(conn, &node.id).await?.ok_or_else(|| AppError::not_found("Item not found"))?;
             empty_on_disk(&moved).await?;
         }
     }
+    drop(access);
     tx.commit().await?;
     locks.committed();
     Ok(Json(json!({ "ok": true })))
@@ -623,3 +626,7 @@ pub async fn conflicts(State(st): State<AppState>, user: User, Json(req): Json<C
     }
     Ok(Json(out))
 }
+
+#[cfg(test)]
+#[path = "trash_batch_tests.rs"]
+mod trash_batch_tests;
