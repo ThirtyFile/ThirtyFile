@@ -21,7 +21,7 @@ pub(super) struct Files {
 }
 enum Opened {
     Read { id: String },
-    Write(Staged),
+    Write(Box<Staged>),
     Directory { path: Vec<String>, after: Option<String>, done: bool },
 }
 struct Staged {
@@ -58,6 +58,15 @@ fn attrs(node: Option<&Node>) -> FileAttributes {
         atime: node.map(|n| n.updated_at.clamp(0, i64::from(u32::MAX)) as u32),
         ..Default::default()
     }
+}
+
+async fn file_attrs(st: &AppState, node: &Node) -> Result<FileAttributes, StatusCode> {
+    let mut attributes = attrs(Some(node));
+    if !node.is_folder() {
+        let source = crate::files::Source::resolve(st, node).await.map_err(code)?;
+        attributes.size = Some(source.describe(node.size as u64).await.map_err(code)?.0);
+    }
+    Ok(attributes)
 }
 fn segments(path: &str) -> Result<Vec<String>, StatusCode> {
     if path.len() > 4096 || path.contains(['\0', '\\']) {
@@ -100,7 +109,7 @@ impl Files {
         let found =
             paths::resolve(&mut *self.st.db.acquire().await.map_err(|_| StatusCode::Failure)?, user, path).await.map_err(code)?.ok_or(StatusCode::NoSuchFile)?;
         Ok(match found.target {
-            Target::Node(n) => attrs(Some(&n)),
+            Target::Node(n) => file_attrs(&self.st, &n).await?,
             _ => attrs(None),
         })
     }
@@ -110,8 +119,8 @@ impl Files {
         if node.parent_id.is_none() || node.is_folder() != directory {
             return Err(StatusCode::PermissionDenied);
         }
-        if directory && !access::list_page(&self.st, &user, &node.id, None).await.map_err(code)?.0.is_empty() {
-            return Err(StatusCode::Failure);
+        if directory {
+            return crate::nodes::trash_empty_folder(&self.st, &user, &node.id).await.map_err(code);
         }
         access::trash(&self.st, &user, &node.id).await.map_err(code)
     }
@@ -134,12 +143,47 @@ impl Files {
             let source = crate::files::Source::resolve(&self.st, node).await.map_err(code)?;
             let (size, _) = source.describe(node.size as u64).await.map_err(code)?;
             access::check_size(&self.st, size).map_err(code)?;
-            crate::util::DiskRoom::check(&self.st.tmp_dir(), size).await.map_err(code)?;
+            let mut disk = crate::util::DiskRoom::check(&self.st.tmp_dir(), size).await.map_err(code)?;
             let mut reader = source.open(&self.st, 0, size).await.map_err(|_| StatusCode::Failure)?;
-            tokio::io::copy(&mut reader, &mut stage.file).await.map_err(|_| StatusCode::Failure)?;
+            let mut buffer = vec![0; 128 * 1024];
+            loop {
+                let n = reader.read(&mut buffer).await.map_err(|_| StatusCode::Failure)?;
+                if n == 0 {
+                    break;
+                }
+                disk.before(n as u64).await.map_err(code)?;
+                stage.file.write_all(&buffer[..n]).await.map_err(|_| StatusCode::Failure)?;
+            }
         }
         Ok(stage)
     }
+}
+
+async fn stage_size(st: &AppState, user: &User, stage: &Staged, size: u64) -> Result<(), StatusCode> {
+    access::check_size(st, size).map_err(code)?;
+    let up = access::upload_to(st, user, &stage.up.parent, stage.up.name.clone()).await.map_err(code)?;
+    crate::tree::check_quota(
+        &mut *st.db.acquire().await.map_err(|_| StatusCode::Failure)?,
+        up.parent.drive(),
+        size as i64 - up.existing.as_ref().map_or(0, |n| n.size),
+    )
+    .await
+    .map_err(code)?;
+    let before = stage.file.metadata().await.map_err(|_| StatusCode::Failure)?.len();
+    crate::util::DiskRoom::check(&st.tmp_dir(), size.saturating_sub(before)).await.map_err(code)?;
+    Ok(())
+}
+
+fn metadata_supported(a: &FileAttributes, directory: bool) -> Result<(), StatusCode> {
+    if a.uid.is_some()
+        || a.gid.is_some()
+        || a.user.is_some()
+        || a.group.is_some()
+        || a.permissions.is_some_and(|mode| mode & 0o7777 != if directory { 0o755 } else { 0o644 })
+    {
+        return Err(StatusCode::OpUnsupported);
+    }
+    Ok(())
 }
 
 impl russh_sftp::server::Handler for Files {
@@ -155,7 +199,7 @@ impl russh_sftp::server::Handler for Files {
         let user = self.user(write).await?;
         let path = segments(&filename)?;
         let opened = if write {
-            Opened::Write(self.open_write(&user, &path, flags).await?)
+            Opened::Write(Box::new(self.open_write(&user, &path, flags).await?))
         } else {
             if !flags.contains(OpenFlags::READ) {
                 return Err(StatusCode::BadMessage);
@@ -218,16 +262,7 @@ impl russh_sftp::server::Handler for Files {
             let before = s.file.metadata().await.map_err(|_| StatusCode::Failure)?.len();
             let offset = if s.append { before } else { offset };
             let size = before.max(offset.checked_add(data.len() as u64).ok_or(StatusCode::Failure)?);
-            access::check_size(&self.st, size).map_err(code)?;
-            let up = access::upload_to(&self.st, &user, &s.up.parent, s.up.name.clone()).await.map_err(code)?;
-            crate::tree::check_quota(
-                &mut *self.st.db.acquire().await.map_err(|_| StatusCode::Failure)?,
-                up.parent.drive(),
-                size as i64 - up.existing.as_ref().map_or(0, |n| n.size),
-            )
-            .await
-            .map_err(code)?;
-            crate::util::DiskRoom::check(&self.st.tmp_dir(), size.saturating_sub(before)).await.map_err(code)?;
+            stage_size(&self.st, &user, s, size).await?;
             s.file.seek(std::io::SeekFrom::Start(offset)).await.map_err(|_| StatusCode::Failure)?;
             s.file.write_all(&data).await.map_err(|_| StatusCode::Failure)
         }
@@ -248,12 +283,19 @@ impl russh_sftp::server::Handler for Files {
     async fn fstat(&mut self, id: u32, handle: String) -> Result<Attrs, StatusCode> {
         let user = self.user(false).await?;
         let a = match self.handles.get(&handle).ok_or(StatusCode::NoSuchFile)? {
-            Opened::Read { id } => attrs(Some(
-                &crate::tree::node_for(&mut *self.st.db.acquire().await.map_err(|_| StatusCode::Failure)?, &user, id, crate::tree::Need::Read)
-                    .await
-                    .map_err(code)?,
-            )),
+            Opened::Read { id } => {
+                file_attrs(
+                    &self.st,
+                    &crate::tree::node_for(&mut *self.st.db.acquire().await.map_err(|_| StatusCode::Failure)?, &user, id, crate::tree::Need::Read)
+                        .await
+                        .map_err(code)?,
+                )
+                .await?
+            }
             Opened::Write(s) => {
+                crate::tree::folder_for(&mut *self.st.db.acquire().await.map_err(|_| StatusCode::Failure)?, &user, &s.up.parent.id, crate::tree::Need::Read)
+                    .await
+                    .map_err(code)?;
                 let mut a = attrs(s.up.existing.as_ref());
                 a.size = Some(s.file.metadata().await.map_err(|_| StatusCode::Failure)?.len());
                 a.permissions = Some(0o100644);
@@ -266,6 +308,7 @@ impl russh_sftp::server::Handler for Files {
     async fn setstat(&mut self, id: u32, path: String, a: FileAttributes) -> Result<Status, StatusCode> {
         let user = self.user(true).await?;
         let node = self.node(&user, &segments(&path)?).await?;
+        metadata_supported(&a, node.is_folder())?;
         crate::tree::node_for(&mut *self.st.db.acquire().await.map_err(|_| StatusCode::Failure)?, &user, &node.id, crate::tree::Need::Write).await.map_err(code)?;
         if a.size.is_some_and(|n| n != node.size as u64) {
             return Err(StatusCode::OpUnsupported);
@@ -273,13 +316,21 @@ impl russh_sftp::server::Handler for Files {
         Ok(okay(id))
     }
     async fn fsetstat(&mut self, id: u32, handle: String, a: FileAttributes) -> Result<Status, StatusCode> {
-        self.user(true).await?;
+        let user = self.user(true).await?;
         let Some(Opened::Write(s)) = self.handles.get_mut(&handle) else {
             return Err(StatusCode::PermissionDenied);
         };
+        metadata_supported(&a, false)?;
         if let Some(size) = a.size {
-            access::check_size(&self.st, size).map_err(code)?;
-            s.file.set_len(size).await.map_err(|_| StatusCode::Failure)?;
+            let change = async {
+                stage_size(&self.st, &user, s, size).await?;
+                s.file.set_len(size).await.map_err(|_| StatusCode::Failure)
+            }
+            .await;
+            if change.is_err() {
+                s.failed = true;
+            }
+            change?;
         }
         Ok(okay(id))
     }
@@ -311,14 +362,24 @@ impl russh_sftp::server::Handler for Files {
             }
             Target::Shared => {
                 *done = true;
-                paths::tops(&mut c, &user).await.map_err(code)?.shared.into_iter().map(|(name, n)| File::new(&name, attrs(Some(&n)))).collect()
+                let shared = paths::tops(&mut c, &user).await.map_err(code)?.shared;
+                drop(c);
+                let mut files = Vec::with_capacity(shared.len());
+                for (name, node) in shared {
+                    files.push(File::new(&name, file_attrs(&self.st, &node).await?));
+                }
+                files
             }
             Target::Node(n) => {
                 drop(c);
                 let (nodes, next) = access::list_page(&self.st, &user, &n.id, after.take()).await.map_err(code)?;
                 *done = next.is_none();
                 *after = next;
-                nodes.iter().map(|n| File::new(&n.name, attrs(Some(n)))).collect()
+                let mut files = Vec::with_capacity(nodes.len());
+                for node in nodes {
+                    files.push(File::new(&node.name, file_attrs(&self.st, &node).await?));
+                }
+                files
             }
         };
         if files.is_empty() {
@@ -330,7 +391,7 @@ impl russh_sftp::server::Handler for Files {
         let user = self.user(false).await?;
         let path = segments(&path)?;
         self.description(&user, &path).await?;
-        Ok(Name { id, files: vec![File::dummy(&format!("/{}", path.join("/")))] })
+        Ok(Name { id, files: vec![File::dummy(format!("/{}", path.join("/")))] })
     }
     async fn mkdir(&mut self, id: u32, path: String, _: FileAttributes) -> Result<Status, StatusCode> {
         let user = self.user(true).await?;
