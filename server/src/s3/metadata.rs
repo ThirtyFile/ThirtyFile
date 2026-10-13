@@ -17,6 +17,20 @@ pub fn mtime(headers: &HeaderMap) -> S3Result<Option<String>> {
     Ok(Some(value.into()))
 }
 
+pub async fn read(st: &AppState, id: &str, version: &str) -> S3Result<Option<String>> {
+    let value: Option<(Option<String>,)> = sqlx::query_as("SELECT s3_mtime FROM nodes WHERE id=? AND s3_mtime_version=?")
+        .bind(id)
+        .bind(version)
+        .fetch_optional(&st.db)
+        .await
+        .map_err(super::internal)?;
+    Ok(value.and_then(|v| v.0))
+}
+
+pub fn response(mtime: Option<String>) -> Option<std::collections::HashMap<String, String>> {
+    mtime.map(|value| [("mtime".into(), value)].into_iter().collect())
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -32,18 +46,4 @@ mod tests {
             assert!(super::mtime(&headers).is_err());
         }
     }
-}
-
-pub async fn read(st: &AppState, id: &str, version: &str) -> S3Result<Option<String>> {
-    let value: Option<(Option<String>,)> = sqlx::query_as("SELECT s3_mtime FROM nodes WHERE id=? AND s3_mtime_version=?")
-        .bind(id)
-        .bind(version)
-        .fetch_optional(&st.db)
-        .await
-        .map_err(super::internal)?;
-    Ok(value.and_then(|v| v.0))
-}
-
-pub fn response(mtime: Option<String>) -> Option<std::collections::HashMap<String, String>> {
-    mtime.map(|value| [("mtime".into(), value)].into_iter().collect())
 }

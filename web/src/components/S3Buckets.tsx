@@ -40,11 +40,11 @@ function KeyForm({ bucket, close }: { bucket: S3Bucket; close(): void }) {
         {created ? (
           <div className="grid gap-3">
             <p className="text-sm">{t("Save the Secret Key now. It is shown only once.")}</p>
-            <Label>
+            <Label className="grid gap-2">
               {t("Access Key")}
               <Input readOnly value={created.access_key} className="mt-2 font-mono" />
             </Label>
-            <Label>
+            <Label className="grid gap-2">
               {t("Secret Key")}
               <Input readOnly value={created.secret_key} className="mt-2 font-mono" autoComplete="off" />
             </Label>
@@ -72,7 +72,7 @@ function KeyForm({ bucket, close }: { bucket: S3Bucket; close(): void }) {
               make.mutate();
             }}
           >
-            <Label>
+            <Label className="grid gap-2">
               {t("Key description")}
               <Input className="mt-2" value={description} maxLength={160} onChange={(e) => setDescription(e.target.value)} required />
             </Label>
@@ -81,7 +81,7 @@ function KeyForm({ bucket, close }: { bucket: S3Bucket; close(): void }) {
               {t("Read and change files")}
             </Label>
             <p className="text-xs text-muted-foreground">{t("Leave unchecked for read-only access. Read-only spaces accept read-only keys only.")}</p>
-            <Label>
+            <Label className="grid gap-2">
               {t("End date (optional)")}
               <Input className="mt-2" type="datetime-local" value={expiry} onChange={(e) => setExpiry(e.target.value)} />
             </Label>

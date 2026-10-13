@@ -38,11 +38,11 @@ function S3Form({ value }: { value: S3Config }) {
         <input type="checkbox" checked={config.enabled} onChange={(e) => setConfig({ ...config, enabled: e.target.checked })} />
         {t("Enable S3 access")}
       </Label>
-      <Label>
+      <Label className="grid gap-2">
         {t("S3 hostname")}
         <Input className="mt-2" value={config.hostname} onChange={(e) => setConfig({ ...config, hostname: e.target.value })} placeholder="s3.files.example.com" required={config.enabled} />
       </Label>
-      <Label>
+      <Label className="grid gap-2">
         {t("Region")}
         <Input className="mt-2" value={config.region} onChange={(e) => setConfig({ ...config, region: e.target.value })} required />
       </Label>

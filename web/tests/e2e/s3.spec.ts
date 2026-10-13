@@ -6,6 +6,8 @@ import { signIn, makeFolder, unique } from "./helpers";
 test.describe.configure({ mode: "serial" });
 
 test("administrators configure S3, publish from a folder menu and manage keys shown only once", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
   await signIn(page);
   await page.goto("/admin/general");
   await expect(page.getByRole("heading", { name: "Apps and protocols", exact: true })).toBeVisible();
@@ -61,9 +63,12 @@ test("administrators configure S3, publish from a folder menu and manage keys sh
   await page.getByRole("dialog", { name: "Delete bucket?", exact: true }).getByRole("button", { name: "Delete", exact: true }).click();
   await expect(page.getByRole("region", { name: bucket })).toHaveCount(0);
   expect((await page.request.get(`/api/nodes/${node}`)).ok()).toBe(true);
+  expect(errors).toEqual([]);
 });
 
 test("personal folders never offer publishing and localized S3 settings fit a phone", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
   await signIn(page);
   const personal = await makeFolder(page, "Personal S3");
   const me = await (await page.request.get("/api/auth/me")).json();
@@ -87,7 +92,12 @@ test("personal folders never offer publishing and localized S3 settings fit a ph
     ]);
     await page.goto("/admin/general");
     await expect(page.getByRole("checkbox", { name: label, exact: true })).toBeVisible();
+    await page
+      .locator("form")
+      .filter({ has: page.getByRole("heading", { name: "S3", exact: true }) })
+      .scrollIntoViewIfNeeded();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     if (lang === "zh-TW" && process.env.E2E_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.E2E_SCREENSHOT_DIR, "s3-settings-zh-TW-mobile.png") });
   }
+  expect(errors).toEqual([]);
 });
