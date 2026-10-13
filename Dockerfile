@@ -28,7 +28,7 @@ ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 # it against the hash given there. Its version is pinned here (Dependabot doesn't see it: update it by hand)
 RUN npm install --global corepack@0.36.0 && corepack enable
 WORKDIR /src/web
-COPY web/package.json web/pnpm-lock.yaml ./
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 COPY web/ ./
