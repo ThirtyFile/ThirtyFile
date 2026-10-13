@@ -205,7 +205,7 @@ pub async fn trigger(st: &AppState, set: &str, trigger: &str, by: Option<(i64, S
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     if let Some((id, _)) = &by {
-        let actor = crate::auth::user_by_id(st, &mut tx, *id).await?.ok_or_else(|| crate::error::AppError::forbidden("Administrator access is required"))?;
+        let actor = crate::auth::user_by_id(st, &mut tx, *id).await?.ok_or_else(|| crate::error::AppError::forbidden("Administrator permission required"))?;
         crate::auth::require_admin(&mut tx, &actor).await?;
     }
     let res = async {

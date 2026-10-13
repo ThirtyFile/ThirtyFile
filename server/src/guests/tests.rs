@@ -383,35 +383,68 @@ async fn an_unconfirmed_standard_update_queued_before_conversion_cannot_restore_
     assert!(current.guest && current.root_id.is_none());
 }
 
-#[tokio::test(flavor="multi_thread",worker_threads=2)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn existing_public_links_and_signed_s3_keys_stop_on_conversion_without_deleting_their_data() {
-    use aws_sdk_s3::config::{BehaviorVersion,Credentials,Region,RequestChecksumCalculation};
-    let env=testutil::env().await;
-    let admin=env.admin().await;
-    let alice=env.user("alice",true).await;
-    let shared=env.folder(&admin,&env.st.shared_root().unwrap(),"Published").await;
-    let _=grant(&env,&admin,&shared,"user",alice.id,"manager",None).await.unwrap();
-    let file=env.stored_file(&alice,&shared,"shared.txt",b"keep published content").await;
-    let Json(link)=crate::shares::create(State(env.st.clone()),alice.clone(),req(json!({"node_id":file}))).await.unwrap();
-    let link=serde_json::to_value(link).unwrap()["id"].as_str().unwrap().to_owned();
-    assert!(crate::shares::check_stream_access(&env.st,&link).await.is_ok());
-    let _=crate::s3::config::save(State(env.st.clone()),Admin(admin.clone()),req(json!({"enabled":true,"hostname":"127.0.0.1","region":"us-east-1","managers_publish":true}))).await.unwrap();
-    let Json(bucket)=crate::s3::manage::create(State(env.st.clone()),alice.clone(),req(json!({"node_id":shared,"name":"guest-conversion"}))).await.unwrap();
-    let Json(key)=crate::s3::manage::new_key(State(env.st.clone()),alice.clone(),Path(bucket.id.clone()),req(json!({"description":"Conversion regression","writable":true,"expires_at":null}))).await.unwrap();
-    let server=http(&env).await;
-    let client=aws_sdk_s3::Client::from_conf(aws_sdk_s3::Config::builder()
-        .behavior_version(BehaviorVersion::latest()).region(Region::new("us-east-1"))
-        .credentials_provider(Credentials::new(&key.key.access_key,&key.secret_key,None,None,"contract"))
-        .endpoint_url(&server.base).force_path_style(true)
-        .request_checksum_calculation(RequestChecksumCalculation::WhenRequired).build());
+    use aws_sdk_s3::config::{BehaviorVersion, Credentials, Region, RequestChecksumCalculation};
+    let env = testutil::env().await;
+    let admin = env.admin().await;
+    let alice = env.user("alice", true).await;
+    let shared = env.folder(&admin, &env.st.shared_root().unwrap(), "Published").await;
+    let _ = grant(&env, &admin, &shared, "user", alice.id, "manager", None).await.unwrap();
+    let file = env.stored_file(&alice, &shared, "shared.txt", b"keep published content").await;
+    let Json(link) = crate::shares::create(State(env.st.clone()), alice.clone(), req(json!({"node_id":file}))).await.unwrap();
+    let link = serde_json::to_value(link).unwrap()["id"].as_str().unwrap().to_owned();
+    assert!(crate::shares::check_stream_access(&env.st, &link).await.is_ok());
+    let _ = crate::s3::config::save(
+        State(env.st.clone()),
+        Admin(admin.clone()),
+        req(json!({"enabled":true,"hostname":"127.0.0.1","region":"us-east-1","managers_publish":true})),
+    )
+    .await
+    .unwrap();
+    let Json(bucket) = crate::s3::manage::create(State(env.st.clone()), alice.clone(), req(json!({"node_id":shared,"name":"guest-conversion"}))).await.unwrap();
+    let Json(key) = crate::s3::manage::new_key(
+        State(env.st.clone()),
+        alice.clone(),
+        Path(bucket.id.clone()),
+        req(json!({"description":"Conversion regression","writable":true,"expires_at":null})),
+    )
+    .await
+    .unwrap();
+    let server = http(&env).await;
+    let client = aws_sdk_s3::Client::from_conf(
+        aws_sdk_s3::Config::builder()
+            .behavior_version(BehaviorVersion::latest())
+            .region(Region::new("us-east-1"))
+            .credentials_provider(Credentials::new(&key.key.access_key, &key.secret_key, None, None, "contract"))
+            .endpoint_url(&server.base)
+            .force_path_style(true)
+            .request_checksum_calculation(RequestChecksumCalculation::WhenRequired)
+            .build(),
+    );
     assert!(client.head_object().bucket(&bucket.name).key("shared.txt").send().await.is_ok());
-    let _=convert_to_guest(&env,&admin,&alice).await.unwrap();
-    assert!(crate::shares::check_stream_access(&env.st,&link).await.is_err());
+    let _ = convert_to_guest(&env, &admin, &alice).await.unwrap();
+    assert!(crate::shares::check_stream_access(&env.st, &link).await.is_err());
     assert!(client.head_object().bucket(&bucket.name).key("shared.txt").send().await.is_err());
-    assert!(client.put_object().bucket(&bucket.name).key("forbidden.txt").body(aws_sdk_s3::primitives::ByteStream::from_static(b"must not commit")).send().await.is_err());
-    assert!(crate::s3::credentials::identity(&env.st,&key.key.access_key,true).await.is_err());
-    let current=auth::user_by_id(&env.st,&mut env.st.db.acquire().await.unwrap(),alice.id).await.unwrap().unwrap();
-    assert_eq!(crate::access::read_at(&env.st,&current,&file,0,64).await.unwrap(),b"keep published content");
-    let (links,buckets,keys):(i64,i64,i64)=sqlx::query_as("SELECT (SELECT COUNT(*) FROM shares WHERE owner_id=?1),(SELECT COUNT(*) FROM s3_buckets WHERE creator_id=?1),(SELECT COUNT(*) FROM s3_keys)").bind(alice.id).fetch_one(&env.st.db).await.unwrap();
-    assert_eq!((links,buckets,keys),(1,1,1));
+    assert!(
+        client
+            .put_object()
+            .bucket(&bucket.name)
+            .key("forbidden.txt")
+            .body(aws_sdk_s3::primitives::ByteStream::from_static(b"must not commit"))
+            .send()
+            .await
+            .is_err()
+    );
+    assert!(crate::s3::credentials::identity(&env.st, &key.key.access_key, true).await.is_err());
+    let current = auth::user_by_id(&env.st, &mut env.st.db.acquire().await.unwrap(), alice.id).await.unwrap().unwrap();
+    assert_eq!(crate::access::read_at(&env.st, &current, &file, 0, 64).await.unwrap(), b"keep published content");
+    let (links, buckets, keys): (i64, i64, i64) = sqlx::query_as(
+        "SELECT (SELECT COUNT(*) FROM shares WHERE owner_id=?1),(SELECT COUNT(*) FROM s3_buckets WHERE creator_id=?1),(SELECT COUNT(*) FROM s3_keys)",
+    )
+    .bind(alice.id)
+    .fetch_one(&env.st.db)
+    .await
+    .unwrap();
+    assert_eq!((links, buckets, keys), (1, 1, 1));
 }
