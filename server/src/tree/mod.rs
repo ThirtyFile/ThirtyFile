@@ -26,7 +26,7 @@ pub const NODE_COLS: &str = "n.id, n.owner_id, n.parent_id, n.kind, n.name, n.bl
      (SELECT location_id FROM blobs WHERE hash = n.blob_hash) AS blob_location,
      n.fs_path, (SELECT source_path FROM drives WHERE id = n.drive_id AND mode = 'folder') AS fs_root,
      (SELECT read_only OR moving FROM drives WHERE id = n.drive_id) AS space_read_only,
-     (SELECT moving FROM drives WHERE id = n.drive_id) AS space_moving, n.found";
+     (SELECT moving FROM drives WHERE id = n.drive_id) AS space_moving, n.found, n.restricted";
 
 #[derive(Debug, Clone, sqlx::FromRow, Serialize)]
 pub struct Node {
@@ -54,6 +54,9 @@ pub struct Node {
     #[serde(skip)]
     #[sqlx(default)]
     pub found: bool,
+    /// Folder grants above this item do not apply to it or its contents.
+    #[sqlx(default)]
+    pub restricted: bool,
     /// Whether the current user has favorited it; filled in by mark_own
     #[sqlx(default)]
     pub is_favorite: bool,
