@@ -1,17 +1,17 @@
 //! Receiving large request bodies: healthy transfers may take arbitrarily long, but idle clients release resources.
 
 use crate::error::{AppError, AppResult};
-use axum::{
-    body::{BodyDataStream, Bytes},
-    http::StatusCode,
-};
-use futures_util::StreamExt;
+use axum::{body::Bytes, http::StatusCode};
+use futures_util::{Stream, StreamExt};
 use std::time::Duration;
 
 pub const UPLOAD_IDLE: Duration = Duration::from_secs(120);
 
 /// The deadline is per read, never the duration of the whole upload or its storage writes.
-pub async fn next_chunk(stream: &mut BodyDataStream) -> AppResult<Option<Bytes>> {
+pub async fn next_chunk<S, E>(stream: &mut S) -> AppResult<Option<Bytes>>
+where
+    S: Stream<Item = Result<Bytes, E>> + Unpin,
+{
     let read = async {
         loop {
             match stream.next().await {

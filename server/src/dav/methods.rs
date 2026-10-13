@@ -30,7 +30,7 @@ pub(super) async fn propfind(st: &AppState, user: &User, segs: &[String], header
             if depth == 1 {
                 for (name, root) in tops(&mut c, user).await?.spaces {
                     let Some(node) = tree::get_node(&mut c, &root).await? else { continue };
-                    let q = if with_quota { quota(&mut c, &mut quotas, node.drive()).await? } else { None };
+                    let q = if with_quota { access::space_room(&mut c, &mut quotas, node.drive()).await? } else { None };
                     out.add(&href(&child(&name), true), &want, node_props(&node, &name, q));
                 }
                 out.add(&href(&child(SHARED), true), &want, folder_props(SHARED));
@@ -40,14 +40,14 @@ pub(super) async fn propfind(st: &AppState, user: &User, segs: &[String], header
             out.add(&href(&path, true), &want, folder_props(SHARED));
             if depth == 1 {
                 for (name, node) in tops(&mut c, user).await?.shared {
-                    let q = if with_quota && node.is_folder() { quota(&mut c, &mut quotas, node.drive()).await? } else { None };
+                    let q = if with_quota && node.is_folder() { access::space_room(&mut c, &mut quotas, node.drive()).await? } else { None };
                     out.add(&href(&child(&name), node.is_folder()), &want, node_props(&node, &name, q));
                 }
             }
         }
         Target::Node(node) => {
             let display = path.last().cloned().unwrap_or_default();
-            let q = if with_quota && node.is_folder() { quota(&mut c, &mut quotas, node.drive()).await? } else { None };
+            let q = if with_quota && node.is_folder() { access::space_room(&mut c, &mut quotas, node.drive()).await? } else { None };
             out.add(&href(&path, node.is_folder()), &want, node_props(&node, &display, q));
             if depth == 1 && node.is_folder() {
                 if node.in_folder_space() {
@@ -84,7 +84,7 @@ fn children_streamed(st: &AppState, head: Multistatus, folder: &str, path: Vec<S
                 let mut quotas = HashMap::new();
                 let mut part = Multistatus::part();
                 for n in std::mem::take(list.items_mut()) {
-                    let q = if with_quota && n.is_folder() { quota(&mut c, &mut quotas, n.drive()).await? } else { None };
+                    let q = if with_quota && n.is_folder() { access::space_room(&mut c, &mut quotas, n.drive()).await? } else { None };
                     let mut p = path.clone();
                     p.push(n.name.clone());
                     part.add(&href(&p, n.is_folder()), &want, node_props(&n, &n.name, q));
@@ -132,11 +132,11 @@ pub(super) async fn get(st: &AppState, user: &User, segs: &[String], headers: &H
 }
 
 pub(super) async fn delete(st: &AppState, user: &User, segs: &[String]) -> AppResult<Response> {
-    let node = found_node(st, user, segs).await?;
+    let node = access::item(st, user, segs).await?;
     if node.parent_id.is_none() {
         return Err(AppError::forbidden("A space can't be deleted here"));
     }
-    trash(st, user, &node.id).await?;
+    access::trash(st, user, &node.id).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -147,13 +147,13 @@ pub(super) async fn mkcol(st: &AppState, user: &User, segs: &[String], body: Bod
     }
     let (parent, name) = {
         let mut c = st.db.acquire().await?;
-        let (parent, name) = parent_of(&mut c, user, segs).await?;
+        let (parent, name) = parent_and_name(&mut c, user, segs).await?;
         if child_named(&mut c, &parent.id, &name).await?.is_some() {
             return Err(AppError::new(StatusCode::METHOD_NOT_ALLOWED, "An item with this name already exists"));
         }
         (parent, name)
     };
-    let _ = nodes::create_folder(State(st.clone()), user.clone(), json_req(json!({ "parent_id": parent.id, "name": name }))?).await?;
+    access::make_folder(st, user, &parent, &name).await?;
     Ok(StatusCode::CREATED.into_response())
 }
 
@@ -171,12 +171,12 @@ pub(super) fn transfer_wait() -> std::time::Duration {
 pub(super) async fn transfer(st: &AppState, user: &User, segs: &[String], headers: &HeaderMap, moving: bool) -> AppResult<Response> {
     let dest_segs = destination(headers)?;
     let overwrite = !headers.get("overwrite").is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"F"));
-    let src = found_node(st, user, segs).await?;
+    let src = access::item(st, user, segs).await?;
     if src.parent_id.is_none() {
         return Err(AppError::forbidden("A space can't be moved or copied here"));
     }
     let mut c = st.db.acquire().await?;
-    let (dest, name) = parent_of(&mut c, user, &dest_segs).await?;
+    let (dest, name) = parent_and_name(&mut c, user, &dest_segs).await?;
     if tree::is_within(&mut c, &dest.id, &src.id).await? {
         return Err(AppError::forbidden("A folder can't go into itself"));
     }
@@ -201,12 +201,12 @@ pub(super) async fn transfer(st: &AppState, user: &User, segs: &[String], header
     let (st, user) = (st.clone(), user.clone());
     let job = jobs::run(&st.clone(), &user.clone(), "webdav", Limit::None, transfer_wait(), move |_| async move {
         if let Some(existing) = &replaced {
-            trash(&st, &user, existing).await?;
+            access::trash(&st, &user, existing).await?;
         }
-        let done = if moving { move_to(&st, &user, &src, &dest, &name).await } else { copy_to(&st, &user, &src, &dest, &name).await };
+        let done = if moving { access::move_to(&st, &user, &src, &dest, &name).await } else { access::copy_to(&st, &user, &src, &dest, &name).await };
         if let Err(e) = done {
             if let Some(existing) = &replaced
-                && let Err(back) = restore(&st, &user, existing).await
+                && let Err(back) = access::restore(&st, &user, existing).await
             {
                 tracing::warn!("Couldn't take {name:?} back out of the trash after a WebDAV change failed: {}", back.message);
             }
@@ -217,78 +217,6 @@ pub(super) async fn transfer(st: &AppState, user: &User, segs: &[String], header
     .await?;
     // Still going: accepted, and done in the background
     Ok(if job.running() { StatusCode::ACCEPTED } else { done }.into_response())
-}
-
-/// Moves an item into `dest` as `name`: a rename, a move, or both (in the order the names allow). When the second step
-/// fails, the first is undone, so the item is where and as it was.
-pub(super) async fn move_to(st: &AppState, user: &User, src: &Node, dest: &Node, name: &str) -> AppResult<()> {
-    let from = src.parent_id.clone().unwrap_or_default();
-    if from == dest.id {
-        return rename(st, user, &src.id, name).await;
-    }
-    if name == src.name {
-        return move_into(st, user, &src.id, &dest.id).await;
-    }
-    // Best effort: the step that failed is what the client hears about
-    let was_in = from.as_str();
-    let back = |moved: bool, renamed: bool| async move {
-        if moved {
-            let _ = move_into(st, user, &src.id, was_in).await;
-        }
-        if renamed {
-            let _ = rename(st, user, &src.id, &src.name).await;
-        }
-    };
-    let mut c = st.db.acquire().await?;
-    if !tree::name_taken(&mut c, &dest.id, &src.name).await? {
-        drop(c);
-        move_into(st, user, &src.id, &dest.id).await?;
-        if let Err(e) = rename(st, user, &src.id, name).await {
-            back(true, false).await;
-            return Err(e);
-        }
-        return Ok(());
-    }
-    if !tree::name_taken(&mut c, &from, name).await? {
-        drop(c);
-        rename(st, user, &src.id, name).await?;
-        if let Err(e) = move_into(st, user, &src.id, &dest.id).await {
-            back(false, true).await;
-            return Err(e);
-        }
-        return Ok(());
-    }
-    // Both names are taken on the other side: pass through a name free in both folders
-    let mut via = None;
-    for n in 1..10_000 {
-        let candidate = numbered_name(name, n, src.is_folder());
-        if !tree::name_taken(&mut c, &dest.id, &candidate).await? && !tree::name_taken(&mut c, &from, &candidate).await? {
-            via = Some(candidate);
-            break;
-        }
-    }
-    drop(c);
-    let via = via.ok_or_else(|| AppError::conflict("Too many items with the same name"))?;
-    rename(st, user, &src.id, &via).await?;
-    if let Err(e) = move_into(st, user, &src.id, &dest.id).await {
-        back(false, true).await;
-        return Err(e);
-    }
-    if let Err(e) = rename(st, user, &src.id, name).await {
-        back(true, true).await;
-        return Err(e);
-    }
-    Ok(())
-}
-
-/// Copies an item into `dest` as `name`: the copy is made under that name, so nothing made there at the same time
-/// (another COPY) can be taken for it
-pub(super) async fn copy_to(st: &AppState, user: &User, src: &Node, dest: &Node, name: &str) -> AppResult<()> {
-    let Json(req) = json_req(json!({ "ids": [src.id], "dest_id": dest.id, "name": name }))?;
-    if let Some(across) = nodes::copy_items(st, user, &req).await? {
-        nodes::run_content(st, user, across, &Default::default()).await?;
-    }
-    Ok(())
 }
 
 /// Hands out a lock (see the module notes: not enforced). A path that doesn't exist yet becomes an empty file, as
@@ -308,13 +236,13 @@ pub(super) async fn lock(st: &AppState, user: &User, segs: &[String], headers: &
         }
         Some(_) => return Err(AppError::forbidden("This folder can't be locked")),
         None => {
-            let (parent, name) = parent_of(&mut *st.db.acquire().await?, user, segs).await?;
+            let (parent, name) = parent_and_name(&mut *st.db.acquire().await?, user, segs).await?;
             let parent = tree::folder_for(&mut *st.db.acquire().await?, user, &parent.id, Need::Add).await?;
             let tmp = st.tmp_dir().join(format!("dav-{}", new_id()));
             tokio::fs::write(&tmp, b"").await?;
             let mut path = segs[..segs.len() - 1].to_vec();
             path.push(name.clone());
-            tokio::spawn(store(st.clone(), user.clone(), parent, name, tmp, 0, None)).await.map_err(AppError::internal)??;
+            tokio::spawn(access::store(st.clone(), user.clone(), parent, name, tmp, 0, None)).await.map_err(AppError::internal)??;
             (StatusCode::CREATED, path, false)
         }
     };
