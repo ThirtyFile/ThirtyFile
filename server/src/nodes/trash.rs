@@ -36,6 +36,8 @@ pub(super) struct Place {
 
 /// Spaces whose trash the user works with: their own spaces (at least `min_role`), plus every team space for administrators
 pub(super) async fn trash_drives(conn: &mut SqliteConnection, user: &User, min_role: Role) -> AppResult<Vec<String>> {
+    let current = crate::auth::current_user(conn, user).await?;
+    let user = &current;
     let mut ids: Vec<String> = tree::user_drives(conn, user).await?.into_iter().filter(|(_, r)| *r >= min_role).map(|(d, _)| d.id).collect();
     if user.is_admin() {
         let all: Vec<(String,)> = sqlx::query_as("SELECT id FROM drives WHERE kind != 'personal' AND disabled = 0").fetch_all(conn).await?;
@@ -116,6 +118,8 @@ pub async fn list_trash(State(st): State<AppState>, user: User, Query(q): Query<
 /// The user's role for trash operations: their role on the item, and administrators manage the trash of every space
 /// that isn't personal (the same rule as managing the space itself), whether or not they were given access to it
 pub(super) async fn trash_role(conn: &mut SqliteConnection, user: &User, node: &Node) -> AppResult<Option<Role>> {
+    let current = crate::auth::current_user(conn, user).await?;
+    let user = &current;
     let role = tree::role_on(conn, user, node).await?;
     if user.is_admin()
         && let Some(drive) = tree::get_drive(conn, node.drive()).await?
@@ -136,6 +140,8 @@ fn trash_visible(user: &User) -> String {
 /// that was merely shared with them gives no rights over the owner's parent folder, so they can't restore or destroy
 /// the shared folder itself, only items inside it.
 pub(super) async fn trash_root(conn: &mut SqliteConnection, user: &User, id: &str, need: Need) -> AppResult<(Node, Place)> {
+    let current = crate::auth::current_user(conn, user).await?;
+    let user = &current;
     let not_found = || AppError::not_found("Item not found in trash");
     let node = tree::get_node(conn, id).await?.ok_or_else(not_found)?;
     // Not one being deleted for good already

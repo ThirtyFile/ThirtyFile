@@ -86,6 +86,7 @@
             <li><a href="#email">通知電子郵件</a></li>
             <li><a href="#privacy">管理員能看到什麼</a></li>
             <li><a href="#password">忘記密碼</a></li>
+            <li><a href="#guests">訪客帳號</a></li>
           </ol>
         </details>
 
@@ -157,6 +158,8 @@
         <p>其他情況下，或帳號沒有電子郵件信箱時，由管理員從<strong>控制台 › 使用者</strong>設定新密碼。管理員自己遺失密碼時，參閱<a href="help.html#password">疑難排解</a>。</p>
 
       <p><strong>控制台 › S3 buckets</strong> 列出已發布的資料夾、建立者、Access Keys、到期日及上次使用時間。可篩選清單、停用或刪除 bucket，以及單獨停用金鑰。檔案仍保留在原資料夾。請參閱 <a href="protocols.html#s3">S3 設定</a>。</p>
+        <h2 id="guests">訪客帳號</h2>
+        <p>在<strong>控制台 › 使用者</strong>將帳號類型設為<strong>訪客</strong>，供外部協作者使用。訪客只能使用直接或透過群組明確分享的資料夾與空間；<strong>所有人</strong>的權限不適用於訪客。訪客沒有<strong>我的檔案</strong>，不能建立空間、分享連結或授予他人權限，也不能成為管理員、管理者或擁有者。WebDAV 與 SFTP 應用程式密碼仍可使用，但僅能存取相同的共享資料夾。</p><p>將現有帳號改為訪客前，請審閱轉換預覽並確認自己的身分。個人檔案會保留，但訪客不能存取；既有分享連結與協定發布也會停止運作。預覽會列出需要調整角色或到期日的直接授權。請先轉移團隊空間的擁有權；群組若有管理者、擁有者、未設定到期日或超出訪客期限的授權，必須先修正，才能轉換帳號或加入訪客。其他群組成員的權限不會被悄悄修改。改回一般帳號後可再次存取保留的個人檔案，但不會還原已調整的直接授權。</p>
         <nav class="next" aria-label="更多指南">
           <a href="protocols.html"><span>上一篇</span>SFTP、S3 與 FTP</a>
           <a class="forward" href="sign-in.html"><span>下一篇</span>單一登入</a>

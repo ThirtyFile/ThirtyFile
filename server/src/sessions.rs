@@ -51,15 +51,21 @@ async fn devices_of(st: &AppState, user_id: i64, current: Option<&str>) -> AppRe
 }
 
 /// Signs out one session of the user; returns whether there was one
-async fn end_session(st: &AppState, user_id: i64, id: &str) -> AppResult<bool> {
+async fn end_session(st: &AppState, user_id: i64, id: &str, admin: Option<&User>) -> AppResult<bool> {
     let _w = st.write_lock.lock().await;
+    if let Some(admin) = admin {
+        crate::auth::require_admin(&mut *st.db.acquire().await?, admin).await?;
+    }
     let res = sqlx::query("DELETE FROM sessions WHERE user_id = ? AND id = ?").bind(user_id).bind(id).execute(&st.db).await?;
     Ok(res.rows_affected() > 0)
 }
 
 /// Signs out every session of the user except `keep`; returns how many were signed out
-async fn end_sessions(st: &AppState, user_id: i64, keep: Option<&str>) -> AppResult<u64> {
+async fn end_sessions(st: &AppState, user_id: i64, keep: Option<&str>, admin: Option<&User>) -> AppResult<u64> {
     let _w = st.write_lock.lock().await;
+    if let Some(admin) = admin {
+        crate::auth::require_admin(&mut *st.db.acquire().await?, admin).await?;
+    }
     let res = sqlx::query("DELETE FROM sessions WHERE user_id = ? AND id IS NOT ?").bind(user_id).bind(keep).execute(&st.db).await?;
     Ok(res.rows_affected())
 }
@@ -78,7 +84,7 @@ pub async fn sign_out(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> AppResult<Json<Value>> {
-    if !end_session(&st, user.id, &id).await? {
+    if !end_session(&st, user.id, &id, None).await? {
         return Err(AppError::not_found("This device is already signed out"));
     }
     logs::record_login(&st, Some(user.id), &user.username, "device_signout", &client_ip(&st, addr, &headers), &headers);
@@ -87,7 +93,7 @@ pub async fn sign_out(
 
 /// Signs out all my devices except this one
 pub async fn sign_out_others(State(st): State<AppState>, user: User, ConnectInfo(addr): ConnectInfo<SocketAddr>, headers: HeaderMap) -> AppResult<Json<Value>> {
-    let removed = end_sessions(&st, user.id, user.session_id.as_deref()).await?;
+    let removed = end_sessions(&st, user.id, user.session_id.as_deref(), None).await?;
     if removed > 0 {
         logs::record_login(&st, Some(user.id), &user.username, "signout_others", &client_ip(&st, addr, &headers), &headers);
     }
@@ -127,7 +133,7 @@ pub async fn admin_sign_out(
     headers: HeaderMap,
 ) -> AppResult<Json<Value>> {
     let username = username_of(&st, user_id).await?;
-    if !end_session(&st, user_id, &id).await? {
+    if !end_session(&st, user_id, &id, Some(&me)).await? {
         return Err(AppError::not_found("This device is already signed out"));
     }
     log_admin_sign_out(&st, &me, user_id, &username, "signed out one device", addr, &headers).await?;
@@ -144,7 +150,7 @@ pub async fn admin_sign_out_all(
 ) -> AppResult<Json<Value>> {
     let username = username_of(&st, user_id).await?;
     let keep = if user_id == me.id { me.session_id.as_deref() } else { None };
-    let removed = end_sessions(&st, user_id, keep).await?;
+    let removed = end_sessions(&st, user_id, keep, Some(&me)).await?;
     if removed > 0 {
         log_admin_sign_out(&st, &me, user_id, &username, "signed out on all devices", addr, &headers).await?;
     }

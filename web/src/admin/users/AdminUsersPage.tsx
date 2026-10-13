@@ -115,6 +115,11 @@ export function AdminUsersPage() {
             </span>
           )}
           {u.role === "admin" && <Badge className="h-4 px-1.5 text-[10px]">{t("Administrator")}</Badge>}
+          {u.guest && (
+            <Badge variant="outline" className="h-4 px-1.5 text-[10px]">
+              {t("Guest")}
+            </Badge>
+          )}
           {u.disabled && (
             <Badge variant="outline" className="h-4 px-1.5 text-[10px]">
               {t("Disabled")}
@@ -129,7 +134,7 @@ export function AdminUsersPage() {
       cell: (u) =>
         u.role === "admin"
           ? t("All")
-          : PERMISSIONS.filter((p) => u[p])
+          : PERMISSIONS.filter((p) => u[p] && !(u.guest && p === "can_share"))
               .map((p) => PERMISSION_LABEL[p])
               .join(t(", ")) || t("View only"),
     },
@@ -224,7 +229,7 @@ export function AdminUsersPage() {
                 </DropdownMenuItem>
               )}
               <DropdownMenuSeparator />
-              {!selected.personal_space && (
+              {!selected.guest && !selected.personal_space && (
                 <DropdownMenuItem onClick={() => setPersonalOf({ t: "add", user: selected })}>
                   <FolderPlusIcon /> {t('Create "My files"…')}
                 </DropdownMenuItem>

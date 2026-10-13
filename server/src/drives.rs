@@ -160,7 +160,7 @@ pub async fn list(State(st): State<AppState>, user: User) -> AppResult<Json<Vec<
 }
 
 fn can_create_drive(st: &AppState, user: &User) -> bool {
-    user.is_admin() || st.system.read().allow_user_drives
+    !user.guest && (user.is_admin() || st.system.read().allow_user_drives)
 }
 
 #[derive(Deserialize)]
@@ -221,6 +221,14 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
     }
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
+    let user = crate::auth::current_user(&mut tx, &user).await?;
+    if !can_create_drive(&st, &user) {
+        return Err(AppError::forbidden("Guests can't create spaces"));
+    }
+    if !user.is_admin() && (source.is_some() || chosen.is_some()) {
+        return Err(AppError::forbidden("Only administrators can choose the storage location of a space"));
+    }
+    let quota = if user.is_admin() { quota } else { user.quota_bytes.max(0) };
     if !user.is_admin() {
         // Each space brings its own quota, so the number a user can create is limited
         let (own,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM drives WHERE kind = 'team' AND owner_id = ?").bind(user.id).fetch_one(&mut *tx).await?;
@@ -292,6 +300,8 @@ pub async fn scan(State(st): State<AppState>, Admin(user): Admin, Path(id): Path
 
 /// Space management rights: manager or above; administrators can manage all non-personal spaces
 pub async fn manageable_drive(conn: &mut SqliteConnection, user: &User, id: &str) -> AppResult<(Drive, Option<Role>)> {
+    let current = crate::auth::current_user(conn, user).await?;
+    let user = &current;
     let drive = tree::get_drive(conn, id).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
     let root = tree::get_node(conn, &drive.root_id).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
     let role = tree::role_on(conn, user, &root).await?;
@@ -473,6 +483,7 @@ pub struct GrantInfo {
     principal_id: i64,
     principal_name: String,
     role: Role,
+    guest: bool,
     expires_at: Option<i64>,
     granted_by_name: String,
     created_at: i64,
@@ -487,7 +498,8 @@ const GRANT_COLS: &str = "g.id, g.node_id, g.principal_type, g.principal_id,
       WHEN 'user' THEN COALESCE((SELECT username FROM users WHERE id = g.principal_id), '(deleted)')
       ELSE COALESCE((SELECT name FROM groups WHERE id = g.principal_id), '(deleted)')
     END AS principal_name,
-    g.role, g.expires_at, COALESCE((SELECT username FROM users WHERE id = g.granted_by), '') AS granted_by_name, g.created_at";
+    g.role, (g.principal_type = 'user' AND EXISTS(SELECT 1 FROM users WHERE id = g.principal_id AND guest = 1)) OR (g.principal_type = 'group' AND EXISTS(SELECT 1 FROM group_members m JOIN users u ON u.id = m.user_id WHERE m.group_id = g.principal_id AND u.guest = 1)) AS guest,
+    g.expires_at, COALESCE((SELECT username FROM users WHERE id = g.granted_by), '') AS granted_by_name, g.created_at";
 
 #[derive(Serialize)]
 pub struct AccessInfo {
@@ -496,6 +508,8 @@ pub struct AccessInfo {
     is_drive_root: bool,
     my_role: Option<Role>,
     can_manage: bool,
+    share_own_groups: bool,
+    guest_max_days: i64,
     can_restrict: bool,
     direct: Vec<GrantInfo>,
     inherited: Vec<GrantInfo>,
@@ -523,9 +537,11 @@ async fn require_other_owner(conn: &mut SqliteConnection, node_id: &str, princip
 /// Whether the user may give and take away access here: managers (and administrators, except in personal spaces)
 /// whose account may share. Giving people access is sharing, like a share link; leaving is always possible.
 async fn can_manage_node(conn: &mut SqliteConnection, user: &User, node: &Node, drive: &Drive) -> AppResult<(bool, Option<Role>)> {
+    let current = crate::auth::current_user(conn, user).await?;
+    let user = &current;
     let role = tree::role_on(conn, user, node).await?;
     let admin_override = user.is_admin() && drive.kind != tree::SpaceKind::Personal;
-    let may_share = user.can_share || user.is_admin();
+    let may_share = !user.guest && (user.can_share || user.is_admin());
     Ok(((admin_override || role.is_some_and(|r| r >= Role::Manager)) && may_share, role))
 }
 
@@ -565,6 +581,8 @@ pub async fn access(State(st): State<AppState>, user: User, Path(id): Path<Strin
         }
     }
     let is_drive_root = node.parent_id.is_none();
+    let share_own_groups = crate::guests::own_groups(&mut c).await?;
+    let guest_max_days = crate::guests::max_days(&mut c).await?;
     let can_restrict = node.is_folder() && !is_drive_root && tree::space_owner(&mut c, &user, &node).await?;
     if let Some(parent) = &node.parent_id {
         let sql = format!("SELECT {}", tree::visible_sql(&user, "?1"));
@@ -573,7 +591,7 @@ pub async fn access(State(st): State<AppState>, user: User, Path(id): Path<Strin
             node.parent_id = None;
         }
     }
-    Ok(Json(AccessInfo { node, drive: drive.into(), is_drive_root, my_role, can_manage, can_restrict, direct, inherited }))
+    Ok(Json(AccessInfo { node, drive: drive.into(), is_drive_root, my_role, can_manage, can_restrict, share_own_groups, guest_max_days, direct, inherited }))
 }
 
 #[derive(Deserialize)]
@@ -593,6 +611,7 @@ pub async fn grant(State(st): State<AppState>, user: User, Path(id): Path<String
     }
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
+    let user = crate::auth::current_user(&mut tx, &user).await?;
     let id = tree::resolve_alias(&user, &id)?;
     let node = tree::get_node(&mut tx, id).await?.filter(|n| n.trashed_at.is_none()).ok_or_else(|| AppError::not_found("Item not found"))?;
     let drive = tree::get_drive(&mut tx, node.drive()).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
@@ -613,6 +632,7 @@ pub async fn grant(State(st): State<AppState>, user: User, Path(id): Path<String
     }
     let principal_id = if principal_type == PrincipalType::Everyone { 0 } else { req.principal_id };
     let name = principal_name(&mut tx, principal_type, principal_id).await?.ok_or_else(|| AppError::bad_request("User or group not found"))?;
+    crate::guests::validate_grant(&mut tx, &user, principal_type, principal_id, role, req.expires_at).await?;
     // Someone who manages this only until a given time can't give access that includes themselves beyond it
     if !user.is_admin()
         && let Some(until) = tree::manages_until(&mut tx, &user, &node).await?
@@ -660,6 +680,7 @@ pub async fn grant(State(st): State<AppState>, user: User, Path(id): Path<String
 pub async fn revoke(State(st): State<AppState>, user: User, Path(grant_id): Path<i64>) -> AppResult<Json<Value>> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
+    let user = crate::auth::current_user(&mut tx, &user).await?;
     let (node_id, principal_type, principal_id, role): (String, PrincipalType, i64, Role) =
         sqlx::query_as("SELECT node_id, principal_type, principal_id, role FROM grants WHERE id = ?")
             .bind(grant_id)
@@ -718,6 +739,7 @@ pub struct Principal {
     principal_id: i64,
     name: String,
     detail: String,
+    guest: bool,
 }
 
 #[derive(Deserialize)]
@@ -728,20 +750,37 @@ pub struct DirectoryQuery {
 
 pub async fn directory(State(st): State<AppState>, user: User, Query(q): Query<DirectoryQuery>) -> AppResult<Json<Vec<Principal>>> {
     let term = format!("%{}%", crate::util::like_escape(q.q.trim()));
+    let mut conn = st.db.acquire().await?;
+    let user = crate::auth::current_user(&mut conn, &user).await?;
+    let restricted_sharing = !user.is_admin() && !user.guest && crate::guests::own_groups(&mut conn).await?;
+    let (drives, folders) = tree::scope(&mut conn, &user).await?;
+    let scope = format!("({}) AND {}", tree::scope_sql(3, 4), tree::visible_sql(&user, "n.id"));
     // Sharing needs the names; which accounts are administrators is for administrators to see
-    let rows: Vec<Principal> = sqlx::query_as(
-        "SELECT 'group' AS principal_type, g.id AS principal_id, g.name,
-                (SELECT CASE COUNT(*) WHEN 1 THEN '1 member' ELSE COUNT(*) || ' members' END FROM group_members WHERE group_id = g.id) AS detail
-         FROM groups g WHERE g.name LIKE ?1 ESCAPE '\\'
+    let sql = format!(
+        r"SELECT 'group' AS principal_type, p.id AS principal_id, p.name,
+                (SELECT CASE COUNT(*) WHEN 1 THEN '1 member' ELSE COUNT(*) || ' members' END FROM group_members WHERE group_id = p.id) AS detail,
+                EXISTS(SELECT 1 FROM group_members m JOIN users u ON u.id = m.user_id WHERE m.group_id = p.id AND u.guest = 1) AS guest
+         FROM groups p WHERE p.name LIKE ?1 ESCAPE '\'
+           AND (NOT ?6 OR EXISTS(SELECT 1 FROM group_members WHERE group_id = p.id AND user_id = ?7))
+           AND (NOT ?5 OR EXISTS(SELECT 1 FROM grants a JOIN nodes n ON n.id = a.node_id WHERE a.principal_type = 'group' AND a.principal_id = p.id AND (a.expires_at IS NULL OR a.expires_at > ?8) AND n.trashed_at IS NULL AND {scope}))
          UNION ALL
-         SELECT 'user', u.id, u.username, CASE WHEN NOT ?2 THEN '' WHEN u.role = 'admin' THEN 'Administrator' ELSE 'User' END
-         FROM users u WHERE u.disabled = 0 AND u.username LIKE ?1 ESCAPE '\\'
-         ORDER BY 1 DESC, 3 LIMIT 30",
-    )
-    .bind(term)
-    .bind(user.is_admin())
-    .fetch_all(&st.db)
-    .await?;
+         SELECT 'user', u.id, u.username, CASE WHEN u.guest THEN 'Guest' WHEN NOT ?2 THEN '' WHEN u.role = 'admin' THEN 'Administrator' ELSE 'User' END, u.guest
+         FROM users u WHERE u.disabled = 0 AND u.username LIKE ?1 ESCAPE '\'
+           AND (NOT ?6 OR EXISTS(SELECT 1 FROM group_members mine JOIN group_members other ON other.group_id = mine.group_id WHERE mine.user_id = ?7 AND other.user_id = u.id))
+           AND (NOT ?5 OR EXISTS(SELECT 1 FROM grants a JOIN nodes n ON n.id = a.node_id WHERE (a.granted_by = u.id OR (a.principal_type = 'user' AND a.principal_id = u.id) OR (a.principal_type = 'group' AND EXISTS(SELECT 1 FROM group_members WHERE group_id = a.principal_id AND user_id = u.id))) AND (a.expires_at IS NULL OR a.expires_at > ?8) AND n.trashed_at IS NULL AND {scope}))
+         ORDER BY 1 DESC, 3 LIMIT 30"
+    );
+    let rows: Vec<Principal> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
+        .bind(term)
+        .bind(user.is_admin())
+        .bind(drives)
+        .bind(folders)
+        .bind(user.guest)
+        .bind(restricted_sharing)
+        .bind(user.id)
+        .bind(now())
+        .fetch_all(&mut *conn)
+        .await?;
     Ok(Json(rows))
 }
 
@@ -760,16 +799,19 @@ pub struct GroupInfo {
 pub struct GroupMember {
     id: i64,
     username: String,
+    guest: bool,
 }
 
 pub async fn list_groups(State(st): State<AppState>, _: Admin) -> AppResult<Json<Vec<GroupInfo>>> {
     let groups: Vec<(i64, String, String, i64)> = sqlx::query_as("SELECT id, name, description, created_at FROM groups ORDER BY name").fetch_all(&st.db).await?;
     // Every group's members in one query
-    let members: Vec<(i64, i64, String)> =
-        sqlx::query_as("SELECT m.group_id, u.id, u.username FROM group_members m JOIN users u ON u.id = m.user_id ORDER BY u.username").fetch_all(&st.db).await?;
+    let members: Vec<(i64, i64, String, bool)> =
+        sqlx::query_as("SELECT m.group_id, u.id, u.username, u.guest FROM group_members m JOIN users u ON u.id = m.user_id ORDER BY u.username")
+            .fetch_all(&st.db)
+            .await?;
     let mut by_group: HashMap<i64, Vec<GroupMember>> = HashMap::new();
-    for (group_id, id, username) in members {
-        by_group.entry(group_id).or_default().push(GroupMember { id, username });
+    for (group_id, id, username, guest) in members {
+        by_group.entry(group_id).or_default().push(GroupMember { id, username, guest });
     }
     let out = groups
         .into_iter()
@@ -786,6 +828,9 @@ pub struct GroupReq {
 }
 
 async fn set_members(conn: &mut SqliteConnection, group_id: i64, members: &[i64]) -> AppResult<()> {
+    for uid in members {
+        crate::guests::validate_group_join(conn, *uid, group_id).await?;
+    }
     sqlx::query("DELETE FROM group_members WHERE group_id = ?").bind(group_id).execute(&mut *conn).await?;
     for uid in members {
         sqlx::query("INSERT OR IGNORE INTO group_members (group_id, user_id) SELECT ?, id FROM users WHERE id = ?")
@@ -801,6 +846,7 @@ pub async fn create_group(State(st): State<AppState>, Admin(user): Admin, Json(r
     let name = validate_name(req.name.as_deref().unwrap_or_default())?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
+    let user = crate::auth::require_admin(&mut tx, &user).await?;
     let id = crate::db::next_id(&mut tx, crate::db::Counted::Groups).await?;
     sqlx::query("INSERT INTO groups (id, name, description, created_at) VALUES (?, ?, ?, ?)")
         .bind(id)
@@ -821,6 +867,7 @@ pub async fn create_group(State(st): State<AppState>, Admin(user): Admin, Json(r
 pub async fn update_group(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<i64>, Json(req): Json<GroupReq>) -> AppResult<Json<Value>> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
+    let user = crate::auth::require_admin(&mut tx, &user).await?;
     if let Some(name) = &req.name {
         let name = validate_name(name)?;
         sqlx::query("UPDATE groups SET name = ? WHERE id = ?").bind(&name).bind(id).execute(&mut *tx).await.map_err(|e| {
@@ -842,6 +889,7 @@ pub async fn update_group(State(st): State<AppState>, Admin(user): Admin, Path(i
 pub async fn delete_group(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<i64>) -> AppResult<Json<Value>> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
+    let user = crate::auth::require_admin(&mut tx, &user).await?;
     let name = principal_name(&mut tx, PrincipalType::Group, id).await?.unwrap_or_default();
     sqlx::query("DELETE FROM grants WHERE principal_type = 'group' AND principal_id = ?").bind(id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM groups WHERE id = ?").bind(id).execute(&mut *tx).await?;

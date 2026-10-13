@@ -7,6 +7,7 @@
         "created_at": 0,
         "expires_at": null,
         "granted_by_name": "",
+        "guest": false,
         "id": 0,
         "inherited_from": null,
         "node_id": "",
@@ -23,11 +24,13 @@
       "name": "",
       "root_id": ""
     },
+    "guest_max_days": 0,
     "inherited": [
       {
         "created_at": 0,
         "expires_at": null,
         "granted_by_name": "",
+        "guest": false,
         "id": 0,
         "inherited_from": "",
         "node_id": "",
@@ -53,7 +56,8 @@
       "size": 0,
       "trashed_at": null,
       "updated_at": 0
-    }
+    },
+    "share_own_groups": false
   },
   "Activity": {
     "action": "",
@@ -109,6 +113,7 @@
     "created_at": 0,
     "expires_at": null,
     "granted_by_name": "",
+    "guest": false,
     "id": 0,
     "inherited_from": null,
     "node_id": "",
@@ -123,6 +128,7 @@
     "id": 0,
     "members": [
       {
+        "guest": false,
         "id": 0,
         "username": ""
       }
@@ -323,6 +329,7 @@
   },
   "Principal": {
     "detail": "",
+    "guest": false,
     "name": "",
     "principal_id": 0,
     "principal_type": ""
@@ -380,6 +387,7 @@
         "can_delete": false,
         "can_share": false,
         "can_write": false,
+        "guest": false,
         "quota_bytes": null
       },
       "enabled": false,
@@ -398,6 +406,7 @@
         "can_delete": false,
         "can_share": false,
         "can_write": false,
+        "guest": false,
         "quota_bytes": null
       },
       "enabled": false,
@@ -417,6 +426,7 @@
         "can_delete": false,
         "can_share": false,
         "can_write": false,
+        "guest": false,
         "quota_bytes": null
       },
       "enabled": false,
@@ -435,6 +445,7 @@
         "can_delete": false,
         "can_share": false,
         "can_write": false,
+        "guest": false,
         "quota_bytes": null
       },
       "enabled": false,
@@ -452,6 +463,7 @@
     "allow_user_drives": false,
     "default_lang": "",
     "default_user_quota": 0,
+    "guest_max_days": 0,
     "min_password_length": 0,
     "personal_location": "",
     "personal_spaces": false,
@@ -460,6 +472,7 @@
     "require_two_factor": false,
     "scan_minutes": 0,
     "share_max_days": 0,
+    "share_own_groups": false,
     "share_password_required": false,
     "shared_enabled": false,
     "shared_root_id": "",
@@ -500,6 +513,7 @@
     "disabled": false,
     "display_name": "",
     "files_folder": "",
+    "guest": false,
     "id": 0,
     "last_login_at": 0,
     "personal_location": "",

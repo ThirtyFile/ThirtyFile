@@ -1179,4 +1179,43 @@ mod tests {
         let replaced = send(&env, &ben, &id, 0, b"ben2").await.unwrap();
         assert_eq!(replaced.headers()["x-node-id"], kept.headers()["x-node-id"]);
     }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_staged_browser_upload_cannot_commit_a_stale_personal_permission_after_guest_conversion() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let kept = env.stored_file(&amy, amy.root(), "kept.txt", b"kept").await;
+        let id = begin(&env, &amy, "blocked.txt", 5).await;
+        send(&env, &amy, &id, 0, b"he").await.unwrap();
+        let lock = env.st.write_lock.lock().await;
+        let st = env.st.clone();
+        let actor = amy.clone();
+        let upload_id = id.clone();
+        let waiting = tokio::spawn(async move {
+            let mut h = HeaderMap::new();
+            h.insert(header::CONTENT_TYPE, "application/offset+octet-stream".parse().unwrap());
+            h.insert("upload-offset", "2".parse().unwrap());
+            patch(State(st), actor, Path(upload_id), h, Body::from("llo")).await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while tokio::fs::metadata(upload_path(&env.st, &id)).await.unwrap().len() != 5 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(!waiting.is_finished());
+        let mut tx = crate::db::begin_write(&env.st.db).await.unwrap();
+        let preview = crate::guests::preview_in(&mut tx, amy.id).await.unwrap();
+        crate::guests::convert(&mut tx, amy.id, Some(&preview.revision)).await.unwrap();
+        sqlx::query("UPDATE users SET guest=1 WHERE id=?").bind(amy.id).execute(&mut *tx).await.unwrap();
+        tx.commit().await.unwrap();
+        drop(lock);
+        let error = waiting.await.unwrap().unwrap_err();
+        assert_eq!(error.code, Some("upload_discarded"));
+        assert_eq!(files_named(&env, "blocked").await, 0);
+        assert!(!upload_path(&env.st, &id).exists());
+        assert!(load(&env.st, &Uploader::signed_in(amy.clone()), &id).await.is_err());
+        sqlx::query("UPDATE users SET guest=0 WHERE id=?").bind(amy.id).execute(&env.st.db).await.unwrap();
+        assert_eq!(read(&env, &amy, &kept).await, b"kept");
+    }
 }
