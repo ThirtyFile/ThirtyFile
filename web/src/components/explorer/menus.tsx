@@ -3,6 +3,7 @@
  * here, the same in every style; the style arranges them (`menu` in components/style): the Windows style as Windows 11
  * does, with submenus on empty space and a row of icon buttons on items.
  */
+import { PublishBucketMenu } from "@/components/S3Buckets";
 import { Fragment, type ReactNode } from "react";
 import {
   ClipboardPasteIcon,
@@ -66,6 +67,7 @@ export interface MenuEntries {
   extractItem: ReactNode;
   shareWith: ReactNode;
   shareLink: ReactNode;
+  publishBucket: ReactNode;
   favorite: ReactNode;
   /** "Tags ›": the person's own tags, put on the items or taken off */
   tags: ReactNode;
@@ -104,7 +106,7 @@ export function toolbarCommands(p: ExplorerProps, s: ExplorerState, a: ExplorerA
       </DropdownMenuItem>
     ),
     copyTo: (
-      <DropdownMenuItem key="copy" disabled={none || !caps.write} onClick={() => setDialog({ t: "copy", picked: s.picked })}>
+      <DropdownMenuItem key="copy" disabled={none || !caps.add} onClick={() => setDialog({ t: "copy", picked: s.picked })}>
         <CopyIcon /> {t("Copy to…")}
       </DropdownMenuItem>
     ),
@@ -188,6 +190,7 @@ export function explorerMenus(p: ExplorerProps, s: ExplorerState, a: ExplorerAct
       <Share2Icon /> {t("Create share link")}
     </DropdownMenuItem>
   );
+  const publishBucket = single?.kind === "folder" && <PublishBucketMenu key="s3" nodeId={single.id} onPublish={() => setDialog({ t: "s3", nodeId: single.id })} />;
   const favorite = (
     <DropdownMenuItem key="favorite" onClick={toggleFavorite}>
       {allFavorite ? <StarOffIcon /> : <StarIcon />} {allFavorite ? t("Remove from favorites") : t("Add to favorites")}
@@ -199,7 +202,7 @@ export function explorerMenus(p: ExplorerProps, s: ExplorerState, a: ExplorerAct
       <FolderInputIcon /> {t("Move to…")}
     </DropdownMenuItem>
   );
-  const copyTo = caps.write && (
+  const copyTo = caps.add && (
     <DropdownMenuItem key="copy" onClick={() => setDialog({ t: "copy", picked: s.picked })}>
       <CopyIcon /> {t("Copy to…")}
     </DropdownMenuItem>
@@ -243,6 +246,7 @@ export function explorerMenus(p: ExplorerProps, s: ExplorerState, a: ExplorerAct
     extractItem,
     shareWith,
     shareLink,
+    publishBucket,
     favorite,
     tags,
     moveTo,

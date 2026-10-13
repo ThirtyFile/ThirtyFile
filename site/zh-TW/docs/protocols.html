@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="zh-TW" data-root="../.." data-page="protocols">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SFTP、S3 與 FTP · ThirtyFile</title>
+    <meta name="description" content="SFTP、S3 與 FTP — ThirtyFile file access." />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/protocols.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/protocols.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/protocols.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/protocols.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/protocols.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到主要內容</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="網站">
+          <a href="../index.html#features" class="hide-small">功能</a>
+          <a href="index.html" aria-current="page">指南</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">語言 </span><span class="lang-name">繁體中文</span></summary>
+            <ul>
+              <li><a href="../../docs/protocols.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="protocols.html" hreflang="zh-TW" lang="zh-TW" aria-current="true">繁體中文</a></li>
+              <li><a href="../../zh-CN/docs/protocols.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+              <li><a href="../../ja/docs/protocols.html" hreflang="ja" lang="ja">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="指南">
+        <details open>
+          <summary>所有指南</summary>
+          <p>開始使用</p>
+          <a href="index.html">安裝</a>
+          <a href="first-steps.html">初次設定</a>
+          <p>日常使用</p>
+          <a href="files.html">檔案操作</a>
+          <a href="preview.html">預覽與編輯</a>
+          <a href="sharing.html">分享</a>
+          <a href="account.html">你的帳號</a>
+          <a href="webdav.html">連線為網路磁碟機</a>
+          <a href="protocols.html" aria-current="page">SFTP、S3 與 FTP</a>
+          <p>管理</p>
+          <a href="users.html">使用者與空間</a>
+          <a href="sign-in.html">單一登入</a>
+          <a href="storage.html">儲存位置</a>
+          <a href="logs.html">紀錄與品牌</a>
+          <p>架設與維運</p>
+          <a href="settings.html">設定</a>
+          <a href="internet.html">從網際網路存取</a>
+          <a href="backup.html">升級與備份</a>
+          <a href="help.html">疑難排解</a>
+          <p>專案</p>
+          <a href="contributing.html">參與貢獻</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+<h1>SFTP、S3 與 FTP</h1>
+<p>程式可透過標準通訊協定操作 ThirtyFile 檔案。管理員啟用後即可使用 SFTP。S3 儲存桶與 FTP 接收資料夾是獨立功能，供應狀態如下說明。</p>
+        <details class="guide-toc">
+          <summary>本頁內容</summary>
+          <ol>
+            <li><a href="#choosing">如何選擇</a></li>
+            <li><a href="#sftp">SFTP</a></li>
+            <li><a href="#s3">S3 buckets</a></li>
+            <li><a href="#ftp">FTP 接收資料夾</a></li>
+            <li><a href="#use-cases">使用案例</a></li>
+          </ol>
+        </details>
+<h2 id="choosing">如何選擇</h2>
+<p>使用 <a href="webdav.html">WebDAV</a> 將空間掛載為磁碟；使用 SFTP 透過 WinSCP、FileZilla、Cyberduck、OpenSSH 或 rclone 進行加密傳輸。SFTP 顯示與 WebDAV 相同的目錄樹，遵循相同權限。</p>
+<h2 id="sftp">SFTP</h2>
+<p>在<strong>控制台 › 一般 › 應用程式與通訊協定</strong>開啟<strong>允許 SFTP 存取</strong>，預設關閉。啟動時使用 <code>THIRTYFILE_SFTP_ADDR</code> 設定連接埠（預設 <code>0.0.0.0:2022</code>）。在 Docker Compose 獨立公開連接埠，SFTP 不經 HTTP 反向代理。</p>
+<pre><code>services:
+  thirtyfile:
+    environment:
+      THIRTYFILE_SFTP_ADDR: 0.0.0.0:2022
+    ports:
+      - "8080:8080"
+      - "2022:2022"</code></pre>
+<p>將這些項目加入現有 Compose 服務，保留映像與磁碟區。使用 <code>docker compose up -d</code> 重新啟動，僅在必要的網路範圍開放所選 TCP 連接埠。</p>
+<h3 id="connecting">連線</h3>
+<p>在用戶端選擇 SFTP，輸入伺服器主機名稱、連接埠 2022、ThirtyFile 使用者名稱與<a href="account.html#app-passwords">應用程式密碼</a>。此處不接受帳號密碼。唯讀應用程式密碼無法修改檔案，管理員也一樣。第一次信任連線前，請核對控制台顯示的<strong>主機金鑰指紋</strong>。</p>
+<pre><code>sftp -P 2022 amy@files.example.com
+# After connecting:
+ls
+cd "My files"
+put report.csv
+get report.csv</code></pre>
+<h3 id="ssh-keys">SSH 公開金鑰</h3>
+<p>管理員也須開啟<strong>允許 SSH 金鑰</strong>。在<strong>帳號選單 › SFTP 金鑰</strong>新增名稱與 SSH 公開金鑰，依要求確認目前密碼與雙因素驗證碼。私密金鑰請保留在自己的裝置。對話框顯示指紋與上次使用時間，移除金鑰後會停止存取，包含現有連線。</p>
+<pre><code>sftp -i ~/.ssh/id_ed25519 -P 2022 amy@files.example.com</code></pre>
+<h3 id="limits">SFTP 支援範圍</h3>
+<p>存取權限由 ThirtyFile 角色與分享設定控制。Unix 擁有者與權限變更（例如 <code>chmod 600</code>）會被拒絕；建立項目時提供的模式僅供參考。使用 rclone 時請設定 <code>disable_hashcheck = true</code>，因為伺服器不提供計算遠端檢查碼的 Shell 指令。若無法存取控制台，請向管理員取得預期的主機金鑰指紋。</p>
+<p>可列出與下載檔案、上傳、從指定位置續傳、建立資料夾、重新命名、移動及移除項目（送到回收站）。寫入先暫存，關閉檔案時才提交，並套用配額、上傳限制、版本及活動紀錄。斷線時捨棄未完成寫入。接受用戶端時間設定但不儲存。不提供 Shell、指令執行、SSH rsync、轉送或符號連結。每個帳號最多五個連線，每個連線最多 32 個開啟項目，閒置五分鐘後逾時。</p>
+<p>首次啟動時，伺服器在資料目錄產生 ed25519 主機金鑰，請一起備份。更換金鑰會改變指紋，用戶端應要求你重新確認。</p>
+<h2 id="s3">S3 buckets</h2>
+<p>將團隊或公司資料夾發布為 bucket。每個 Access Key 只能存取該資料夾，並依建立者目前的權限操作。這與將現有 S3 服務新增為儲存位置不同。</p>
+<h3 id="s3-setup">端點設定</h3>
+<p>在<strong>控制台 › 一般 › 應用程式與通訊協定 › S3</strong> 啟用 S3，輸入獨立主機名稱，例如 <code>s3.files.example.com</code>，並選擇區域（預設 <code>us-east-1</code>）。S3 預設關閉。代理將此主機名稱轉送至與網站相同的 HTTP 連接埠，不需新增 Docker 連接埠。請保留原始 Host 標頭，它是簽章的一部分。S3 主機名稱需有有效的 HTTPS 憑證與 DNS 紀錄。</p>
+<p>將以下指令加入 S3 主機名稱的 HTTPS server 區塊，沿用現有憑證設定。請依磁碟容量與空間配額設定適當的上傳限制。</p>
+<pre><code>location / {
+    proxy_pass http://thirtyfile:8080;
+    proxy_set_header Host $http_host;
+    proxy_request_buffering off;
+    proxy_buffering off;
+    client_max_body_size 0;
+}</code></pre>
+<h3 id="s3-publishing">發布與金鑰</h3>
+<p>以右鍵點選資料夾並選擇<strong>發布為 S3 bucket…</strong>，或開啟<strong>內容 › S3 buckets</strong>。名稱需唯一，並由 3–63 個小寫字母、數字及連字號組成。重新命名或移動資料夾不會改變 bucket 名稱。</p>
+<p>管理員可發布團隊或公司資料夾。空間管理者還需有帳號的分享權限，且啟用<strong>允許空間管理者發布 buckets</strong>。個人空間及<strong>可建立分享連結的人</strong>設為<strong>無人</strong>的空間不能發布。資料夾在垃圾桶內、建立者失去管理權或空間停用時，bucket 會停止。還原資料夾或存取權後，已啟用的 bucket 會恢復運作。</p>
+<p>建立一個或多個金鑰，填入說明、唯讀或讀寫存取權及選填的到期日。請立即保存 Secret Key，它只顯示一次。金鑰以資料目錄的 <code>secret.key</code> 加密，請依<a href="backup.html">備份指南</a>保存該檔。已啟用的金鑰到期前三天內，建立者會收到存取權即將結束的通知。唯讀空間只能建立唯讀金鑰。</p>
+<p>可單獨停用或刪除金鑰，不影響其他金鑰。<strong>控制台 › S3 buckets</strong> 列出所有 buckets、建立者、金鑰與上次使用時間。停用 bucket 會阻擋全部金鑰；刪除 bucket 或金鑰不會刪除檔案。Access Keys 不能登入網站、SFTP 或 WebDAV。活動紀錄會標示 bucket 與金鑰說明，不會記錄憑證。</p>
+<h3 id="s3-clients">用戶端</h3>
+<p>在程式中選擇 S3 相容服務：端點 <code>https://s3.files.example.com</code>、區域 <code>us-east-1</code>（或自行設定的區域）、路徑式網址及 bucket 的金鑰。不要啟用虛擬主機式網址、ACL 或伺服器端加密設定。</p>
+<p>使用 aws cli 時，請互動設定具名設定檔，避免機密出現在指令歷史。將定址方式設為 path，並在每個指令指定端點。</p>
+<pre><code>aws configure --profile thirtyfile
+aws configure set s3.addressing_style path --profile thirtyfile
+aws --profile thirtyfile --endpoint-url https://s3.files.example.com s3 ls s3://backups/
+aws --profile thirtyfile --endpoint-url https://s3.files.example.com s3 cp report.csv s3://backups/report.csv</code></pre>
+<p>使用 rclone 時執行 <code>rclone config</code>，選擇 S3、提供者 Other，互動輸入金鑰，設定端點與區域，啟用 force_path_style，將 disable_checksum 設為 true 以停用 rclone 自訂 MD5 中繼資料（S3 Content-MD5 仍會驗證傳輸），並將 ACL 與伺服器端加密留空。<code>rclone copy</code> 可增加檔案；<code>rclone sync</code> 可能移除目的地檔案。</p>
+<p>ThirtyFile 會將 rclone 的 <code>x-amz-meta-mtime</code> 與目前內容版本一起保存，也支援用同名複製更新時間。其他自訂中繼資料仍不支援。<code>no_system_metadata</code> 無法阻止 rclone 傳送這個時間戳記，請保持關閉。這不會變更 S3 以外的檔案修改時間。</p>
+<h3 id="s3-backups">備份與其他用途</h3>
+<p>使用 restic 時，將<strong>備份</strong>資料夾發布為 <code>backups</code>，並建立讀寫金鑰。從受保護的憑證儲存區載入 <code>AWS_ACCESS_KEY_ID</code> 與 <code>AWS_SECRET_ACCESS_KEY</code>。Repository 密碼與 S3 金鑰不同，請妥善保管。只在專用的空資料夾內初始化。</p>
+<pre><code>restic -r s3:https://s3.files.example.com/backups -o s3.region=us-east-1 -o s3.bucket-lookup=path init
+restic -r s3:https://s3.files.example.com/backups -o s3.region=us-east-1 -o s3.bucket-lookup=path backup ./documents</code></pre>
+<p>Duplicati 或 Synology Hyper Backup 可使用 S3 相容目的地，設定相同端點、區域與路徑式網址。請勿在瀏覽器編輯備份 repository 檔案。此 S3 端點是這些工具的目的地，與 ThirtyFile 自身的備份和副本原則不同。</p>
+<p>合作夥伴讀取價目表時，可將<strong>價目表</strong>資料夾發布為 <code>price-lists</code>，並建立 90 天後到期的唯讀金鑰。資料團隊應為每個 rclone 或 aws cli 工作建立獨立金鑰，方便分別停用。</p>
+<h3 id="s3-mapping">資料夾對應與限制</h3>
+<p><code>a/b/c.txt</code> 等 key 對應巢狀資料夾及檔案；PUT 會建立缺少的父資料夾。以 <code>/</code> 結尾的空物件代表資料夾。清單使用 UTF-8 位元組排序、前綴、分隔符號及有上限的分頁。路徑穿越、空白路徑元件、不合法字元或前後空白的名稱會被拒絕。不區分大小寫的空間會拒絕僅大小寫不同的名稱衝突。</p>
+<p>DELETE 會將檔案與資料夾移至垃圾桶。覆寫會依空間原則保存舊版本。空間配額與上傳大小限制均適用。MD5 ETag 識別上傳內容，伺服器會驗證 Content-MD5 與支援的 AWS 檢查碼標頭。分段上傳的片段在暫存區保留最多一天，可中止未完成上傳以提早釋放。每個金鑰最多 32 個、每個 bucket 最多 128 個待完成上傳（全伺服器 512 個），每次最多 10,000 個片段。</p>
+<p>支援操作包含 ListBuckets（僅該金鑰的 bucket）、HeadBucket、GetBucketLocation、ListObjects/V2、HEAD、範圍與條件式 GET、PUT、同 bucket 內的 COPY、DELETE 與批次刪除、分段建立／上傳／完成／中止／列出，以及預先簽署 GET/PUT。預先簽署網址最多有效七天，金鑰到期或停用後立即失效。唯讀金鑰即使使用預先簽署網址也不能 PUT。</p>
+<p>不提供 ACL、透過 S3 建立 bucket、bucket 原則、生命週期、Object Lock、S3 版本 API、自訂中繼資料、物件標籤、伺服器端加密設定或虛擬主機式網址。不支援的操作回應 NotImplemented。時鐘需與伺服器相差 15 分鐘內；錯誤簽章與登入共用失敗限制。</p>
+<h2 id="ftp">FTP 接收資料夾</h2>
+<p>目前不提供 FTP 接收伺服器，僅在無法使用 SFTP 的掃描器或攝影機有具體需求時規劃。將既有 FTP 伺服器新增為儲存位置是不同功能。</p>
+<h2 id="use-cases">使用案例</h2>
+<p>伺服器可使用 SSH 金鑰與 SFTP 腳本上傳每晚報表；設計師可使用 Cyberduck 傳輸大型專案。使用 rclone 時執行 <code>rclone config</code>，選擇 SFTP 並設定主機名稱與連接埠，核對主機金鑰，使用應用程式密碼或 SSH 私密金鑰；避免將憑證寫入指令歷史。</p>
+        <nav class="next" aria-label="更多指南">
+          <a href="webdav.html"><span>上一篇</span>連線為網路磁碟機</a>
+          <a class="forward" href="users.html"><span>下一篇</span>使用者與空間</a>
+        </nav>
+</main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">指南</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">原始碼</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">回報問題</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker 映像檔</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>

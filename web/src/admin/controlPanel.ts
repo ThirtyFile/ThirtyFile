@@ -24,6 +24,7 @@ export type ControlPanelKey =
   | "users"
   | "groups"
   | "shares"
+  | "s3"
   | "drives"
   | "storage"
   | "moves"
@@ -62,6 +63,16 @@ export const CONTROL_PANEL_CATEGORIES: { id: ControlPanelCategory; label: string
 export const controlPanelCategoryLabel = (id: ControlPanelCategory) => CONTROL_PANEL_CATEGORIES.find((c) => c.id === id)?.label ?? id;
 
 export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
+  {
+    key: "s3",
+    to: adminPath("s3"),
+    title: t("S3 buckets"),
+    desc: t("Manage published folders, Access Keys and their end dates"),
+    icon: DatabaseIcon,
+    tone: "bg-teal-500/12 text-teal-700 dark:text-teal-300",
+    category: "users",
+    keywords: "s3 bucket access key secret key protocol",
+  },
   {
     key: "users",
     to: adminPath("users"),

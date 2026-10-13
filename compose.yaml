@@ -14,6 +14,8 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
+      # SFTP (also enable access in Control panel > General > Apps and protocols):
+      # - "2022:2022"
     volumes:
       # Database, settings, thumbnails and uploads in progress
       - ./data:/data
@@ -28,6 +30,7 @@ services:
       # THIRTYFILE_SECURE_COOKIE: "true"
       # THIRTYFILE_TRUST_PROXY: "true"
       # THIRTYFILE_MAX_UPLOAD_MB: "0"
+      # THIRTYFILE_SFTP_ADDR: "0.0.0.0:2022"
       # THIRTYFILE_TRASH_DAYS: "30"
     # Memory: about 100–300 MB in use; on a small NAS you can cap it (ThirtyFile adjusts to the limit on start)
     # mem_limit: 512m

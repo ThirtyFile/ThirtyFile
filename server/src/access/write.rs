@@ -36,10 +36,11 @@ pub struct Upload {
     pub existing: Option<Node>,
 }
 
-/// Where a file `name` in `parent` goes, looked at before anything is received: nobody without write access makes the
-/// server take a file. A folder of that name is refused; a file of that name must be one the user may change.
+/// Where a file `name` in `parent` goes, looked at before anything is received: the parent needs Add, so contributors
+/// can add files to folders other people made. A folder of that name is refused; replacing a file requires Write on
+/// that item. Both checks are repeated when the received content is committed.
 pub async fn upload_to(st: &AppState, user: &User, parent: &Node, name: String) -> AppResult<Upload> {
-    let parent = tree::folder_for(&mut *st.db.acquire().await?, user, &parent.id, Need::Write).await?;
+    let parent = tree::folder_for(&mut *st.db.acquire().await?, user, &parent.id, Need::Add).await?;
     let mut c = st.db.acquire().await?;
     let mut existing = child_named(&mut c, &parent.id, &name).await?;
     // Only when the index and the folder on the server disagree about this name is the folder looked at again:
@@ -131,14 +132,41 @@ where
 /// Stores a received file as `name` in `parent`, replacing a file of that name, and removes the received file; true
 /// when it was created. `hash`: the content's SHA-256 when it was computed while receiving it
 pub async fn store(st: AppState, user: User, parent: Node, name: String, tmp: PathBuf, size: u64, hash: Option<String>) -> AppResult<bool> {
-    let result = store_file(&st, &user, &parent, &name, &tmp, size, hash).await;
+    let result = store_file(&st, &user, &parent, &name, &tmp, size, (hash, false, None)).await;
     let _ = tokio::fs::remove_file(&tmp).await;
+    result
+}
+
+/// Commits a create-only upload, checking the name again after staging and waiting for the space's turn.
+pub async fn store_new(st: AppState, user: User, parent: Node, name: String, tmp: PathBuf, size: u64) -> AppResult<bool> {
+    let result = store_file(&st, &user, &parent, &name, &tmp, size, (None, true, None)).await;
+    let _ = tokio::fs::remove_file(&tmp).await;
+    result
+}
+
+/// Stores an upload only if the destination is still inside the protocol's published folder.
+pub struct ScopedWrite {
+    pub root: String,
+    pub mtime: Option<String>,
+}
+
+pub async fn store_in_scope(st: AppState, user: User, parent: Node, name: String, received: content::Received, scope: ScopedWrite) -> AppResult<bool> {
+    let result = store_file(&st, &user, &parent, &name, &received.path, received.size, (received.hash, false, Some(&scope))).await;
+    let _ = tokio::fs::remove_file(received.path).await;
     result
 }
 
 /// Makes the received file `name` in `parent` (content.rs), or gives the file of that name its content; true when
 /// it was created
-async fn store_file(st: &AppState, user: &User, parent: &Node, name: &str, tmp: &Path, size: u64, hash: Option<String>) -> AppResult<bool> {
+async fn store_file(
+    st: &AppState,
+    user: &User,
+    parent: &Node,
+    name: &str,
+    tmp: &Path,
+    size: u64,
+    (hash, create_only, scope): (Option<String>, bool, Option<&ScopedWrite>),
+) -> AppResult<bool> {
     let staged = content::stage(st, parent, content::Received { path: tmp.to_path_buf(), size, hash }).await?;
     let size = size as i64;
     let mut turn = staged.turn(st).await;
@@ -147,19 +175,35 @@ async fn store_file(st: &AppState, user: &User, parent: &Node, name: &str, tmp: 
         turn.ready()?;
         let mut tx = crate::db::begin_write(&st.db).await?;
         // Looked at again under the write lock: the folder or the file may have changed meanwhile
-        let folder = tree::folder_for(&mut tx, user, &parent.id, Need::Write).await?;
+        let folder = tree::folder_for(&mut tx, user, &parent.id, Need::Add).await?;
         staged.check(&folder)?;
+        if let Some(scope) = scope {
+            tree::folder_for(&mut tx, user, &scope.root, Need::Add).await?;
+            if !super::inside(&mut tx, &scope.root, &folder.id).await? {
+                return Err(AppError::forbidden("Object is outside the bucket"));
+            }
+        }
         let (created, written) = match child_named(&mut tx, &folder.id, name).await? {
+            Some(_) if create_only => return Err(AppError::conflict(format!("\"{name}\" already exists"))),
             Some(n) if n.is_folder() => return Err(AppError::new(StatusCode::METHOD_NOT_ALLOWED, "A folder has this name")),
             Some(n) => {
+                if scope.is_some() && n.name != name {
+                    return Err(AppError::conflict("Object keys that differ only in case conflict in this space"));
+                }
                 let n = tree::node_for(&mut tx, user, &n.id, Need::Write).await?;
                 // The same content again (clients often save a file twice): nothing changes
                 if staged.hash().is_some() && n.blob_hash.as_deref() == staged.hash() {
+                    scoped_metadata(&mut tx, scope, &n.id).await?;
+                    if scope.is_some() {
+                        logs::record_activity(&mut tx, user, Some(&n), "edit", "").await?;
+                    }
+                    tx.commit().await?;
                     return Ok((false, content::Written::default()));
                 }
                 tree::check_quota(&mut tx, n.drive(), size - n.size).await?;
                 // The content it had is kept as an earlier version
                 let written = content::replace(&mut tx, st, &staged, &n, user.id).await?;
+                scoped_metadata(&mut tx, scope, &n.id).await?;
                 tree::touch(&mut tx, &folder.id).await?;
                 logs::record_activity(&mut tx, user, Some(&n), "edit", "").await?;
                 (false, written)
@@ -167,6 +211,7 @@ async fn store_file(st: &AppState, user: &User, parent: &Node, name: &str, tmp: 
             None => {
                 tree::check_quota(&mut tx, folder.drive(), size).await?;
                 let (id, written) = content::create(&mut tx, &staged, user.id, &folder, name, None).await?;
+                scoped_metadata(&mut tx, scope, &id).await?;
                 tree::touch(&mut tx, &folder.id).await?;
                 let node = tree::get_node(&mut tx, &id).await?;
                 logs::record_activity(&mut tx, user, node.as_ref().map(|n| n as _), "upload", "").await?;
@@ -187,4 +232,15 @@ async fn store_file(st: &AppState, user: &User, parent: &Node, name: &str, tmp: 
             Err(e)
         }
     }
+}
+
+async fn scoped_metadata(conn: &mut sqlx::SqliteConnection, scope: Option<&ScopedWrite>, id: &str) -> AppResult<()> {
+    let Some(scope) = scope else {
+        sqlx::query("UPDATE nodes SET s3_mtime=NULL,s3_mtime_version=NULL WHERE id=?").bind(id).execute(conn).await?;
+        return Ok(());
+    };
+    let node = tree::get_node(conn, id).await?.ok_or_else(|| AppError::not_found("File not found"))?;
+    let (_, version) = crate::files::Source::of(&node)?.describe(node.size as u64).await?;
+    sqlx::query("UPDATE nodes SET s3_mtime=?,s3_mtime_version=? WHERE id=?").bind(&scope.mtime).bind(version).bind(id).execute(conn).await?;
+    Ok(())
 }

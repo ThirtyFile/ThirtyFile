@@ -122,7 +122,7 @@ export interface Crumb {
   name: string;
 }
 
-export type Role = "viewer" | "editor" | "manager" | "owner";
+export type Role = "viewer" | "contributor" | "editor" | "manager" | "owner";
 /** Who may make share links of a space's items, besides what their account allows (personal spaces: always "editors") */
 export type LinkMakers = "editors" | "managers" | "nobody";
 export type DriveKind = "personal" | "company" | "team";

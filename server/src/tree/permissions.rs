@@ -18,6 +18,8 @@ use crate::{
 #[sqlx(rename_all = "lowercase")]
 pub enum Role {
     Viewer,
+    /// Adds items, and changes, moves and deletes only those they added (`allows_on`)
+    Contributor,
     Editor,
     Manager,
     Owner,
@@ -27,6 +29,7 @@ impl Role {
     pub fn parse(s: &str) -> Option<Role> {
         match s {
             "viewer" => Some(Role::Viewer),
+            "contributor" => Some(Role::Contributor),
             "editor" => Some(Role::Editor),
             "manager" => Some(Role::Manager),
             "owner" => Some(Role::Owner),
@@ -36,6 +39,7 @@ impl Role {
     pub fn as_str(self) -> &'static str {
         match self {
             Role::Viewer => "viewer",
+            Role::Contributor => "contributor",
             Role::Editor => "editor",
             Role::Manager => "manager",
             Role::Owner => "owner",
@@ -78,8 +82,12 @@ impl PrincipalType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Need {
     Read,
-    /// Upload, create, rename, move, edit
+    /// Add to a folder: upload, create, move, copy or restore into it
+    Add,
+    /// Change an item: upload over it, edit, rename
     Write,
+    /// Move an item out of its folder
+    Move,
     /// Move to trash, delete permanently
     Delete,
     /// Share: create share links, and give people access and manage members (drives.rs); the interface calls it "Share"
@@ -90,7 +98,8 @@ pub enum Need {
 pub fn allows(user: &User, role: Role, need: Need) -> AppResult<()> {
     let ok = match need {
         Need::Read => true,
-        Need::Write => role >= Role::Editor && (user.can_write || user.is_admin()),
+        Need::Add => role >= Role::Contributor && (user.can_write || user.is_admin()),
+        Need::Write | Need::Move => role >= Role::Editor && (user.can_write || user.is_admin()),
         Need::Delete => role >= Role::Editor && (user.can_delete || user.is_admin()),
         Need::Share => role >= Role::Editor && (user.can_share || user.is_admin()),
     };
@@ -99,10 +108,122 @@ pub fn allows(user: &User, role: Role, need: Need) -> AppResult<()> {
     }
     Err(AppError::forbidden(match need {
         Need::Read => "You don't have access",
-        Need::Write => "You don't have permission to make changes here",
+        Need::Add | Need::Write | Need::Move => "You don't have permission to make changes here",
         Need::Delete => "You don't have permission to delete here",
         Need::Share => "You don't have permission to share here",
     }))
+}
+
+/// Whether the user added `node` themselves in ThirtyFile: not an item the check of a folder space found on its disk,
+/// nor a space's root folder
+pub fn is_own(user: &User, node: &Node) -> bool {
+    node.owner_id == user.id && !node.found && node.parent_id.is_some()
+}
+
+/// `allows`, for an item: a contributor may also change, move and delete what they added themselves (`is_own`), as
+/// their account's permissions let them. A folder they made moves or goes to the trash only while everything in it is
+/// theirs too, since that goes with it.
+pub async fn allows_on(conn: &mut SqliteConnection, user: &User, role: Role, need: Need, node: &Node) -> AppResult<()> {
+    let current = crate::auth::sftp::current_user(conn, user, need != Need::Read).await?;
+    let user = current.as_ref().unwrap_or(user);
+    let role = if current.is_some() { live_role_on(conn, user, node).await?.ok_or_else(|| AppError::not_found("Item not found"))? } else { role };
+    let refused = match allows(user, role, need) {
+        Ok(()) => return Ok(()),
+        Err(e) => e,
+    };
+    if role != Role::Contributor || !matches!(need, Need::Write | Need::Move | Need::Delete) || !is_own(user, node) {
+        return Err(refused);
+    }
+    allows(user, Role::Editor, need)?;
+    if matches!(need, Need::Move | Need::Delete) && node.is_folder() && holds_others(conn, user, node).await? {
+        return Err(AppError::forbidden(format!("\"{}\" holds items other people added, so you can't move or delete it", node.name)));
+    }
+    Ok(())
+}
+
+/// Whether anything in the folder `id` (in the trash or not) wasn't added by `user` (`is_own`)
+async fn holds_others(conn: &mut SqliteConnection, user: &User, node: &Node) -> AppResult<bool> {
+    let (others,): (bool,) = sqlx::query_as(
+        "WITH RECURSIVE sub(id) AS (SELECT id FROM nodes WHERE parent_id = ?1 UNION ALL SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id)
+         SELECT EXISTS (SELECT 1 FROM nodes n JOIN sub ON n.id = sub.id WHERE n.owner_id <> ?2 OR n.found)",
+    )
+    .bind(&node.id)
+    .bind(user.id)
+    .fetch_one(&mut *conn)
+    .await?;
+    if others || !node.in_folder_space() {
+        return Ok(others);
+    }
+    // The index may not yet know about files made through SMB or on the server. Scan every disk entry, including
+    // names ordinary scans skip, in bounded batches. Unknown, unreadable and symbolic-link entries are refused.
+    // Only contributors moving/deleting their own folder need this; the folder space's change lock is held by the
+    // caller. The disk step times out, and neither a large directory nor the whole tree is collected in memory.
+    let (send, mut receive) = tokio::sync::mpsc::channel(1);
+    let folder = node.clone();
+    let refuse = format!("\"{}\" holds items other people added, so you can't move or delete it", node.name);
+    let disk = crate::fsops::on_disk(node.drive(), std::time::Duration::from_secs(5), move || disk_entries(&folder, send));
+    let check = async {
+        while let Some(paths) = receive.recv().await {
+            let (owned,): (i64,) = sqlx::query_as(
+                "SELECT COUNT(*) FROM nodes WHERE drive_id = ? AND owner_id = ? AND NOT found
+                 AND fs_path IN (SELECT value FROM json_each(?))",
+            )
+            .bind(node.drive())
+            .bind(user.id)
+            .bind(serde_json::to_string(&paths).map_err(AppError::internal)?)
+            .fetch_one(&mut *conn)
+            .await?;
+            if owned as usize != paths.len() {
+                return Err(AppError::forbidden(&refuse));
+            }
+        }
+        Ok::<_, AppError>(())
+    };
+    tokio::try_join!(disk, check)?;
+    Ok(false)
+}
+
+/// Enumerates disk paths without following links. A channel holds at most one batch, and traversal keeps at most
+/// 128 directory iterators open. Dropping the receiver after a refusal stops the producer before its next entry.
+fn disk_entries(node: &Node, send: tokio::sync::mpsc::Sender<Vec<String>>) -> AppResult<()> {
+    let refused = || AppError::forbidden(format!("\"{}\" holds items other people added, so you can't move or delete it", node.name));
+    let root = node.fs_pinned().and_then(|p| p.dir()).map_err(|_| refused())?;
+    let entries = std::fs::read_dir(root.as_path()).map_err(|_| refused())?;
+    let mut stack = vec![(root, node.fs_path.clone().ok_or_else(refused)?, entries)];
+    let mut batch = Vec::with_capacity(500);
+    while let Some((dir, rel, entries)) = stack.last_mut() {
+        if send.is_closed() {
+            return Ok(());
+        }
+        let Some(entry) = entries.next() else {
+            stack.pop();
+            continue;
+        };
+        let entry = entry.map_err(|_| refused())?;
+        let name = entry.file_name().into_string().map_err(|_| refused())?;
+        let child = dir.join(&name).map_err(|_| refused())?;
+        let meta = std::fs::symlink_metadata(child.as_path()).map_err(|_| refused())?;
+        if meta.file_type().is_symlink() || (!meta.is_file() && !meta.is_dir()) {
+            return Err(refused());
+        }
+        let path = format!("{rel}/{name}");
+        batch.push(path.clone());
+        if batch.len() == 500 && send.blocking_send(std::mem::replace(&mut batch, Vec::with_capacity(500))).is_err() {
+            return Ok(());
+        }
+        if meta.is_dir() {
+            if stack.len() >= 128 {
+                return Err(refused());
+            }
+            let child = child.dir().map_err(|_| refused())?;
+            let entries = std::fs::read_dir(child.as_path()).map_err(|_| refused())?;
+            stack.push((child, path, entries));
+        }
+    }
+    if !batch.is_empty() {
+        let _ = send.blocking_send(batch);
+    }
+    Ok(())
 }
 
 impl super::LinkMakers {
@@ -161,6 +282,16 @@ async fn access(conn: &mut SqliteConnection, user: &User, node: &Node) -> AppRes
     }
     // Administrators manage the company shared space (personal spaces are unaffected, for privacy)
     let mut best = (drive.kind == super::SpaceKind::Company && user.is_admin()).then_some(Role::Manager);
+    if user.is_admin()
+        && drive.kind != super::SpaceKind::Personal
+        && let Some(root) = &user.protocol_root
+    {
+        let (permitted,): (bool,) = sqlx::query_as("WITH RECURSIVE up(id,parent_id,trash) AS (SELECT id,parent_id,trashed_at IS NOT NULL FROM nodes WHERE id=?1 UNION ALL SELECT n.id,n.parent_id,n.trashed_at IS NOT NULL FROM nodes n JOIN up ON n.id=up.parent_id) SELECT EXISTS(SELECT 1 FROM up WHERE id=?2) AND NOT EXISTS(SELECT 1 FROM up WHERE trash)")
+                .bind(&node.id).bind(root).fetch_one(&mut *conn).await?;
+        if permitted {
+            best = Some(Role::Manager);
+        }
+    }
     // A row for each folder on the way up, and one more for each grant there that applies
     let sql = format!(
         "WITH RECURSIVE up(id, parent_id, trashed) AS (
@@ -223,9 +354,16 @@ pub async fn node_with_role(conn: &mut SqliteConnection, user: &User, id: &str) 
 
 /// Gets a node and checks the required capability
 pub async fn node_for(conn: &mut SqliteConnection, user: &User, id: &str, need: Need) -> AppResult<Node> {
+    let current = if user.protocol_key.is_some() { Some(crate::s3::credentials::actor_in_transaction(conn, user, need).await?) } else { None };
+    let user = current.as_ref().unwrap_or(user);
     let (n, role) = node_with_role(conn, user, id).await?;
-    allows(user, role, need)?;
-    if matches!(need, Need::Write | Need::Delete) && n.space_read_only {
+    if let Some(root) = &user.protocol_root
+        && !crate::access::inside(conn, root, &n.id).await?
+    {
+        return Err(AppError::forbidden("Object is outside the bucket"));
+    }
+    allows_on(conn, user, role, need, &n).await?;
+    if matches!(need, Need::Add | Need::Write | Need::Move | Need::Delete) && n.space_read_only {
         return Err(read_only_error(&n));
     }
     Ok(n)
