@@ -285,6 +285,7 @@ pub async fn create(State(st): State<AppState>, Admin(user): Admin, Json(req): J
     {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
+        crate::auth::require_admin(&mut tx, &user).await?;
         let res = async {
             sqlx::query(
                 "INSERT INTO replica_policies (id, name, source_location, enabled, all_spaces, copies, read_fallback, verify_days, alert_hours, rate_limit,
@@ -333,6 +334,7 @@ pub async fn update(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
     {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
+        crate::auth::require_admin(&mut tx, &user).await?;
         let res = async {
             let name = match req.name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
                 Some(n) if n.chars().count() > 200 => return Err(AppError::bad_request("Name is too long")),
@@ -431,12 +433,12 @@ pub async fn sync(State(st): State<AppState>, Admin(user): Admin, Path(id): Path
 }
 
 /// Reads the copies of the policy's targets (or one) back and checks them
-pub async fn verify(State(st): State<AppState>, _: Admin, Path(id): Path<String>, Json(q): Json<TargetQuery>) -> AppResult<Json<Value>> {
+pub async fn verify(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<String>, Json(q): Json<TargetQuery>) -> AppResult<Json<Value>> {
     let p = super::load(&mut *st.db.acquire().await?, &id).await?.ok_or_else(|| AppError::not_found("This replica policy no longer exists"))?;
     let targets = super::targets(&mut *st.db.acquire().await?, &id).await?;
     let mut queued = Vec::new();
     for t in targets.iter().filter(|t| q.location.as_ref().is_none_or(|l| *l == t.location_id)) {
-        if let Some(job) = super::policy::queue_verify(&st, &p, &t.location_id, now()).await? {
+        if let Some(job) = super::policy::queue_verify(&st, &p, &t.location_id, now(), Some(&user)).await? {
             queued.push(job);
         }
     }
@@ -445,10 +447,12 @@ pub async fn verify(State(st): State<AppState>, _: Admin, Path(id): Path<String>
 
 /// Deletes a policy. Its copies stay, kept from deletion, until removed as not needed.
 pub async fn delete(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
+    crate::auth::require_admin(&mut *st.db.acquire().await?, &user).await?;
     let p = super::load(&mut *st.db.acquire().await?, &id).await?.ok_or_else(|| AppError::not_found("This replica policy no longer exists"))?;
     pause_running(&st, &id);
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
+    crate::auth::require_admin(&mut tx, &user).await?;
     let res = async {
         let running: Option<(i64,)> =
             sqlx::query_as("SELECT 1 FROM replica_jobs WHERE policy_id = ? AND state = 'running'").bind(&id).fetch_optional(&mut *tx).await?;
@@ -538,6 +542,7 @@ pub struct PurgeReq {
 /// wanted, or a policy was deleted). Each is checked again before it is deleted: content that is the primary there
 /// stays.
 pub async fn purge(State(st): State<AppState>, Admin(user): Admin, Json(req): Json<PurgeReq>) -> AppResult<Json<Value>> {
+    crate::auth::require_admin(&mut *st.db.acquire().await?, &user).await?;
     let extra = unneeded_on(&st, &req.location).await?;
     let n = extra.len();
     super::sync::drop_copies(&st, &req.location, extra).await?;
@@ -545,6 +550,7 @@ pub async fn purge(State(st): State<AppState>, Admin(user): Admin, Json(req): Js
         let name = location_name(&mut *st.db.acquire().await?, &req.location).await?;
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
+        crate::auth::require_admin(&mut tx, &user).await?;
         let res = async {
             sqlx::query("DELETE FROM replica_unneeded WHERE location_id = ?").bind(&req.location).execute(&mut *tx).await?;
             crate::logs::record_activity(&mut tx, &user, None, "replica_purge", &format!("{name}: {n}")).await
@@ -557,12 +563,13 @@ pub async fn purge(State(st): State<AppState>, Admin(user): Admin, Json(req): Js
 
 // ───────────── Jobs ─────────────
 
-pub async fn pause_job(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
+pub async fn pause_job(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
+    let _actor_lock = st.write_lock.lock().await;
+    crate::auth::require_admin(&mut *st.db.acquire().await?, &user).await?;
     if let Some(ctl) = st.part::<Memory>().queue.running.lock().get(&id) {
         ctl.pause.store(true, Ordering::SeqCst);
         return Ok(Json(json!({ "ok": true })));
     }
-    let _w = st.write_lock.lock().await;
     let n = sqlx::query("UPDATE replica_jobs SET state = 'paused' WHERE id = ? AND state IN ('queued', 'waiting')").bind(&id).execute(&st.db).await?.rows_affected();
     if n == 0 {
         return Err(AppError::conflict("This job can't be paused now"));
@@ -570,9 +577,10 @@ pub async fn pause_job(State(st): State<AppState>, _: Admin, Path(id): Path<Stri
     Ok(Json(json!({ "ok": true })))
 }
 
-pub async fn resume_job(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
+pub async fn resume_job(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
+    let _actor_lock = st.write_lock.lock().await;
+    crate::auth::require_admin(&mut *st.db.acquire().await?, &user).await?;
     {
-        let _w = st.write_lock.lock().await;
         // Resumed with the policy as it is now
         let n = sqlx::query(
             "UPDATE replica_jobs SET state = 'queued', error = NULL, params = json_set(params, '$.epoch', (SELECT epoch FROM replica_policies p WHERE p.id = replica_jobs.policy_id))
@@ -590,12 +598,13 @@ pub async fn resume_job(State(st): State<AppState>, _: Admin, Path(id): Path<Str
     Ok(Json(json!({ "ok": true })))
 }
 
-pub async fn cancel_job(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
+pub async fn cancel_job(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
+    let _actor_lock = st.write_lock.lock().await;
+    crate::auth::require_admin(&mut *st.db.acquire().await?, &user).await?;
     if let Some(ctl) = st.part::<Memory>().queue.running.lock().get(&id) {
         ctl.cancel.store(true, Ordering::SeqCst);
         return Ok(Json(json!({ "ok": true })));
     }
-    let _w = st.write_lock.lock().await;
     let n = sqlx::query("UPDATE replica_jobs SET state = 'cancelled', finished_at = ? WHERE id = ? AND state IN ('queued', 'paused', 'failed', 'waiting')")
         .bind(now())
         .bind(&id)
@@ -773,6 +782,7 @@ pub async fn promote(State(st): State<AppState>, Admin(user): Admin, Path(id): P
     let (moved, missing, converted) = {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
+        crate::auth::require_admin(&mut tx, &user).await?;
         let res = async {
             // The same epoch as the check: nothing promoted it meanwhile
             let (epoch, source): (i64, String) =

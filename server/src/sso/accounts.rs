@@ -164,17 +164,24 @@ pub(super) async fn create_sso_user(st: &AppState, provider: &str, cfg: &Provide
     let base = sso_username(&ident.email);
     // Settings for the new account: the rule for the email's domain, otherwise the provider's defaults
     let rule = st.part::<Memory>().settings.read().domain_rule(&ident.email).cloned();
-    let (perms, quota_setting, groups) = match &rule {
-        Some(r) => ((r.can_write, r.can_delete, r.can_share), r.quota_bytes, r.groups.clone()),
-        None => ((cfg.defaults.can_write, cfg.defaults.can_delete, cfg.defaults.can_share), cfg.defaults.quota_bytes, cfg.groups.clone()),
-    };
-    let quota = quota_setting.unwrap_or_else(|| st.system.read().default_user_quota).max(0);
     // Sign-in is only possible through the provider: no password can match this value until an administrator sets one
     let password_hash = NO_PASSWORD.to_string();
     let (create, location) = rule.as_ref().map_or((None, None), |r| (r.personal_space, r.personal_location.as_deref()));
     crate::personal::check_ahead(st, create, location).await;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
+    let current_settings = st.part::<Memory>().settings.read().clone();
+    let current_provider = current_settings.provider(provider).cloned().unwrap_or_else(|| cfg.clone());
+    let cfg = &current_provider;
+    let rule = current_settings.domain_rule(&ident.email).cloned();
+    let (perms, quota_setting, groups) = match &rule {
+        Some(r) => ((r.can_write, r.can_delete, r.can_share), r.quota_bytes, r.groups.clone()),
+        None => ((cfg.defaults.can_write, cfg.defaults.can_delete, cfg.defaults.can_share), cfg.defaults.quota_bytes, cfg.groups.clone()),
+    };
+    let guest = rule.as_ref().map_or(cfg.defaults.guest, |r| r.guest);
+    let quota = quota_setting.unwrap_or_else(|| st.system.read().default_user_quota).max(0);
+    let (create, location) = rule.as_ref().map_or((None, None), |r| (r.personal_space, r.personal_location.as_deref()));
+
     // Two sign-ins of the same person at the same time: the second one finds what the first created (checked under the lock)
     let linked: Option<(i64, String)> =
         sqlx::query_as("SELECT u.id, u.username FROM user_identities i JOIN users u ON u.id = i.user_id WHERE i.provider = ? AND i.subject = ?")
@@ -208,14 +215,14 @@ pub(super) async fn create_sso_user(st: &AppState, provider: &str, cfg: &Provide
     crate::users::validate_username(&username)?;
     // "My files" as the domain rule says, else by the system setting; a location that was deleted since gives way to
     // the setting's
-    let personal = crate::personal::choose(st, &mut tx, create, location, false).await?;
+    let personal = crate::personal::choose(st, &mut tx, if guest { Some(false) } else { create }, location, false).await?;
     let id = create_user(
         &mut tx,
         NewUser {
             username: &username,
             password_hash: &password_hash,
             role: crate::auth::UserRole::User,
-            guest: false,
+            guest,
             can_write: perms.0,
             can_delete: perms.1,
             can_share: perms.2,
@@ -237,6 +244,13 @@ pub(super) async fn create_sso_user(st: &AppState, provider: &str, cfg: &Provide
     for g in &groups {
         let name: Option<(String,)> = sqlx::query_as("SELECT name FROM groups WHERE id = ?").bind(g).fetch_optional(&mut *tx).await?;
         if let Some((name,)) = name {
+            crate::guests::validate_group_join(&mut tx, id, *g).await.map_err(|e| {
+                if e.status == axum::http::StatusCode::BAD_REQUEST {
+                    AppError::forbidden("Your account couldn't join its configured groups. Ask an administrator to check guest access.")
+                } else {
+                    e
+                }
+            })?;
             sqlx::query("INSERT OR IGNORE INTO group_members (group_id, user_id) VALUES (?, ?)").bind(g).bind(id).execute(&mut *tx).await?;
             joined.push(name);
         }

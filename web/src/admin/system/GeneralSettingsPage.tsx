@@ -254,6 +254,42 @@ export function GeneralSettingsPage() {
         </>
       )}
       {q.data && (
+        <Section title={t("Guest access and sharing")}>
+          <div className="flex items-start gap-4 p-4">
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">{t("People can share only within their own groups")}</div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t("Administrators are exempt. New and changed grants use current group membership, including the people picker. Existing grants are kept.")}
+              </p>
+            </div>
+            <Toggle
+              label={t("People can share only within their own groups")}
+              checked={q.data.share_own_groups}
+              disabled={save.isPending}
+              onChange={(v) => save.mutate({ share_own_groups: v })}
+            />
+          </div>
+          <div className="flex flex-wrap items-start gap-4 border-t p-4">
+            <div className="min-w-0 flex-1 basis-52">
+              <div className="font-medium">{t("Guest access maximum (days)")}</div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t("An end date is always required, even for administrators. New and changed grants, group joins and account conversions use this limit. Existing end dates are kept.")}
+              </p>
+            </div>
+            <NumberInput
+              key={q.data.guest_max_days}
+              value={q.data.guest_max_days}
+              label={t("Guest access maximum (days)")}
+              width="w-20"
+              min={1}
+              max={3650}
+              saving={save.isPending}
+              onSave={(n) => save.mutate({ guest_max_days: n })}
+            />
+          </div>
+        </Section>
+      )}
+      {q.data && (
         <Section title={t("Users")}>
           <div className="flex items-start gap-4 p-4">
             <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand">

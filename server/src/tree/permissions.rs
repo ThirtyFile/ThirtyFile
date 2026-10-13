@@ -129,9 +129,12 @@ pub async fn allows_on(conn: &mut SqliteConnection, user: &User, role: Role, nee
     let current = crate::auth::current_user(conn, user).await?;
     let user = &current;
     let (mut fresh_role, in_trash) = access(conn, user, node).await?;
-    if fresh_role.is_none() && in_trash && user.is_admin()
+    if fresh_role.is_none()
+        && in_trash
+        && user.is_admin()
         && let Some(drive) = get_drive(conn, node.drive()).await?
-        && drive.kind != super::SpaceKind::Personal {
+        && drive.kind != super::SpaceKind::Personal
+    {
         // Administrators may manage the trash of team spaces without membership; ordinary reads still require it.
         fresh_role = Some(Role::Manager);
     }

@@ -27,6 +27,7 @@ pub struct UserRow {
     pub username: String,
     display_name: String,
     role: UserRole,
+    guest: bool,
     can_write: bool,
     can_delete: bool,
     can_share: bool,
@@ -63,7 +64,7 @@ impl UserRow {
 }
 
 const USER_ROW_SQL: &str =
-    "SELECT u.id, u.username, u.display_name, u.role, u.can_write, u.can_delete, u.can_share, u.quota_bytes, u.disabled, u.created_at, u.last_login_at, u.source,
+    "SELECT u.id, u.username, u.display_name, u.role, u.guest, u.can_write, u.can_delete, u.can_share, u.quota_bytes, u.disabled, u.created_at, u.last_login_at, u.source,
        (SELECT COALESCE(GROUP_CONCAT(provider), '') FROM user_identities WHERE user_id = u.id) AS sso,
        u.totp_secret IS NOT NULL AS two_factor,
        (SELECT COALESCE(email, '') FROM user_identities WHERE user_id = u.id ORDER BY last_login_at DESC LIMIT 1) AS sso_email,
@@ -106,6 +107,8 @@ pub struct CreateReq {
     display_name: String,
     #[serde(default = "default_role")]
     role: String,
+    #[serde(default)]
+    guest: bool,
     #[serde(default = "yes")]
     can_write: bool,
     #[serde(default = "yes")]
@@ -151,6 +154,9 @@ pub async fn create(State(st): State<AppState>, Admin(me): Admin, Json(mut req):
     validate_username(username)?;
     validate_password(&req.password, min_password(&st))?;
     let role = UserRole::parse(&req.role)?;
+    if req.guest && (role == UserRole::Admin || req.personal_space == Some(true)) {
+        return Err(AppError::bad_request("Guests can't be administrators or have My files"));
+    }
     let display_name = validate_display_name(&req.display_name)?.to_string();
     if role == UserRole::Admin {
         std::mem::take(&mut req.me).check(&st, &me).await?;
@@ -160,14 +166,16 @@ pub async fn create(State(st): State<AppState>, Admin(me): Admin, Json(mut req):
     let id = {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
-        let personal = crate::personal::choose(&st, &mut tx, req.personal_space, req.personal_location.as_deref(), true).await?;
+        crate::auth::require_admin(&mut tx, &me).await?;
+        let personal =
+            crate::personal::choose(&st, &mut tx, if req.guest { Some(false) } else { req.personal_space }, req.personal_location.as_deref(), true).await?;
         let id = create_user(
             &mut tx,
             NewUser {
                 username,
                 password_hash: &password_hash,
                 role,
-                guest: false,
+                guest: req.guest,
                 can_write: req.can_write,
                 can_delete: req.can_delete,
                 can_share: req.can_share,
@@ -198,6 +206,10 @@ pub struct UpdateReq {
     password: Option<String>,
     display_name: Option<String>,
     role: Option<String>,
+    guest: Option<bool>,
+    #[serde(default)]
+    confirm_guest: bool,
+    guest_revision: Option<String>,
     can_write: Option<bool>,
     can_delete: Option<bool>,
     can_share: Option<bool>,
@@ -215,7 +227,7 @@ pub(crate) const SIGN_IN_AGAIN: &str = "Sign out and sign in again, then make th
 
 pub async fn update(State(st): State<AppState>, Admin(me): Admin, Path(id): Path<i64>, Json(req): Json<UpdateReq>) -> AppResult<Json<UserRow>> {
     let role = req.role.as_deref().map(UserRole::parse).transpose()?;
-    if id == me.id && (role.is_some_and(|r| r != UserRole::Admin) || req.disabled == Some(true)) {
+    if id == me.id && (role.is_some_and(|r| r != UserRole::Admin) || req.disabled == Some(true) || req.guest == Some(true)) {
         return Err(AppError::bad_request("You can't disable your own account or remove your own administrator rights"));
     }
     let password_hash = match &req.password {
@@ -228,11 +240,14 @@ pub async fn update(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
     let target = get_row(&st, id).await?;
     // A new password, or administrator rights, hand over an account: whoever is at an administrator's unlocked
     // browser can't do it without knowing who they are
-    if password_hash.is_some() || role.is_some_and(|r| r != target.role) {
+    if password_hash.is_some() || role.is_some_and(|r| r != target.role) || req.guest.is_some_and(|g| g != target.guest) {
         crate::tokens::confirm_identity(&st, &me, req.my_password.clone(), req.my_code.as_deref(), SIGN_IN_AGAIN).await?;
     }
     let display_name = req.display_name.as_deref().map(validate_display_name).transpose()?.map(str::to_string);
     let mut changes = Vec::new();
+    if let Some(guest) = req.guest.filter(|g| *g != target.guest) {
+        changes.push(if guest { "changed to guest" } else { "changed to standard account" }.to_string());
+    }
     if password_hash.is_some() {
         changes.push("reset password".to_string());
     }
@@ -263,6 +278,16 @@ pub async fn update(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
         still_admin(&mut tx, me.id).await?;
+        let (was_guest, current_role): (bool, UserRole) = sqlx::query_as("SELECT guest, role FROM users WHERE id = ?").bind(id).fetch_one(&mut *tx).await?;
+        if req.guest.unwrap_or(was_guest) && role.unwrap_or(current_role) == UserRole::Admin {
+            return Err(AppError::bad_request("Guests can't be administrators"));
+        }
+        if req.guest == Some(true) && !was_guest {
+            if !req.confirm_guest {
+                return Err(AppError::bad_request("Review and confirm the guest conversion before saving"));
+            }
+            crate::guests::convert(&mut tx, id, req.guest_revision.as_deref()).await?;
+        }
         if !changes.is_empty() {
             logs::record_activity(&mut tx, &me, None, "user_update", &format!("{}: {}", target.username, changes.join(", "))).await?;
         }
@@ -271,6 +296,7 @@ pub async fn update(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
                password_hash = COALESCE(?, password_hash),
                display_name = COALESCE(?, display_name),
                role = COALESCE(?, role),
+               guest = COALESCE(?, guest),
                can_write = COALESCE(?, can_write),
                can_delete = COALESCE(?, can_delete),
                can_share = COALESCE(?, can_share),
@@ -281,6 +307,7 @@ pub async fn update(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
         .bind(&password_hash)
         .bind(&display_name)
         .bind(role)
+        .bind(req.guest)
         .bind(req.can_write)
         .bind(req.can_delete)
         .bind(req.can_share)
@@ -461,6 +488,7 @@ mod tests {
             password: testutil::password().into(),
             display_name: String::new(),
             role: "user".into(),
+            guest: false,
             can_write: true,
             can_delete: true,
             can_share: true,
@@ -623,6 +651,9 @@ mod tests {
             password: Some("elevenchars".into()),
             display_name: None,
             role: None,
+            guest: None,
+            confirm_guest: false,
+            guest_revision: None,
             can_write: None,
             can_delete: None,
             can_share: None,

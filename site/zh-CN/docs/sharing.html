@@ -84,6 +84,7 @@
             <li><a href="#manage">你的链接</a></li>
             <li><a href="#admin">管理员设置</a></li>
             <li><a href="#spaces">空间</a></li>
+            <li><a href="#guest-access">访客权限与共享策略</a></li>
           </ol>
         </details>
         <h2 id="people">与同事共享</h2>
@@ -146,6 +147,8 @@
         </ul>
 
       <p>文件夹也可发布为 <a href="protocols.html#s3">S3 存储桶</a>，供程序访问。管理员或 S3 设置允许的空间管理者可创建文件夹专用密钥。个人空间和不允许任何人创建分享链接的空间不能发布。</p>
+        <h2 id="guest-access">访客权限与共享策略</h2>
+        <p>在<strong>控制面板 › 常规 › 访客访问与共享</strong>设置授予访客的最长天数，默认为 90 天。新增或更新对访客的直接授权，或对包含访客的群组授权，都必须设置期限内的到期日，管理员也不例外。角色只能选择编辑者、贡献者或查看者。修改设置不会重写现有到期日。权限到期后，浏览器、WebDAV 与 SFTP 的访问都会停止。</p><p><strong>只能在自己的群组内共享</strong>限制新增或更新的授权：对方必须与你同属至少一个当前群组，目标群组也必须包含你。选择列表会遵守此策略，管理员不受此限制。现有对其他人的授权会保留；若要停止，请明确移除。此设置管理账号与群组访问，不会改动现有公开链接。</p>
         <nav class="next" aria-label="更多指南">
           <a href="preview.html"><span>上一篇</span>预览与编辑</a>
           <a class="forward" href="account.html"><span>下一篇</span>你的账号</a>

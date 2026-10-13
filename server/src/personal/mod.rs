@@ -74,6 +74,9 @@ pub async fn check_ahead(st: &AppState, create: Option<bool>, location: Option<&
 /// rolls back. `space_folders`: see `AppState::space_folders`. The caller calls `folders::spaces_changed` after
 /// committing.
 pub async fn create(conn: &mut SqliteConnection, space_folders: Option<&FsPath>, user_id: i64, location: &str) -> AppResult<String> {
+    if crate::guests::target_has_guests(conn, crate::tree::PrincipalType::User, user_id).await? {
+        return Err(AppError::bad_request("Guests can't have My files"));
+    }
     let (drive_id, root_id) = create_drive(conn, NAME, "personal", user_id, 0, location).await?;
     crate::space_folders::make_folder_space(conn, space_folders, &drive_id).await?;
     add_grant(conn, &root_id, "user", user_id, "owner", Some(user_id), None).await?;
@@ -108,7 +111,7 @@ pub async fn create_or_wait(conn: &mut SqliteConnection, space_folders: Option<&
 /// sign in). Failures are only logged. Returns how many were created.
 pub async fn retry_pending(st: &AppState, user: Option<i64>) -> usize {
     let rows: Vec<(i64, String, String)> =
-        match sqlx::query_as("SELECT id, username, personal_pending FROM users WHERE personal_pending IS NOT NULL AND (?1 IS NULL OR id = ?1)")
+        match sqlx::query_as("SELECT id, username, personal_pending FROM users WHERE guest = 0 AND personal_pending IS NOT NULL AND (?1 IS NULL OR id = ?1)")
             .bind(user)
             .fetch_all(&st.db)
             .await

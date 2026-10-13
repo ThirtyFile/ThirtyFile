@@ -694,6 +694,7 @@ export interface PromotePreflight {
 export type PrincipalType = "user" | "group" | "everyone";
 
 export interface Grant {
+  guest: boolean;
   id: number;
   node_id: string;
   principal_type: PrincipalType;
@@ -707,6 +708,8 @@ export interface Grant {
 }
 
 export interface AccessInfo {
+  share_own_groups: boolean;
+  guest_max_days: number;
   node: Node;
   drive: { id: string; name: string; kind: DriveKind; root_id: string; link_makers: LinkMakers };
   is_drive_root: boolean;
@@ -717,6 +720,7 @@ export interface AccessInfo {
 }
 
 export interface Principal {
+  guest: boolean;
   principal_type: PrincipalType;
   principal_id: number;
   name: string;
@@ -728,7 +732,7 @@ export interface Group {
   name: string;
   description: string;
   created_at: number;
-  members: { id: number; username: string }[];
+  members: { id: number; username: string; guest: boolean }[];
 }
 
 export interface Activity {
@@ -898,6 +902,7 @@ export type SsoProvisioning = "off" | "link" | "create";
 
 /** Permissions and space size of accounts a provider creates automatically */
 export interface SsoNewUserDefaults {
+  guest: boolean;
   can_write: boolean;
   can_delete: boolean;
   can_share: boolean;
@@ -929,6 +934,7 @@ export interface SsoProviderSettings extends SsoProviderPolicy {
 
 /** Settings for accounts created for one email domain (wins over the provider's defaults) */
 export interface SsoDomainRule {
+  guest: boolean;
   domain: string;
   can_write: boolean;
   can_delete: boolean;
@@ -1072,6 +1078,7 @@ export interface SharedItem extends Located {
 }
 
 export interface Me {
+  guest: boolean;
   id: number;
   /** An administrator chose the password: the person must choose their own before anything else */
   must_change_password: boolean;
@@ -1237,7 +1244,21 @@ export interface ShareAccessOptions {
   allow_download: boolean;
 }
 
+export interface GuestConversionPreview {
+  revision: string;
+  max_days: number;
+  personal_files: number;
+  personal_bytes: number;
+  personal_space: boolean;
+  owned_spaces: string[];
+  unsafe_groups: { group_id: number; group_name: string; grant_id: number; item_name: string; role: Role; expires_at: number | null }[];
+  changed_grants: { id: number; item_name: string; old_role: Role; old_expires_at: number | null; role: Role; expires_at: number }[];
+  share_links: number;
+  s3_buckets: number;
+}
+
 export interface UserRow {
+  guest: boolean;
   id: number;
   username: string;
   role: "admin" | "user";
@@ -1270,6 +1291,8 @@ export interface UserRow {
 }
 
 export interface SystemSettingsReq {
+  share_own_groups?: boolean;
+  guest_max_days?: number;
   shared_enabled?: boolean;
   allow_user_drives?: boolean;
   default_user_quota?: number;
@@ -1292,6 +1315,8 @@ export interface SystemSettingsReq {
 export type DefaultLang = "auto" | Lang;
 
 export interface SystemInfo {
+  share_own_groups: boolean;
+  guest_max_days: number;
   shared_enabled: boolean;
   shared_root_id: string;
   allow_user_drives: boolean;

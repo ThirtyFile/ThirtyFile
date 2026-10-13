@@ -83,6 +83,7 @@
             <li><a href="#manage">Your links</a></li>
             <li><a href="#admin">For administrators</a></li>
             <li><a href="#spaces">Spaces</a></li>
+            <li><a href="#guest-access">Guest access and sharing policy</a></li>
           </ol>
         </details>
         <h2 id="people">Share with colleagues</h2>
@@ -153,6 +154,8 @@
           <li><strong>Team spaces</strong>: for a department or project. Managers add and remove members.</li>
         </ul>
       <p>A folder can also be published as an <a href="protocols.html#s3">S3 bucket</a> for programs. Administrators, and space managers allowed by the S3 setting, create folder-specific keys. Personal spaces and spaces whose link makers are Nobody cannot be published.</p>
+        <h2 id="guest-access">Guest access and sharing policy</h2>
+        <p>Under <strong>Control panel › General › Guest access and sharing</strong>, set the maximum number of days for access given to guests (90 by default). Every new or updated direct grant to a guest, or grant to a group containing a guest, needs an end date within this limit, even when an administrator gives it. Choose Editor, Contributor or Viewer. Changing the setting does not rewrite existing end dates. Expired access stops in the browser, WebDAV and SFTP.</p><p><strong>Share only within your own groups</strong> limits new or updated access grants: a user must share a current group with you, and a target group must currently include you. The picker follows this policy. Administrators are exempt. Existing grants to unrelated people remain valid; remove them explicitly if they should end. This setting governs account and group access, rather than changing existing public links.</p>
         <nav class="next" aria-label="More guides">
           <a href="preview.html"><span>Previous</span>Preview and editing</a>
           <a class="forward" href="account.html"><span>Next</span>Your account</a>

@@ -128,6 +128,9 @@ pub async fn load_system_settings(db: &SqlitePool) -> Result<SystemSettings, sql
     let share_password_required = get_setting(db, "share_password_required").await?.as_deref() == Some("1");
     let share_max_days = get_setting(db, "share_max_days").await?.and_then(|v| v.parse().ok()).unwrap_or(0).clamp(0, crate::shares::MAX_EXPIRY_DAYS);
     let public_links = get_setting(db, "public_links").await?.as_deref() != Some("0");
+    let share_own_groups = get_setting(db, "share_own_groups").await?.as_deref() == Some("1");
+    let guest_max_days =
+        get_setting(db, "guest_max_days").await?.and_then(|s| s.parse().ok()).unwrap_or(crate::guests::DEFAULT_DAYS).clamp(1, crate::guests::MAX_DAYS);
     let version_keep =
         get_setting(db, "version_keep").await?.and_then(|v| v.parse().ok()).unwrap_or(crate::versions::DEFAULT_KEEP).clamp(0, crate::versions::MAX_KEEP);
     let version_days =
@@ -148,6 +151,8 @@ pub async fn load_system_settings(db: &SqlitePool) -> Result<SystemSettings, sql
         share_password_required,
         share_max_days,
         public_links,
+        share_own_groups,
+        guest_max_days,
         version_keep,
         version_days,
         move_jobs,

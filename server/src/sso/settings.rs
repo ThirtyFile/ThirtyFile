@@ -59,11 +59,23 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, hea
     {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
+        let user = crate::auth::require_admin(&mut tx, &user).await?;
+        for p in PROVIDERS {
+            let provider = req.provider(p).unwrap();
+            if provider.defaults.guest {
+                crate::guests::validate_guest_groups(&mut tx, &provider.groups).await?;
+            }
+        }
+        for rule in &req.domain_rules {
+            if rule.guest {
+                crate::guests::validate_guest_groups(&mut tx, &rule.groups).await?;
+            }
+        }
         store(&mut tx, &req).await?;
         logs::record_activity(&mut tx, &user, None, "settings", &detail).await?;
         tx.commit().await?;
+        *st.part::<Memory>().settings.write() = req.clone();
     }
-    *st.part::<Memory>().settings.write() = req;
     Ok(Json(admin_view(&st, &headers)))
 }
 
@@ -90,6 +102,9 @@ pub(super) async fn check_provider(st: &AppState, p: &str, new: &mut ProviderCon
         return Err(AppError::bad_request("The space size can't be negative"));
     }
     new.groups = existing_groups(st, &new.groups).await?;
+    if new.defaults.guest {
+        crate::guests::validate_guest_groups(&mut *st.db.acquire().await?, &new.groups).await?;
+    }
     if p == "oidc" {
         discover(new, prev).await?;
     }
@@ -159,6 +174,12 @@ pub(super) async fn check_domain_rules(st: &AppState, rules: Vec<DomainRule>) ->
             crate::db::check_location(&mut *st.db.acquire().await?, l).await?;
         }
         r.groups = existing_groups(st, &r.groups).await?;
+        if r.guest {
+            if r.personal_space == Some(true) {
+                return Err(AppError::bad_request("Guests can't have My files"));
+            }
+            crate::guests::validate_guest_groups(&mut *st.db.acquire().await?, &r.groups).await?;
+        }
         r.domain = domain;
         checked.push(r);
     }

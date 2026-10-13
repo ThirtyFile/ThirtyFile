@@ -43,6 +43,7 @@ pub async fn update(State(st): State<AppState>, Admin(user): Admin, Json(req): J
     }
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
+    crate::auth::require_admin(&mut tx, &user).await?;
     for (key, value) in [("sftp_enabled", req.enabled), ("sftp_keys_enabled", req.keys_enabled)] {
         sqlx::query("INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
             .bind(key)
