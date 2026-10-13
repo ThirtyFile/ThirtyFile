@@ -167,6 +167,7 @@ pub async fn create(State(st): State<AppState>, Admin(me): Admin, Json(mut req):
                 username,
                 password_hash: &password_hash,
                 role,
+                guest: false,
                 can_write: req.can_write,
                 can_delete: req.can_delete,
                 can_share: req.can_share,

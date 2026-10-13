@@ -198,6 +198,7 @@ fn sharing_api() -> Router<AppState> {
         .route("/drives/{id}", patch(drives::update).delete(drives::delete))
         .route("/drives/{id}/links-stopping", get(drives::links_stopping))
         .route("/nodes/{id}/access", get(drives::access).post(drives::grant))
+        .route("/nodes/{id}/restriction", get(crate::restrictions::preview).post(crate::restrictions::change))
         .route("/grants/{id}", delete(drives::revoke))
         .route("/directory", get(drives::directory))
         .route("/activity", get(history::activity))
