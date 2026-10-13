@@ -36,10 +36,11 @@ pub struct Upload {
     pub existing: Option<Node>,
 }
 
-/// Where a file `name` in `parent` goes, looked at before anything is received: nobody without write access makes the
-/// server take a file. A folder of that name is refused; a file of that name must be one the user may change.
+/// Where a file `name` in `parent` goes, looked at before anything is received: the parent needs Add, so contributors
+/// can add files to folders other people made. A folder of that name is refused; replacing a file requires Write on
+/// that item. Both checks are repeated when the received content is committed.
 pub async fn upload_to(st: &AppState, user: &User, parent: &Node, name: String) -> AppResult<Upload> {
-    let parent = tree::folder_for(&mut *st.db.acquire().await?, user, &parent.id, Need::Write).await?;
+    let parent = tree::folder_for(&mut *st.db.acquire().await?, user, &parent.id, Need::Add).await?;
     let mut c = st.db.acquire().await?;
     let mut existing = child_named(&mut c, &parent.id, &name).await?;
     // Only when the index and the folder on the server disagree about this name is the folder looked at again:
@@ -147,7 +148,7 @@ async fn store_file(st: &AppState, user: &User, parent: &Node, name: &str, tmp: 
         turn.ready()?;
         let mut tx = crate::db::begin_write(&st.db).await?;
         // Looked at again under the write lock: the folder or the file may have changed meanwhile
-        let folder = tree::folder_for(&mut tx, user, &parent.id, Need::Write).await?;
+        let folder = tree::folder_for(&mut tx, user, &parent.id, Need::Add).await?;
         staged.check(&folder)?;
         let (created, written) = match child_named(&mut tx, &folder.id, name).await? {
             Some(n) if n.is_folder() => return Err(AppError::new(StatusCode::METHOD_NOT_ALLOWED, "A folder has this name")),

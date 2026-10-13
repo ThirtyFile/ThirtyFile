@@ -643,4 +643,42 @@ mod tests {
         assert_eq!(parse(br#"<D:propfind xmlns:D="DAV:"><D:propname/></D:propfind>"#).unwrap().want(), Want::Names);
         assert!(parse(b"<not xml").is_err() || parse(b"<a><b></a>").is_err());
     }
+
+    #[tokio::test]
+    async fn a_contributor_changes_only_what_they_added_over_webdav() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let ben = env.user("ben", true).await;
+        // A folder space (so an item found on its disk is there too), Ben a contributor of it
+        let space = env.folder_space("Library").await;
+        testutil::write_old(&space.dir.join("found.txt"), b"found");
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        env.grant(&space.root, &ben, "contributor").await;
+        let admins = Client::new(&env, &admin, "write").await;
+        assert_eq!(admins.send("PUT", "/dav/Library/admin.txt", &[], "A").await.status, StatusCode::CREATED);
+        let dav = Client::new(&env, &ben, "write").await;
+        let to = |dest: &str| [("destination", format!("http://localhost{dest}")), ("overwrite", "F".to_string())];
+        let send = async |method: &str, path: &str, headers: [(&str, String); 2]| {
+            let h: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
+            dav.send(method, path, &h, "").await.status
+        };
+
+        // He adds files and folders, and changes his own
+        assert_eq!(dav.send("PUT", "/dav/Library/ben.txt", &[], "B").await.status, StatusCode::CREATED);
+        assert_eq!(dav.send("MKCOL", "/dav/Library/Ben", &[], "").await.status, StatusCode::CREATED);
+        assert_eq!(dav.send("PUT", "/dav/Library/ben.txt", &[], "B2").await.status, StatusCode::NO_CONTENT);
+        assert_eq!(send("MOVE", "/dav/Library/ben.txt", to("/dav/Library/Ben/ben.txt")).await, StatusCode::CREATED);
+        assert_eq!(send("COPY", "/dav/Library/admin.txt", to("/dav/Library/Ben/admin.txt")).await, StatusCode::CREATED);
+        // Others' items, and those found on the disk, he can't change, move or delete
+        for path in ["/dav/Library/admin.txt", "/dav/Library/found.txt"] {
+            assert_eq!(dav.send("PUT", path, &[], "X").await.status, StatusCode::FORBIDDEN, "{path}");
+            assert_eq!(dav.send("DELETE", path, &[], "").await.status, StatusCode::FORBIDDEN, "{path}");
+            assert_eq!(send("MOVE", path, to("/dav/Library/Ben/moved.txt")).await, StatusCode::FORBIDDEN, "{path}");
+        }
+        assert_eq!(std::fs::read(space.dir.join("found.txt")).unwrap(), b"found");
+        assert_eq!(admins.send("GET", "/dav/Library/admin.txt", &[], "").await.body, "A");
+        // As a member of the space, he takes his own to his files
+        assert_eq!(send("MOVE", "/dav/Library/Ben/ben.txt", to("/dav/My%20files/ben.txt")).await, StatusCode::CREATED);
+        assert_eq!(dav.send("DELETE", "/dav/Library/Ben/", &[], "").await.status, StatusCode::NO_CONTENT);
+    }
 }

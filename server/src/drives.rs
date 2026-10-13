@@ -680,6 +680,7 @@ async fn principal_name(conn: &mut SqliteConnection, kind: PrincipalType, id: i6
 fn role_label(r: Role) -> &'static str {
     match r {
         Role::Viewer => "Viewer",
+        Role::Contributor => "Contributor",
         Role::Editor => "Editor",
         Role::Manager => "Manager",
         Role::Owner => "Owner",
