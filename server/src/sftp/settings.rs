@@ -12,6 +12,7 @@ pub struct Info {
     pub keys_enabled: bool,
     pub address: String,
     pub fingerprint: String,
+    pub error: Option<String>,
 }
 
 pub async fn flag(st: &AppState, key: &str) -> AppResult<bool> {
@@ -26,6 +27,7 @@ pub async fn get(State(st): State<AppState>, _: Admin) -> AppResult<Json<Info>> 
         keys_enabled: flag(&st, "sftp_keys_enabled").await?,
         address: memory.address.read().clone(),
         fingerprint: memory.fingerprint.read().clone(),
+        error: memory.error.read().clone(),
     }))
 }
 

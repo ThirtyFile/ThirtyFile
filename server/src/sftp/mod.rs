@@ -29,6 +29,7 @@ use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 pub struct Memory {
     pub address: crate::sync::RwLock<String>,
     pub fingerprint: crate::sync::RwLock<String>,
+    pub error: crate::sync::RwLock<Option<String>>,
     sessions: crate::sync::Mutex<HashMap<i64, usize>>,
 }
 
@@ -126,9 +127,61 @@ impl Drop for Listener {
     }
 }
 
-pub async fn start(st: AppState, address: &str) -> Result<Listener, Box<dyn std::error::Error>> {
+/// Optional file access must not keep HTTP from starting. Retry its configured address after a bind failure.
+pub fn supervise(st: AppState, address: &str) -> Listener {
+    *st.part::<Memory>().address.write() = address.to_string();
+    let address = address.to_string();
+    let (stop, mut stopped) = tokio::sync::watch::channel(false);
+    let task = tokio::spawn(async move {
+        match host_key(&st).map_err(|error| error.to_string()) {
+            Ok(key) => *st.part::<Memory>().fingerprint.write() = key.public_key().fingerprint(HashAlg::Sha256).to_string(),
+            Err(error) => {
+                tracing::warn!("SFTP host key is unavailable: {error}; HTTP remains available");
+                *st.part::<Memory>().error.write() = Some(error);
+            }
+        }
+        let mut active: Option<Listener> = None;
+        let mut retry = tokio::time::Instant::now();
+        let mut tick = tokio::time::interval(Duration::from_millis(500));
+        loop {
+            tokio::select! {
+                _ = stopped.changed() => break,
+                _ = tick.tick() => (),
+            }
+            if !settings::flag(&st, "sftp_enabled").await.unwrap_or(false) {
+                if let Some(listener) = active.take() {
+                    listener.finish().await;
+                    *st.part::<Memory>().address.write() = address.clone();
+                }
+                continue;
+            }
+            if active.is_none() && tokio::time::Instant::now() >= retry {
+                // Keep non-Send error values out of the spawned task across an await.
+                match start(st.clone(), &address).await.map_err(|error| error.to_string()) {
+                    Ok(listener) => {
+                        *st.part::<Memory>().error.write() = None;
+                        active = Some(listener);
+                    }
+                    Err(error) => {
+                        if st.part::<Memory>().error.read().as_ref() != Some(&error) {
+                            tracing::warn!("SFTP is unavailable: {error}; HTTP remains available");
+                        }
+                        *st.part::<Memory>().error.write() = Some(error);
+                        retry = tokio::time::Instant::now() + Duration::from_secs(5);
+                    }
+                }
+            }
+        }
+        if let Some(listener) = active {
+            listener.finish().await;
+        }
+    });
+    Listener { stop, task: Some(task) }
+}
+
+fn host_key(st: &AppState) -> Result<PrivateKey, Box<dyn std::error::Error>> {
     let path = st.data_dir.join("sftp_host_ed25519");
-    let key = if path.exists() {
+    Ok(if path.exists() {
         russh::keys::load_secret_key(&path, None)?
     } else {
         let key = PrivateKey::from(russh::keys::ssh_key::private::Ed25519Keypair::from_seed(&rand::random()));
@@ -144,7 +197,11 @@ pub async fn start(st: AppState, address: &str) -> Result<Listener, Box<dyn std:
         file.write_all(key.to_openssh(russh::keys::ssh_key::LineEnding::LF)?.as_bytes())?;
         file.sync_all()?;
         key
-    };
+    })
+}
+
+pub async fn start(st: AppState, address: &str) -> Result<Listener, Box<dyn std::error::Error>> {
+    let key = host_key(&st)?;
     let socket = tokio::net::TcpListener::bind(address).await?;
     *st.part::<Memory>().address.write() = socket.local_addr()?.to_string();
     *st.part::<Memory>().fingerprint.write() = key.public_key().fingerprint(HashAlg::Sha256).to_string();

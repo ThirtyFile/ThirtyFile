@@ -31,6 +31,7 @@ struct Staged {
     append: bool,
     readable: bool,
     failed: bool,
+    create_only: bool,
 }
 impl Drop for Staged {
     fn drop(&mut self) {
@@ -135,7 +136,15 @@ impl Files {
         }
         let path = self.st.tmp_dir().join(format!("sftp-{}", new_id()));
         let file = tokio::fs::OpenOptions::new().create_new(true).read(true).write(true).open(&path).await.map_err(|_| StatusCode::Failure)?;
-        let mut stage = Staged { path, file, up, append: flags.contains(OpenFlags::APPEND), readable: flags.contains(OpenFlags::READ), failed: false };
+        let mut stage = Staged {
+            path,
+            file,
+            up,
+            append: flags.contains(OpenFlags::APPEND),
+            readable: flags.contains(OpenFlags::READ),
+            failed: false,
+            create_only: flags.contains(OpenFlags::EXCLUDE),
+        };
         if !flags.contains(OpenFlags::TRUNCATE)
             && let Some(node) = &stage.up.existing
         {
@@ -197,6 +206,9 @@ impl russh_sftp::server::Handler for Files {
         }
         let write = flags.intersects(OpenFlags::WRITE | OpenFlags::APPEND | OpenFlags::TRUNCATE | OpenFlags::CREATE);
         let user = self.user(write).await?;
+        if write && !flags.contains(OpenFlags::WRITE) {
+            return Err(StatusCode::BadMessage);
+        }
         let path = segments(&filename)?;
         let opened = if write {
             Opened::Write(Box::new(self.open_write(&user, &path, flags).await?))
@@ -223,7 +235,11 @@ impl russh_sftp::server::Handler for Files {
             stage.file.sync_data().await.map_err(|_| StatusCode::Failure)?;
             let size = stage.file.metadata().await.map_err(|_| StatusCode::Failure)?.len();
             access::check_size(&self.st, size).map_err(code)?;
-            access::store(self.st.clone(), user, stage.up.parent.clone(), stage.up.name.clone(), stage.path.clone(), size, None).await.map_err(code)?;
+            if stage.create_only {
+                access::store_new(self.st.clone(), user, stage.up.parent.clone(), stage.up.name.clone(), stage.path.clone(), size).await.map_err(code)?;
+            } else {
+                access::store(self.st.clone(), user, stage.up.parent.clone(), stage.up.name.clone(), stage.path.clone(), size, None).await.map_err(code)?;
+            }
         } else {
             self.user(false).await?;
         }

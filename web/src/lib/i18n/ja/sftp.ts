@@ -1,5 +1,6 @@
 /** SFTP settings, keys and verified protocol activity. */
 export default {
+  "SFTP is unavailable: {reason}": "SFTP を利用できません: {reason}",
   "The folder isn't empty": "フォルダーは空ではありません",
   "Updated SFTP settings": "SFTP 設定を更新しました",
   "SFTP keys": "SFTP キー",

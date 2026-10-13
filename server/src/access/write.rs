@@ -132,14 +132,21 @@ where
 /// Stores a received file as `name` in `parent`, replacing a file of that name, and removes the received file; true
 /// when it was created. `hash`: the content's SHA-256 when it was computed while receiving it
 pub async fn store(st: AppState, user: User, parent: Node, name: String, tmp: PathBuf, size: u64, hash: Option<String>) -> AppResult<bool> {
-    let result = store_file(&st, &user, &parent, &name, &tmp, size, hash).await;
+    let result = store_file(&st, &user, &parent, &name, &tmp, size, (hash, false)).await;
+    let _ = tokio::fs::remove_file(&tmp).await;
+    result
+}
+
+/// Commits a create-only upload, checking the name again after staging and waiting for the space's turn.
+pub async fn store_new(st: AppState, user: User, parent: Node, name: String, tmp: PathBuf, size: u64) -> AppResult<bool> {
+    let result = store_file(&st, &user, &parent, &name, &tmp, size, (None, true)).await;
     let _ = tokio::fs::remove_file(&tmp).await;
     result
 }
 
 /// Makes the received file `name` in `parent` (content.rs), or gives the file of that name its content; true when
 /// it was created
-async fn store_file(st: &AppState, user: &User, parent: &Node, name: &str, tmp: &Path, size: u64, hash: Option<String>) -> AppResult<bool> {
+async fn store_file(st: &AppState, user: &User, parent: &Node, name: &str, tmp: &Path, size: u64, (hash, create_only): (Option<String>, bool)) -> AppResult<bool> {
     let staged = content::stage(st, parent, content::Received { path: tmp.to_path_buf(), size, hash }).await?;
     let size = size as i64;
     let mut turn = staged.turn(st).await;
@@ -151,6 +158,7 @@ async fn store_file(st: &AppState, user: &User, parent: &Node, name: &str, tmp: 
         let folder = tree::folder_for(&mut tx, user, &parent.id, Need::Add).await?;
         staged.check(&folder)?;
         let (created, written) = match child_named(&mut tx, &folder.id, name).await? {
+            Some(_) if create_only => return Err(AppError::conflict(format!("\"{name}\" already exists"))),
             Some(n) if n.is_folder() => return Err(AppError::new(StatusCode::METHOD_NOT_ALLOWED, "A folder has this name")),
             Some(n) => {
                 let n = tree::node_for(&mut tx, user, &n.id, Need::Write).await?;

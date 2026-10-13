@@ -54,6 +54,7 @@ export function SftpKeysDialog({ onClose }: { onClose(): void }) {
             {t("Add an SSH public key to access your files over SFTP. Keep the private key on your device. Administrators must enable SFTP and SSH keys first.")}
           </DialogDescription>
         </DialogHeader>
+        {!security.data && <Pending query={security} loading={<Skeleton className="h-8" />} />}
         <form onSubmit={submit} className="grid gap-2 rounded border p-3">
           <Label htmlFor="sftp-name">{t("Name")}</Label>
           <Input id="sftp-name" maxLength={80} value={name} onChange={(e) => setName(e.target.value)} />
@@ -72,7 +73,9 @@ export function SftpKeysDialog({ onClose }: { onClose(): void }) {
             </>
           )}
           <ErrorText>{add.error?.message}</ErrorText>
-          <Button disabled={add.isPending || !security.data || !name.trim() || !publicKey.trim()}>{t("Add SSH key")}</Button>
+          <Button type="submit" disabled={add.isPending || !security.data || !name.trim() || !publicKey.trim()}>
+            {t("Add SSH key")}
+          </Button>
         </form>
         {!q.data ? (
           <Pending query={q} loading={<Skeleton className="h-20" />} />

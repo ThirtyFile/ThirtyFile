@@ -1,5 +1,6 @@
 /** SFTP settings, keys and verified protocol activity. */
 export default {
+  "SFTP is unavailable: {reason}": "SFTP 無法使用：{reason}",
   "The folder isn't empty": "資料夾不是空的",
   "Updated SFTP settings": "已更新 SFTP 設定",
   "SFTP keys": "SFTP 金鑰",
