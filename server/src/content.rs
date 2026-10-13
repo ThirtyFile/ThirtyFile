@@ -37,7 +37,7 @@ pub struct Received {
 
 /// Received content put where its space keeps content, ready to become a file
 pub struct Staged {
-    md5: String,
+    md5: Option<String>,
     drive: String,
     kind: Kind,
 }
@@ -70,7 +70,13 @@ pub async fn stage_restored(st: &AppState, into: &Node, received: Received) -> A
 }
 
 async fn stage_inner(st: &AppState, into: &Node, received: Received, restored: bool) -> AppResult<Staged> {
-    let md5 = crate::s3::etag::reader(tokio::fs::File::open(&received.path).await?).await?;
+    let md5 = match tokio::fs::File::open(&received.path).await {
+        Ok(file) => Some(crate::s3::etag::reader(file).await?),
+        // Restoring an already stored version only changes references, even while its storage is offline.
+        // The content-change trigger invalidates the old checksum; its next successful read fills the cache.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound && received.hash.is_some() && !into.in_folder_space() => None,
+        Err(e) => return Err(e.into()),
+    };
     let kind = if into.in_folder_space() {
         Kind::Folder(fsops::stage_upload(st, into, &received.path, received.size).await?)
     } else {
@@ -240,10 +246,11 @@ pub async fn replace(conn: &mut SqliteConnection, st: &AppState, staged: &Staged
 }
 
 async fn cache_md5(conn: &mut SqliteConnection, staged: &Staged, id: &str) -> AppResult<()> {
+    let Some(md5) = &staged.md5 else { return Ok(()) };
     let node = tree::get_node(conn, id).await?.ok_or_else(|| AppError::not_found("File not found"))?;
     let source = crate::files::Source::of(&node)?;
     let (_, version) = source.describe(node.size as u64).await?;
-    sqlx::query("UPDATE nodes SET content_md5 = ?, md5_version = ? WHERE id = ?").bind(&staged.md5).bind(version).bind(id).execute(conn).await?;
+    sqlx::query("UPDATE nodes SET content_md5 = ?, md5_version = ? WHERE id = ?").bind(md5).bind(version).bind(id).execute(conn).await?;
     Ok(())
 }
 

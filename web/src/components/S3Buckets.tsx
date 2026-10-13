@@ -196,7 +196,8 @@ export function S3BucketDialog({ nodeId, onClose }: { nodeId: string; onClose():
           <>
             {options.data && (
               <p className="text-xs [overflow-wrap:anywhere]">
-                {t("Endpoint")}: https://{options.data.hostname} · {t("Region")}: {options.data.region} · {t("Use path-style URLs")}
+                {t("Endpoint")}: {window.location.protocol}//{options.data.hostname}
+                {window.location.port ? `:${window.location.port}` : ""} · {t("Region")}: {options.data.region} · {t("Use path-style URLs")}
               </p>
             )}
             {q.data.can_publish ? (

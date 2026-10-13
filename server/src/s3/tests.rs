@@ -160,6 +160,9 @@ async fn sdk_round_trips_nested_unicode_content_md5_ranges_conditions_copy_and_t
     assert_eq!(head.e_tag(), out.e_tag());
     let signed =
         s.client.get_object().bucket("backups").key(key).presigned(PresigningConfig::expires_in(std::time::Duration::from_secs(300)).unwrap()).await.unwrap();
+    let ranged = reqwest::Client::new().get(signed.uri()).header("range", "bytes=1-3").send().await.unwrap();
+    assert_eq!(ranged.status(), axum::http::StatusCode::PARTIAL_CONTENT);
+    assert_eq!(ranged.bytes().await.unwrap().as_ref(), b"ell");
     let not_modified = reqwest::Client::new().get(signed.uri()).header("if-none-match", out.e_tag().unwrap()).send().await.unwrap();
     assert_eq!(not_modified.status(), axum::http::StatusCode::NOT_MODIFIED);
     assert!(not_modified.bytes().await.unwrap().is_empty());
