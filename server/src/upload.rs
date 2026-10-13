@@ -743,13 +743,15 @@ pub async fn clean_tmp(st: &AppState) -> AppResult<usize> {
         let modified = entry.metadata().await.and_then(|m| m.modified()).ok();
         files.push((entry.file_name().to_string_lossy().into_owned(), entry.path(), modified));
     }
-    let known: std::collections::HashSet<String> =
+    let mut known: std::collections::HashSet<String> =
         sqlx::query_as::<_, (String,)>("SELECT id FROM uploads").fetch_all(&st.db).await?.into_iter().map(|(id,)| format!("upload-{id}")).collect();
+    known.extend(sqlx::query_as::<_, (String,)>("SELECT file_id FROM s3_parts").fetch_all(&st.db).await?.into_iter().map(|(id,)| format!("s3-part-{id}")));
     let now = std::time::SystemTime::now();
     let older_than = |t: Option<std::time::SystemTime>, secs: u64| t.is_some_and(|t| t < now - std::time::Duration::from_secs(secs));
     let mut removed = 0;
     for (name, path, modified) in files {
-        let stale = if name.starts_with("upload-") { !known.contains(&name) && older_than(modified, 3600) } else { older_than(modified, 86400) };
+        let stale =
+            if name.starts_with("upload-") { !known.contains(&name) && older_than(modified, 3600) } else { !known.contains(&name) && older_than(modified, 86400) };
         if stale && tokio::fs::remove_file(path).await.is_ok() {
             removed += 1;
         }

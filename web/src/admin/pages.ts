@@ -7,6 +7,7 @@ import type { ControlPanelKey } from "@/admin/controlPanel";
 export const ADMIN_PAGES: Record<ControlPanelKey, () => Promise<ComponentType>> = {
   users: () => import("@/admin/users/AdminUsersPage").then((m) => m.AdminUsersPage),
   groups: () => import("@/admin/users/GroupsPage").then((m) => m.GroupsPage),
+  s3: () => import("@/admin/users/S3BucketsPage").then((m) => m.S3BucketsPage),
   shares: () => import("@/admin/users/AdminSharesPage").then((m) => m.AdminSharesPage),
   sso: () => import("@/admin/users/SsoPage").then((m) => m.SsoPage),
   drives: () => import("@/admin/storage/AdminDrivesPage").then((m) => m.AdminDrivesPage),

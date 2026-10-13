@@ -20,6 +20,19 @@ GitHub, Microsoft, Google, Keycloak, Authentik, Excel, Word, PowerPoint, NAS.
 
 ## Terms
 
+| English          | zh-TW          | zh-CN        | ja                       |
+| ---------------- | -------------- | ------------ | ------------------------ |
+| Bucket           | bucket         | 存储桶       | バケット                 |
+| Access Key       | Access Key     | Access Key   | Access Key               |
+| Secret Key       | Secret Key     | Secret Key   | Secret Key               |
+| Endpoint         | 端點           | 端点         | エンドポイント           |
+| Region           | 區域           | 区域         | リージョン               |
+| Prefix           | 前綴           | 前缀         | プレフィックス           |
+| Object           | 物件           | 对象         | オブジェクト             |
+| Path-style URL   | 路徑式網址     | 路径样式 URL | パス形式の URL           |
+| Presigned URL    | 預先簽署的網址 | 预签名 URL   | 署名付き URL             |
+| Multipart Upload | 分段上傳       | 分段上传     | マルチパートアップロード |
+
 | English              | zh-TW        | zh-CN        | ja                             |
 | -------------------- | ------------ | ------------ | ------------------------------ |
 | SSH public key       | SSH 公開金鑰 | SSH 公钥     | SSH 公開キー                   |

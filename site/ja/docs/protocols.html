@@ -113,7 +113,42 @@ get report.csv</code></pre>
 <p>一覧表示、ダウンロード、アップロード、指定位置からの再開、フォルダー作成、名前変更、移動、削除（ごみ箱へ）に対応します。書き込みは一時保存され、ファイルを閉じると容量制限、アップロード上限、バージョン、活動ログを適用して確定します。切断時は未確定の書き込みを破棄します。クライアントから送られた時刻設定は受け付けますが保存しません。シェル、コマンド実行、SSH 経由の rsync、転送、シンボリックリンクには対応しません。アカウントごとに接続は五つ、接続ごとに開ける項目は 32 個、無操作タイムアウトは五分です。</p>
 <p>初回起動時にデータフォルダーに ed25519 ホストキーを生成します。データのバックアップに含めてください。交換するとフィンガープリントが変わり、クライアントが変更の確認を求めます。</p>
 <h2 id="s3">S3 バケット</h2>
-<p>フォルダーを専用 Access Key のバケットとして公開する機能は別途開発中です。SFTP アプリパスワードは使用しません。既存の S3 ストレージへの接続は<a href="storage.html#types">ストレージの場所</a>を参照してください。</p>
+<p>チームや会社のフォルダーをバケットとして公開します。各 Access Key はそのフォルダーだけにアクセスし、作成者の現在の権限で操作します。既存の S3 サービスをストレージとして追加する機能とは異なります。</p>
+<h3 id="s3-setup">エンドポイントの設定</h3>
+<p><strong>コントロールパネル › 一般 › アプリとプロトコル › S3</strong> で S3 を有効にし、<code>s3.files.example.com</code> などの専用ホスト名とリージョン（既定は <code>us-east-1</code>）を指定します。初期状態では無効です。プロキシはこのホスト名をサイトと同じ HTTP ポートへ転送するため、Docker ポートの追加は不要です。署名に使われる元の Host ヘッダーを保持してください。S3 ホスト名には有効な HTTPS 証明書と DNS レコードが必要です。</p>
+<p>既存の証明書設定を持つ S3 ホスト名の HTTPS server ブロックに次の設定を追加します。ディスク容量やスペースのクォータに合ったアップロード制限を設定してください。</p>
+<pre><code>location / {
+    proxy_pass http://thirtyfile:8080;
+    proxy_set_header Host $http_host;
+    proxy_request_buffering off;
+    proxy_buffering off;
+    client_max_body_size 0;
+}</code></pre>
+<h3 id="s3-publishing">公開とキー</h3>
+<p>フォルダーを右クリックして <strong>S3 バケットとして公開…</strong> を選ぶか、<strong>プロパティ › S3 バケット</strong> を開きます。小文字、数字、ハイフンで 3～63 文字の一意な名前を指定します。フォルダーの名前を変更したり移動したりしても、バケット名は変わりません。</p>
+<p>管理者はチームまたは会社のフォルダーを公開できます。スペースの管理者には、アカウントの共有権限と <strong>スペースの管理者によるバケットの公開を許可</strong> の有効化が必要です。個人スペースと共有リンクの作成者を <strong>誰も許可しない</strong> にしたスペースは公開できません。フォルダーがごみ箱にある間、作成者の管理権限がなくなった場合、スペースを無効にした場合はバケットが停止します。権限やフォルダーを復元すると、有効なバケットは再び使えます。</p>
+<p>説明、読み取り専用または読み書きの権限、任意の有効期限を指定してキーを作成します。Secret Key は一度だけ表示されるため、すぐ保存してください。キーはデータフォルダーの <code>secret.key</code> で暗号化されます。<a href="backup.html">バックアップガイド</a> に従ってこのファイルを保管してください。有効なキーの期限が三日以内になると、作成者にアクセス終了の通知が届きます。読み取り専用のスペースには読み取り専用キーだけを作成できます。</p>
+<p>キーは個別に停止または削除でき、他のキーには影響しません。<strong>コントロールパネル › S3 バケット</strong> では全バケット、作成者、キー、最終使用時刻を確認できます。バケットを停止すると全キーのアクセスが止まります。バケットやキーを削除してもファイルは残ります。Access Key はサイト、SFTP、WebDAV へのログインには使えません。操作履歴にはバケットとキーの説明が記録され、認証情報は記録されません。</p>
+<h3 id="s3-clients">クライアント</h3>
+<p>プログラムで S3 互換サービスを選び、エンドポイント <code>https://s3.files.example.com</code>、リージョン <code>us-east-1</code>（または設定したリージョン）、パス形式の URL、バケットのキーを指定します。仮想ホスト形式の URL、ACL、サーバー側暗号化設定は有効にしないでください。</p>
+<p>aws cli では名前付きプロファイルを対話形式で設定し、認証情報をコマンド履歴に残さないでください。アドレス形式を path にし、各コマンドでエンドポイントを指定します。</p>
+<pre><code>aws configure --profile thirtyfile
+aws configure set s3.addressing_style path --profile thirtyfile
+aws --profile thirtyfile --endpoint-url https://s3.files.example.com s3 ls s3://backups/
+aws --profile thirtyfile --endpoint-url https://s3.files.example.com s3 cp report.csv s3://backups/report.csv</code></pre>
+<p>rclone では <code>rclone config</code> を実行し、S3、プロバイダー Other を選び、キーを対話形式で入力します。エンドポイントとリージョンを指定し、force_path_style を有効にし、disable_checksum を true にして rclone の独自 MD5 メタデータを無効にします（S3 の Content-MD5 は転送を検証します）。ACL とサーバー側暗号化は未設定にします。<code>rclone copy</code> はファイルを追加しますが、<code>rclone sync</code> は宛先のファイルを削除する場合があります。</p>
+<p>ThirtyFile は rclone の <code>x-amz-meta-mtime</code> を現在のコンテンツバージョンに結び付けて保持し、同じキーへのコピーによる時刻の更新もサポートします。他のカスタムメタデータには対応しません。<code>no_system_metadata</code> ではこのタイムスタンプの送信を止められないため、無効のままにしてください。S3 以外のファイルの更新時刻は変わりません。</p>
+<h3 id="s3-backups">バックアップとその他の用途</h3>
+<p>restic を使う場合は <strong>Backups</strong> フォルダーを <code>backups</code> として公開し、読み書きキーを作成します。<code>AWS_ACCESS_KEY_ID</code> と <code>AWS_SECRET_ACCESS_KEY</code> は保護された認証情報ストアから読み込みます。リポジトリのパスワードは S3 キーとは別です。安全に保管し、専用の空のフォルダーだけを初期化してください。</p>
+<pre><code>restic -r s3:https://s3.files.example.com/backups -o s3.region=us-east-1 -o s3.bucket-lookup=path init
+restic -r s3:https://s3.files.example.com/backups -o s3.region=us-east-1 -o s3.bucket-lookup=path backup ./documents</code></pre>
+<p>Duplicati や Synology Hyper Backup では、同じエンドポイント、リージョン、パス形式を使う S3 互換の保存先を設定できます。バックアップリポジトリのファイルをブラウザーで編集しないでください。このエンドポイントは各ツールの保存先であり、ThirtyFile 自体のバックアップやレプリカのポリシーとは別です。</p>
+<p>取引先に価格表を読んでもらう場合は <strong>Price lists</strong> フォルダーを <code>price-lists</code> として公開し、90 日後に期限が切れる読み取り専用キーを作成します。データチームでは rclone や aws cli のジョブごとにキーを作成すると、個別に停止できます。</p>
+<h3 id="s3-mapping">フォルダーへの対応と制限</h3>
+<p><code>a/b/c.txt</code> は入れ子のフォルダーとファイルに対応し、PUT は必要な親フォルダーを作成します。<code>/</code> で終わる空のオブジェクトはフォルダーです。一覧は UTF-8 のバイト順で、プレフィックス、区切り文字、件数を制限したページに対応します。親への移動、空のパス要素、不正な文字、前後の空白を含む名前は拒否します。大文字と小文字を区別しないスペースでは、大文字と小文字だけが異なる名前の競合を拒否します。</p>
+<p>DELETE はファイルとフォルダーをごみ箱へ移します。上書き時はスペースの方針に従って以前のバージョンを保存します。クォータとアップロードサイズの制限も適用されます。MD5 ETag はアップロードした内容を識別し、Content-MD5 と対応する AWS チェックサムヘッダーを検証します。マルチパートの部品は一日以内の一時保存で、未完了アップロードを中止すれば早く解放できます。未完了アップロードはキーごとに 32 件、バケットごとに 128 件、サーバー全体で 512 件までです。各アップロードは 10,000 パートまでです。</p>
+<p>対応する操作は ListBuckets（キーに対応するバケットのみ）、HeadBucket、GetBucketLocation、ListObjects/V2、HEAD、範囲と条件付き GET、PUT、同一バケット内の COPY、DELETE と一括削除、マルチパートの開始・パート送信・完了・中止・一覧、署名付き GET/PUT です。署名付き URL の有効期間は最大七日ですが、キーの期限切れや無効化で直ちに停止します。読み取り専用キーは署名付き URL でも PUT できません。</p>
+<p>ACL、S3 API によるバケット作成、バケットポリシー、ライフサイクル、Object Lock、S3 バージョニング、カスタムメタデータ、オブジェクトタグ、サーバー側暗号化設定、仮想ホスト形式の URL は提供しません。未対応の操作には NotImplemented を返します。時計はサーバーとのずれを 15 分以内にしてください。署名の失敗にはログインと共通の失敗回数制限を適用します。</p>
 <h2 id="ftp">FTP 受信フォルダー</h2>
 <p>FTP 受信サーバーは提供していません。SFTP を使えないスキャナーやカメラで具体的な必要が生じた場合に計画します。既存の FTP サーバーをストレージとして追加する機能とは異なります。</p>
 <h2 id="use-cases">利用例</h2>

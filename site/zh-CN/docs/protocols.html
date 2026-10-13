@@ -113,7 +113,42 @@ get report.csv</code></pre>
 <p>可列出和下载文件、上传、从指定位置续传、创建文件夹、重命名、移动及移除项目（送到回收站）。写入先暂存，关闭文件时才提交，并应用配额、上传限制、版本及活动记录。断线时丢弃未完成写入。接受客户端时间设置但不保存。不提供 Shell、命令执行、SSH rsync、转发或符号链接。每个账号最多五个连接，每个连接最多 32 个打开项目，闲置五分钟后超时。</p>
 <p>首次启动时，服务器在数据目录生成 ed25519 主机密钥，请一起备份。更换密钥会改变指纹，客户端应要求你重新确认。</p>
 <h2 id="s3">S3 存储桶</h2>
-<p>将文件夹发布为使用独立 Access Key 的存储桶是另一项开发中的功能，不使用 SFTP 应用程序密码。将 ThirtyFile 连接至现有 S3 存储位置，请参阅<a href="storage.html#types">存储位置</a>。</p>
+<p>将团队或公司文件夹发布为存储桶。每个 Access Key 只能访问该文件夹，并按创建者当前的权限操作。这与将现有 S3 服务添加为存储位置不同。</p>
+<h3 id="s3-setup">端点设置</h3>
+<p>在<strong>控制面板 › 常规 › 应用程序与协议 › S3</strong> 启用 S3，输入独立主机名，例如 <code>s3.files.example.com</code>，并选择区域（默认 <code>us-east-1</code>）。S3 默认关闭。代理将此主机名转发至与网站相同的 HTTP 端口，无需新增 Docker 端口。请保留原始 Host 请求头，它是签名的一部分。S3 主机名需要有效的 HTTPS 证书和 DNS 记录。</p>
+<p>将以下指令加入 S3 主机名的 HTTPS server 配置块，沿用现有证书设置。请按磁盘容量和空间配额设置适当的上传限制。</p>
+<pre><code>location / {
+    proxy_pass http://thirtyfile:8080;
+    proxy_set_header Host $http_host;
+    proxy_request_buffering off;
+    proxy_buffering off;
+    client_max_body_size 0;
+}</code></pre>
+<h3 id="s3-publishing">发布和密钥</h3>
+<p>右键点击文件夹并选择<strong>发布为 S3 存储桶…</strong>，或打开<strong>属性 › S3 存储桶</strong>。名称必须唯一，由 3–63 个小写字母、数字和连字符组成。重命名或移动文件夹不会改变存储桶名称。</p>
+<p>管理员可发布团队或公司文件夹。空间管理者还须有账号的分享权限，并启用<strong>允许空间管理者发布存储桶</strong>。个人空间及<strong>可创建分享链接的人</strong>设为<strong>无人</strong>的空间不能发布。文件夹在回收站内、创建者失去管理权限或空间停用时，存储桶会停止。还原文件夹或访问权限后，已启用的存储桶会恢复工作。</p>
+<p>创建一个或多个密钥，填写说明、只读或读写访问权限和可选的到期日。请立即保存 Secret Key，它只显示一次。密钥使用数据目录的 <code>secret.key</code> 加密，请按<a href="backup.html">备份指南</a>保存该文件。已启用密钥到期前三天内，创建者会收到访问权限即将结束的通知。只读空间只能创建只读密钥。</p>
+<p>可单独停用或删除密钥，不影响其他密钥。<strong>控制面板 › S3 存储桶</strong> 列出所有存储桶、创建者、密钥和上次使用时间。停用存储桶会阻止全部密钥；删除存储桶或密钥不会删除文件。Access Keys 不能登录网站、SFTP 或 WebDAV。活动记录会标明存储桶和密钥说明，不会记录凭据。</p>
+<h3 id="s3-clients">客户端</h3>
+<p>在程序中选择 S3 兼容服务：端点 <code>https://s3.files.example.com</code>、区域 <code>us-east-1</code>（或自行设置的区域）、路径样式 URL 和存储桶密钥。不要启用虚拟托管样式 URL、ACL 或服务器端加密设置。</p>
+<p>使用 aws cli 时，请交互设置命名配置文件，避免机密出现在命令历史中。将寻址方式设为 path，并在每条命令指定端点。</p>
+<pre><code>aws configure --profile thirtyfile
+aws configure set s3.addressing_style path --profile thirtyfile
+aws --profile thirtyfile --endpoint-url https://s3.files.example.com s3 ls s3://backups/
+aws --profile thirtyfile --endpoint-url https://s3.files.example.com s3 cp report.csv s3://backups/report.csv</code></pre>
+<p>使用 rclone 时运行 <code>rclone config</code>，选择 S3、提供商 Other，交互输入密钥，设置端点和区域，启用 force_path_style，将 disable_checksum 设为 true 以停用 rclone 自定义 MD5 元数据（S3 Content-MD5 仍会验证传输），并将 ACL 和服务器端加密留空。<code>rclone copy</code> 可增加文件；<code>rclone sync</code> 可能移除目标文件。</p>
+<p>ThirtyFile 会将 rclone 的 <code>x-amz-meta-mtime</code> 与当前内容版本一起保存，也支持使用同名复制更新时间。其他自定义元数据仍不支持。<code>no_system_metadata</code> 无法阻止 rclone 发送此时间戳，请保持关闭。这不会改变 S3 以外的文件修改时间。</p>
+<h3 id="s3-backups">备份和其他用途</h3>
+<p>使用 restic 时，将<strong>备份</strong>文件夹发布为 <code>backups</code>，并创建读写密钥。从受保护的凭据存储区加载 <code>AWS_ACCESS_KEY_ID</code> 和 <code>AWS_SECRET_ACCESS_KEY</code>。Repository 密码与 S3 密钥不同，请妥善保管。只在专用的空文件夹中初始化。</p>
+<pre><code>restic -r s3:https://s3.files.example.com/backups -o s3.region=us-east-1 -o s3.bucket-lookup=path init
+restic -r s3:https://s3.files.example.com/backups -o s3.region=us-east-1 -o s3.bucket-lookup=path backup ./documents</code></pre>
+<p>Duplicati 或 Synology Hyper Backup 可使用 S3 兼容目标，设置相同端点、区域和路径样式 URL。请勿在浏览器中编辑备份 repository 文件。此 S3 端点是这些工具的目标，与 ThirtyFile 自身的备份和副本策略不同。</p>
+<p>合作伙伴读取价目表时，可将<strong>价目表</strong>文件夹发布为 <code>price-lists</code>，并创建 90 天后到期的只读密钥。数据团队应为每个 rclone 或 aws cli 任务创建独立密钥，便于分别停用。</p>
+<h3 id="s3-mapping">文件夹映射和限制</h3>
+<p><code>a/b/c.txt</code> 等 key 对应嵌套文件夹和文件；PUT 会创建缺少的父文件夹。以 <code>/</code> 结尾的空对象代表文件夹。列表使用 UTF-8 字节排序、前缀、分隔符和有上限的分页。路径穿越、空路径组件、非法字符或前后空格的名称会被拒绝。不区分大小写的空间会拒绝仅大小写不同的名称冲突。</p>
+<p>DELETE 会将文件和文件夹移至回收站。覆盖会按空间策略保留旧版本。空间配额和上传大小限制均适用。MD5 ETag 标识上传内容，服务器会验证 Content-MD5 和支持的 AWS 校验和请求头。分段上传的片段在临时存储区保留最多一天，可中止未完成上传以提前释放。每个密钥最多 32 个、每个存储桶最多 128 个待完成上传（全服务器 512 个），每次最多 10,000 个片段。</p>
+<p>支持的操作包括 ListBuckets（仅该密钥的存储桶）、HeadBucket、GetBucketLocation、ListObjects/V2、HEAD、范围和条件式 GET、PUT、同一存储桶内的 COPY、DELETE 和批量删除、分段创建／上传／完成／中止／列出，以及预签名 GET/PUT。预签名 URL 最长有效七天，密钥到期或停用后立即失效。只读密钥即使使用预签名 URL 也不能 PUT。</p>
+<p>不提供 ACL、通过 S3 创建存储桶、存储桶策略、生命周期、Object Lock、S3 版本 API、自定义元数据、对象标签、服务器端加密设置或虚拟托管样式 URL。不支持的操作返回 NotImplemented。时钟需与服务器相差 15 分钟以内；错误签名与登录共用失败限制。</p>
 <h2 id="ftp">FTP 接收文件夹</h2>
 <p>目前不提供 FTP 接收服务器，仅在无法使用 SFTP 的扫描仪或摄像机有具体需求时规划。将现有 FTP 服务器添加为存储位置是不同功能。</p>
 <h2 id="use-cases">使用案例</h2>

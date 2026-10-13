@@ -113,7 +113,42 @@ get report.csv</code></pre>
 <p>List and download files, upload, resume at an offset, make folders, rename, move, and remove items (to the trash). Writes are staged and committed when the file closes: quotas, upload limits, versions and activity records apply. A disconnected unfinished write is discarded. Times sent by clients are accepted but ignored. There is no shell, command execution, rsync over SSH, forwarding or symbolic links. Each account may have five sessions, with 32 open handles per session and a five-minute idle timeout.</p>
 <p>The server generates an ed25519 host key in the data folder on first start. Keep it in data backups. Replacing it changes the fingerprint and clients should ask you to verify the change.</p>
 <h2 id="s3">S3 buckets</h2>
-<p>Publishing a folder as a bucket with its own Access Keys is a separate feature under development. It does not use your SFTP app password. Connecting ThirtyFile to an existing S3 storage location is already described in <a href="storage.html#types">Storage locations</a>.</p>
+<p>Publish a team or company folder as a bucket. Each Access Key reaches only that folder and acts with its creator's current permissions. This is different from adding an existing S3 service as a storage location.</p>
+<h3 id="s3-setup">Endpoint setup</h3>
+<p>In <strong>Control panel › General › Apps and protocols › S3</strong>, enable S3, enter a separate hostname such as <code>s3.files.example.com</code>, and choose a Region (default <code>us-east-1</code>). S3 is off by default. The proxy sends this hostname to the same HTTP port as the website; no extra Docker port is needed. Keep the original Host header: it is part of the signature. Use a valid HTTPS certificate and DNS record for the S3 hostname.</p>
+<p>Add these directives to the HTTPS server block for the S3 hostname, with your existing certificate settings. Keep upload limits appropriate for your disk and space quotas.</p>
+<pre><code>location / {
+    proxy_pass http://thirtyfile:8080;
+    proxy_set_header Host $http_host;
+    proxy_request_buffering off;
+    proxy_buffering off;
+    client_max_body_size 0;
+}</code></pre>
+<h3 id="s3-publishing">Publishing and keys</h3>
+<p>Right-click a folder and choose <strong>Publish as S3 bucket…</strong>, or open <strong>Properties › S3 buckets</strong>. Choose a unique name of 3–63 lowercase letters, digits and hyphens. Renaming or moving the folder does not change the bucket name.</p>
+<p>Administrators may publish team or company folders. Space managers also need their account's permission to share and <strong>Space managers can publish buckets</strong> enabled. Personal spaces and spaces where <strong>Share links can be made by</strong> is <strong>Nobody</strong> cannot be published. A bucket stops while its folder is in the trash, its creator loses the right to manage it, or the space is disabled. Restoring access or the folder makes an enabled bucket work again.</p>
+<p>Create one or more keys with a description, read-only or read-and-write access, and an optional end date. Save the Secret Key immediately: it is shown only once. Keys are encrypted with the data folder's <code>secret.key</code>; back it up as described in the <a href="backup.html">backup guide</a>. The creator receives an access-ending notice within three days of an enabled key's end date. Read-only spaces accept only read-only keys.</p>
+<p>Stop or delete individual keys without affecting others. <strong>Control panel › S3 buckets</strong> lists every bucket, its creator, keys and last use. Stopping a bucket blocks all its keys; deleting a bucket or key keeps the files. Access Keys do not sign in to the website, SFTP or WebDAV. Activity records name the bucket and key description without storing credentials.</p>
+<h3 id="s3-clients">Clients</h3>
+<p>Choose an S3-compatible service in your program: endpoint <code>https://s3.files.example.com</code>, Region <code>us-east-1</code> (or your configured Region), path-style URLs, and the bucket's keys. Do not enable virtual-hosted URLs, ACLs or server-side encryption settings.</p>
+<p>For aws cli, configure a named profile interactively so secrets do not appear in command history. Set its addressing style to path and use the endpoint on each command.</p>
+<pre><code>aws configure --profile thirtyfile
+aws configure set s3.addressing_style path --profile thirtyfile
+aws --profile thirtyfile --endpoint-url https://s3.files.example.com s3 ls s3://backups/
+aws --profile thirtyfile --endpoint-url https://s3.files.example.com s3 cp report.csv s3://backups/report.csv</code></pre>
+<p>For rclone, run <code>rclone config</code>, choose S3, provider Other, enter the keys interactively, set the endpoint and Region, enable force_path_style, set disable_checksum to true to omit rclone's custom MD5 metadata (S3 Content-MD5 still checks transfers), and leave ACL and server-side encryption unset. Use <code>rclone copy</code> for additive transfers; <code>rclone sync</code> can remove destination files.</p>
+<p>ThirtyFile preserves rclone's <code>x-amz-meta-mtime</code> with the current content version, including same-key copies that update its time. Other custom metadata remains unsupported. <code>no_system_metadata</code> does not prevent rclone from sending this timestamp; leave that option off. This does not change the file's modification time outside S3.</p>
+<h3 id="s3-backups">Backups and other uses</h3>
+<p>For restic, publish a <strong>Backups</strong> folder as <code>backups</code> and make a read-and-write key. Load <code>AWS_ACCESS_KEY_ID</code> and <code>AWS_SECRET_ACCESS_KEY</code> from your protected credentials store. The repository password is separate from the S3 key; store it safely. Initialize only an empty, dedicated folder.</p>
+<pre><code>restic -r s3:https://s3.files.example.com/backups -o s3.region=us-east-1 -o s3.bucket-lookup=path init
+restic -r s3:https://s3.files.example.com/backups -o s3.region=us-east-1 -o s3.bucket-lookup=path backup ./documents</code></pre>
+<p>Duplicati or Synology Hyper Backup can use an S3-compatible destination with the same endpoint, Region and path-style settings. Do not edit backup repository files in the browser. This S3 endpoint is a destination for those tools, separate from ThirtyFile's own backup and replica policies.</p>
+<p>For a partner reading price lists, publish a <strong>Price lists</strong> folder as <code>price-lists</code> and make a read-only key ending after 90 days. For a data team, make a separate key for each rclone or aws cli job so it can be stopped independently.</p>
+<h3 id="s3-mapping">Folder mapping and limits</h3>
+<p>Keys such as <code>a/b/c.txt</code> become nested folders and a file; PUT creates missing parent folders. An empty object ending in <code>/</code> is a folder. Listings use UTF-8 byte order, prefixes, delimiters and bounded pages. Names with traversal, empty components, invalid characters or surrounding spaces are refused. Case-only conflicts are refused in spaces that ignore case.</p>
+<p>DELETE moves files and folders to the trash. Overwriting preserves earlier versions according to the space's policy. Quotas and the upload size limit apply. MD5 ETags identify uploaded content, and Content-MD5 and supported AWS checksum headers are checked. Multipart parts stay in temporary storage for at most one day; abort an unfinished upload to free them sooner. A key may have 32 pending uploads and a bucket 128 (512 server-wide); parts are capped at 10,000 per upload.</p>
+<p>Supported operations are ListBuckets (the key's own bucket only), HeadBucket, GetBucketLocation, ListObjects/V2, HEAD, ranged and conditional GET, PUT, COPY within the same bucket, DELETE and batch deletion, multipart create/upload/complete/abort/list, and presigned GET/PUT. Presigned URLs last at most seven days and stop immediately when the key expires or is revoked. A read-only key cannot PUT even through a presigned URL.</p>
+<p>ACLs, bucket creation through S3, bucket policies, lifecycle, Object Lock, S3 versioning, custom metadata, object tags, server-side encryption settings and virtual-hosted URLs are not offered. Unsupported operations answer NotImplemented. Keep clocks within 15 minutes of the server; wrong signatures share the sign-in failure limit.</p>
 <h2 id="ftp">FTP receive folders</h2>
 <p>An FTP receive server is not available. It is planned only for a concrete need from a scanner or camera that cannot use SFTP. An existing FTP server can be added as a storage location; that is a different feature.</p>
 <h2 id="use-cases">Examples</h2>

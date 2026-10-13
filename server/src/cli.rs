@@ -61,7 +61,14 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::io::IsTerminal;
     // Colours only on a terminal (not in `docker logs` or a log collector); THIRTYFILE_LOG_FORMAT=json for JSON lines
     let logs = tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "thirtyfile=info,tower_http=warn".into()))
+        // Adapter diagnostics can contain signatures or authorization fields, even when the app's own traces omit
+        // query strings. Keep protocol authentication diagnostics off when an operator enables general debug logs.
+        .with_env_filter(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "thirtyfile=info,tower_http=warn".into())
+                .add_directive("s3s=warn".parse()?)
+                .add_directive("s3s::ops::signature=off".parse()?),
+        )
         .with_ansi(std::io::stdout().is_terminal());
     if std::env::var("THIRTYFILE_LOG_FORMAT").is_ok_and(|f| f.eq_ignore_ascii_case("json")) {
         logs.json().init();

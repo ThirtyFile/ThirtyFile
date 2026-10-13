@@ -228,6 +228,7 @@ pub fn parts(l: Loaded) -> Parts {
         .with(folders::Memory::default())
         .with(location_tools::Memory::default())
         .with(crate::sftp::Memory::default())
+        .with(crate::s3::config::Memory::default())
         .with(shares::Memory::default());
     #[cfg(target_os = "linux")]
     let parts = parts.with(watch::Memory::default());

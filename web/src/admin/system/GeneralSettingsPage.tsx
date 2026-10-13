@@ -31,6 +31,8 @@ import { invalidateFiles } from "@/lib/queries";
 import { Toggle, Section, SettingsFrame } from "@/admin/SettingsFrame";
 import { SftpSettings } from "@/admin/system/SftpSettings";
 
+import { S3Settings } from "@/admin/system/S3Settings";
+
 const GB = 1024 ** 3;
 
 /**
@@ -152,7 +154,10 @@ export function GeneralSettingsPage() {
         <Pending query={q} loading={<Skeleton className="h-40" />} />
       ) : (
         <>
-          <SftpSettings />
+          <Section title={t("Apps and protocols")}>
+            <SftpSettings />
+            <S3Settings />
+          </Section>
           <Section title={t("Website")}>
             <div className="flex items-start gap-4 p-4">
               <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-300">

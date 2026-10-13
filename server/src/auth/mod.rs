@@ -157,6 +157,14 @@ pub struct User {
     #[sqlx(skip)]
     #[serde(skip)]
     pub activity_source: Option<String>,
+    /// A verified protocol actor may act only below this stable folder identity.
+    #[sqlx(skip)]
+    #[serde(skip)]
+    pub protocol_root: Option<String>,
+    /// Internal key identity, checked in each transaction; never serialized or accepted from an API.
+    #[sqlx(skip)]
+    #[serde(skip)]
+    pub protocol_key: Option<String>,
     #[sqlx(skip)]
     #[serde(skip)]
     pub sftp_credential: Option<sftp::SftpCredential>,

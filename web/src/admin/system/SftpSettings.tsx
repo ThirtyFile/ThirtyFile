@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "@/api";
-import { Section, Toggle } from "@/admin/SettingsFrame";
+import { Toggle } from "@/admin/SettingsFrame";
 import { Pending } from "@/components/ErrorState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { t } from "@/lib/i18n";
@@ -11,7 +11,7 @@ export function SftpSettings() {
   const q = useQuery({ queryKey: ["sftp-settings"], queryFn: api.sftpSettings, refetchInterval: 5000 });
   const save = useMutation({ mutationFn: api.updateSftpSettings, onSuccess: (data) => qc.setQueryData(["sftp-settings"], data), onError: (e) => toast.error(e.message) });
   return (
-    <Section title={t("Apps and protocols")}>
+    <>
       <div className="grid gap-3 p-4">
         <h3 className="text-sm font-medium">SFTP</h3>
         {!q.data ? (
@@ -51,6 +51,6 @@ export function SftpSettings() {
           </>
         )}
       </div>
-    </Section>
+    </>
   );
 }
