@@ -8,7 +8,7 @@ import { useFolderDrop } from "@/lib/dnd";
 import { NavMenu } from "@/components/NavMenu";
 import { InlineRename } from "@/components/InlineRename";
 import { useClickToRename } from "@/lib/clickToRename";
-import { capsOf } from "@/lib/drives";
+import { capsFor, capsOf } from "@/lib/drives";
 import { refreshFiles, renamed } from "@/lib/queries";
 import { useMe } from "@/lib/session";
 import { toastWithUndo } from "@/lib/undo";
@@ -375,7 +375,7 @@ export function FolderTree({ activeId }: { activeId?: string }) {
   const me = useMe();
   const info = useQuery({ queryKey: keys.node(activeId), queryFn: () => api.node(activeId!), enabled: !!activeId && kit.clickToRename });
   const active = info.data?.node.id === activeId ? info.data : undefined;
-  const canRename = !!active?.node.parent_id && capsOf(active.role, me, active.read_only).write;
+  const canRename = !!active?.node.parent_id && capsFor(capsOf(active.role, me, active.read_only), [active.node], me).write;
   useClickToRename({
     enabled: kit.clickToRename && canRename,
     root: tree,

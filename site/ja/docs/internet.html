@@ -57,6 +57,7 @@
           <a href="sharing.html">共有</a>
           <a href="account.html">アカウント</a>
           <a href="webdav.html">ネットワークドライブとして割り当て</a>
+          <a href="protocols.html">SFTP、S3、FTP</a>
           <p>管理</p>
           <a href="users.html">ユーザーとスペース</a>
           <a href="sign-in.html">シングルサインオン</a>
@@ -84,6 +85,7 @@
             <li><a href="#compose-caddy">同じ Docker Compose ファイルで Caddy を動かす</a></li>
             <li><a href="#traefik">Traefik</a></li>
             <li><a href="#checklist">公開する前に</a></li>
+            <li><a href="#sftp-port">SFTP は専用 TCP ポートを使用</a></li>
           </ol>
         </details>
         <h2 id="steps">行うことは 3 つ</h2>
@@ -204,12 +206,15 @@ networks:
           <li><a href="backup.html">バックアップ</a> を設定します。</li>
           <li>サインインできる人を決めます。<a href="sign-in.html#who">シングルサインオン</a> を参照してください。</li>
         </ul>
+
+      <h2 id="sftp-port">SFTP は専用 TCP ポートを使用</h2>
+<p>SFTP は HTTP リバースプロキシを経由しません。Docker でポート（既定値 2022）を公開し、ファイアウォールで許可します。HTTPS パスではなくサーバーのホスト名で接続してください。初回接続を信頼する前にコントロールパネルのホストキーのフィンガープリントを確認します。<a href="protocols.html#sftp">SFTP 設定</a>を参照してください。</p>
+<p><a href="protocols.html#s3-setup">S3 エンドポイント</a> には <code>s3.files.example.com</code> などの専用ホスト名、HTTPS 証明書、同じ ThirtyFile HTTP ポートへのプロキシ転送が必要です。元の Host ヘッダーを保持し、パスや署名されたクエリーパラメーターを書き換えないでください。パス形式の URL ではバケット名をホスト名ではなくパスに置きます。</p>
         <nav class="next" aria-label="その他のガイド">
           <a href="settings.html"><span>前へ</span>設定</a>
           <a class="forward" href="backup.html"><span>次へ</span>アップグレードとバックアップ</a>
         </nav>
-
-      </main>
+</main>
     </div>
     <footer class="site-footer">
       <div class="wrap">

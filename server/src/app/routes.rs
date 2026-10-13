@@ -38,12 +38,16 @@ pub fn router(state: AppState) -> Router {
         .route("/dav/{*path}", any(dav::handle))
         .route("/", any(dav::server_root))
         .fallback(web::serve)
+        .layer(middleware::from_fn_with_state(state.clone(), crate::s3::dispatch))
         .layer(middleware::from_fn_with_state(state.clone(), same_origin))
         .layer(middleware::from_fn_with_state(state.clone(), forwarding))
         // gzip / brotli for JSON, HTML, JS, CSS and SVG (see `Compressible`); file contents and other downloads are never compressed
         // Level 4: brotli's default (11) spends far more CPU per response than it saves on JSON and HTML; gzip 4 is likewise the sweet spot
         .layer(CompressionLayer::new().gzip(true).br(true).quality(CompressionLevel::Precise(4)).compress_when(Compressible))
-        .layer(TraceLayer::new_for_http())
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(|req: &axum::http::Request<axum::body::Body>| tracing::debug_span!("http_request", method = %req.method(), path = req.uri().path())),
+        )
         // A bug hit by one request answers that request with an error instead of stopping the server for everyone
         .layer(tower_http::catch_panic::CatchPanicLayer::new())
         // Outermost, so a request that panicked is recorded too: gives each request an id and records the errors
@@ -163,6 +167,9 @@ fn account_api() -> Router<AppState> {
         .route("/auth/sessions/{id}", delete(sessions::sign_out))
         .route("/auth/app-passwords", get(tokens::list).post(tokens::create))
         .route("/auth/app-passwords/{id}", delete(tokens::delete))
+        .route("/auth/sftp-keys", get(crate::sftp::keys::list).post(crate::sftp::keys::add))
+        .route("/auth/sftp-keys/{id}", delete(crate::sftp::keys::remove))
+        .route("/admin/sftp", get(crate::sftp::settings::get).put(crate::sftp::settings::update))
         .route("/auth/2fa", get(twofactor::status))
         .route("/auth/2fa/setup", post(twofactor::start_setup))
         .route("/auth/2fa/enable", post(twofactor::enable))
@@ -179,6 +186,13 @@ fn account_api() -> Router<AppState> {
 /// Spaces, who has access, what happened in them, and share links (with what visitors of a link reach)
 fn sharing_api() -> Router<AppState> {
     Router::new()
+        .route("/s3/options", get(crate::s3::config::options))
+        .route("/s3/buckets", get(crate::s3::manage::list).post(crate::s3::manage::create))
+        .route("/s3/buckets/{id}", patch(crate::s3::manage::update).delete(crate::s3::manage::delete))
+        .route("/s3/buckets/{id}/keys", post(crate::s3::manage::new_key))
+        .route("/s3/buckets/{id}/keys/{key}", patch(crate::s3::manage::revoke_key).delete(crate::s3::manage::delete_key))
+        .route("/admin/s3", get(crate::s3::config::get).put(crate::s3::config::save))
+        .route("/admin/s3/buckets", get(crate::s3::manage::admin_list))
         // Listing the spaces works with an app password too
         .route("/drives", get(drives::list).layer(middleware::from_fn(auth::app_passwords::allow)).post(drives::create))
         .route("/drives/{id}", patch(drives::update).delete(drives::delete))

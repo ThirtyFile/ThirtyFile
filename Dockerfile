@@ -28,7 +28,7 @@ ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 # it against the hash given there. Its version is pinned here (Dependabot doesn't see it: update it by hand)
 RUN npm install --global corepack@0.36.0 && corepack enable
 WORKDIR /src/web
-COPY web/package.json web/pnpm-lock.yaml ./
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 COPY web/ ./
@@ -182,7 +182,7 @@ ENV PATH=/usr/local/bin \
     THIRTYFILE_ADDR=0.0.0.0:8080
 
 VOLUME ["/data", "/storage"]
-EXPOSE 8080
+EXPOSE 8080 2022
 
 # Requests /api/health on the address from THIRTYFILE_ADDR (no need to change this when the port changes)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --start-interval=2s --retries=3 CMD ["thirtyfile", "health"]

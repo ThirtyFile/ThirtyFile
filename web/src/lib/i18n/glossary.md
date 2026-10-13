@@ -20,6 +20,25 @@ GitHub, Microsoft, Google, Keycloak, Authentik, Excel, Word, PowerPoint, NAS.
 
 ## Terms
 
+| English          | zh-TW          | zh-CN        | ja                       |
+| ---------------- | -------------- | ------------ | ------------------------ |
+| Bucket           | bucket         | 存储桶       | バケット                 |
+| Access Key       | Access Key     | Access Key   | Access Key               |
+| Secret Key       | Secret Key     | Secret Key   | Secret Key               |
+| Endpoint         | 端點           | 端点         | エンドポイント           |
+| Region           | 區域           | 区域         | リージョン               |
+| Prefix           | 前綴           | 前缀         | プレフィックス           |
+| Object           | 物件           | 对象         | オブジェクト             |
+| Path-style URL   | 路徑式網址     | 路径样式 URL | パス形式の URL           |
+| Presigned URL    | 預先簽署的網址 | 预签名 URL   | 署名付き URL             |
+| Multipart Upload | 分段上傳       | 分段上传     | マルチパートアップロード |
+
+| English              | zh-TW        | zh-CN        | ja                             |
+| -------------------- | ------------ | ------------ | ------------------------------ |
+| SSH public key       | SSH 公開金鑰 | SSH 公钥     | SSH 公開キー                   |
+| SSH private key      | SSH 私密金鑰 | SSH 私钥     | SSH 秘密キー                   |
+| host key fingerprint | 主機金鑰指紋 | 主机密钥指纹 | ホストキーのフィンガープリント |
+
 | English                                       | zh-TW                    | zh-CN                    | ja                                        |
 | --------------------------------------------- | ------------------------ | ------------------------ | ----------------------------------------- |
 | file                                          | 檔案                     | 文件                     | ファイル                                  |
@@ -109,6 +128,7 @@ GitHub, Microsoft, Google, Keycloak, Authentik, Excel, Word, PowerPoint, NAS.
 | folder tree                                   | 資料夾樹狀結構           | 文件夹树                 | フォルダーツリー                          |
 | Columns (view: a column per folder level)     | 直欄                     | 分栏                     | カラム                                    |
 | Gallery (view, Mac style)                     | 圖庫                     | 画廊                     | ギャラリー                                |
+| Contributor (role)                            | 投稿者                   | 投稿者                   | 投稿者                                    |
 | thumbnail                                     | 縮圖                     | 缩略图                   | サムネイル                                |
 | right-click menu                              | 右鍵選單                 | 右键菜单                 | 右クリックメニュー                        |
 | navigation pane / details pane                | 瀏覽窗格 / 詳細資料窗格  | 导航窗格 / 详细信息窗格  | ナビゲーションウィンドウ / 詳細ウィンドウ |

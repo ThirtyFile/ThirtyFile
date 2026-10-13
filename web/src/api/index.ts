@@ -2,6 +2,7 @@
 //! - client.ts: requests and errors; types.ts: what the server sends and takes; names.ts: names shown in the interface
 //! - one module of endpoints per area, merged into `api` here; sources.ts: where file content is read from
 
+import { s3Api } from "@/api/s3";
 import { authApi } from "@/api/auth";
 import { filesApi } from "@/api/files";
 import { sharingApi } from "@/api/sharing";
@@ -15,6 +16,7 @@ import { backupsApi } from "@/api/backups";
 import { replicasApi } from "@/api/replicas";
 import { tagsApi } from "@/api/tags";
 import { smartFoldersApi } from "@/api/smartFolders";
+import { sftpApi } from "@/api/sftp";
 
 export * from "@/api/types";
 export { SORT_KEYS } from "@/api/files";
@@ -25,6 +27,7 @@ export { driveName, locationName } from "@/api/names";
 export { privateSource, shareSource, shareUploadEndpoint, type FileSource } from "@/api/sources";
 
 export const api = {
+  ...s3Api,
   ...authApi,
   ...filesApi,
   ...sharingApi,
@@ -38,4 +41,5 @@ export const api = {
   ...replicasApi,
   ...tagsApi,
   ...smartFoldersApi,
+  ...sftpApi,
 };

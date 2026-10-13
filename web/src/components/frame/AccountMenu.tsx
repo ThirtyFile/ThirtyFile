@@ -36,6 +36,7 @@ import { LoginLogDialog } from "@/components/logs/LoginLog";
 import { LinkedAccountsDialog } from "@/components/LinkedAccountsDialog";
 import { DevicesDialog } from "@/components/DevicesDialog";
 import { AppPasswordsDialog } from "@/components/AppPasswordsDialog";
+import { SftpKeysDialog } from "@/components/SftpKeysDialog";
 import { TwoFactorDialog } from "@/components/TwoFactor";
 import { NotificationSettingsDialog } from "@/components/NotificationSettingsDialog";
 import { useMe } from "@/lib/session";
@@ -58,6 +59,7 @@ export function AccountMenu({ usage }: { usage: string | null }) {
   const [showAccounts, setShowAccounts] = useState(false);
   const [showDevices, setShowDevices] = useState(false);
   const [showAppPasswords, setShowAppPasswords] = useState(false);
+  const [showSftpKeys, setShowSftpKeys] = useState(false);
   const [showTwoFactor, setShowTwoFactor] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
 
@@ -130,6 +132,9 @@ export function AccountMenu({ usage }: { usage: string | null }) {
           <DropdownMenuItem onClick={() => setShowLogins(true)}>
             <HistoryIcon /> {t("My sign-in history")}
           </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setShowSftpKeys(true)}>
+            <KeySquareIcon /> {t("SFTP keys")}
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => setShowNotifications(true)}>
             <BellIcon /> {t("Notification settings")}
           </DropdownMenuItem>
@@ -189,6 +194,7 @@ export function AccountMenu({ usage }: { usage: string | null }) {
       {showAccounts && <LinkedAccountsDialog onClose={() => setShowAccounts(false)} />}
       {showDevices && <DevicesDialog onClose={() => setShowDevices(false)} />}
       {showAppPasswords && <AppPasswordsDialog onClose={() => setShowAppPasswords(false)} />}
+      {showSftpKeys && <SftpKeysDialog onClose={() => setShowSftpKeys(false)} />}
       {showTwoFactor && <TwoFactorDialog onClose={() => setShowTwoFactor(false)} />}
       {showNotifications && <NotificationSettingsDialog onClose={() => setShowNotifications(false)} />}
       {showLogins && (

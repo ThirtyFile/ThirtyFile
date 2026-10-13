@@ -139,7 +139,7 @@ pub(super) async fn trash_root(conn: &mut SqliteConnection, user: &User, id: &st
         return Err(not_found());
     }
     let role = trash_role(conn, user, &node).await?.ok_or_else(not_found)?;
-    tree::allows(user, role, need)?;
+    tree::allows_on(conn, user, role, need, &node).await?;
     if node.space_read_only {
         return Err(tree::read_only_error(&node));
     }
@@ -164,7 +164,8 @@ pub(super) async fn trash_root(conn: &mut SqliteConnection, user: &User, id: &st
         }
     };
     let dest_role = trash_role(conn, user, &dest).await?.ok_or_else(|| AppError::forbidden("You don't have permission on the folder this item belongs to"))?;
-    tree::allows(user, dest_role, need)?;
+    // Restoring adds to it (folders on the way made again included)
+    tree::allows(user, dest_role, if need == Need::Read { Need::Read } else { Need::Add })?;
     Ok((node, Place { folder: dest.id, missing }))
 }
 
@@ -282,7 +283,7 @@ pub async fn restore(State(st): State<AppState>, user: User, Json(req): Json<Bat
     let mut tx = crate::db::begin_write(&st.db).await?;
     for id in &outer_first(&mut tx, ids).await? {
         // Restored into the original folder, made again (with the folders above it) if it is in the trash too
-        let (node, place) = trash_root(&mut tx, &user, id, Need::Write).await?;
+        let (node, place) = trash_root(&mut tx, &user, id, Need::Move).await?;
         locks.check(&node)?;
         changes::refuse_busy(&mut tx, &node.id).await?;
         let parent_id = make_way(&mut tx, &user, &locks, &place).await?;
@@ -294,7 +295,7 @@ pub async fn restore(State(st): State<AppState>, user: User, Json(req): Json<Bat
                 if resolution == Some(Resolution::Skip) {
                     continue;
                 }
-                let into = tree::node_for(&mut tx, &user, &existing.id, Need::Write).await?;
+                let into = tree::node_for(&mut tx, &user, &existing.id, Need::Add).await?;
                 locks.check(&into)?;
                 changes::refuse_busy(&mut tx, &into.id).await?;
                 let (trash_id,): (Option<String>,) = sqlx::query_as("SELECT trash_id FROM nodes WHERE id = ?").bind(&node.id).fetch_one(&mut *tx).await?;

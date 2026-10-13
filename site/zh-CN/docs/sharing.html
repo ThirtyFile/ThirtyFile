@@ -57,6 +57,7 @@
           <a href="sharing.html" aria-current="page">分享</a>
           <a href="account.html">你的账号</a>
           <a href="webdav.html">映射为网络驱动器</a>
+          <a href="protocols.html">SFTP、S3 和 FTP</a>
           <p>管理</p>
           <a href="users.html">用户与空间</a>
           <a href="sign-in.html">单点登录</a>
@@ -93,6 +94,7 @@
           <thead><tr><th>角色</th><th>可执行的操作</th></tr></thead>
           <tbody>
             <tr><td><strong>查看者</strong></td><td>浏览、预览和下载</td></tr>
+            <tr><td><strong>投稿者</strong></td><td>还可添加文件和文件夹，但只能更改、移动或删除自己添加的项目，且须账号获准执行。上传的文件与别人的文件同名时，两者都保留。<a href="storage.html#folder-spaces">服务器文件夹</a>中找到的项目算是别人的；自己创建的文件夹里有别人的项目时，就无法移动或删除。不能创建分享链接，也不能管理成员</td></tr>
             <tr><td><strong>编辑者</strong></td><td>还可上传、编辑、删除和创建分享链接，但每项操作仍须账号获准执行（<strong>控制面板 › 用户</strong>），且分享链接只能在允许编辑者创建链接的空间中创建（<a href="#link-makers">谁可以创建链接</a>）</td></tr>
             <tr><td><strong>管理者</strong></td><td>账号获准分享时，还可管理成员与共享权限</td></tr>
             <tr><td><strong>所有者</strong></td><td>账号获准删除时，还可删除空间</td></tr>
@@ -142,12 +144,13 @@
           <li><strong>全部文件</strong>：公司共用空间，管理员可以修改名称。</li>
           <li><strong>团队空间</strong>：用于部门或项目，管理者可添加和移除成员。</li>
         </ul>
+
+      <p>文件夹也可发布为 <a href="protocols.html#s3">S3 存储桶</a>，供程序访问。管理员或 S3 设置允许的空间管理者可创建文件夹专用密钥。个人空间和不允许任何人创建分享链接的空间不能发布。</p>
         <nav class="next" aria-label="更多指南">
           <a href="preview.html"><span>上一篇</span>预览与编辑</a>
           <a class="forward" href="account.html"><span>下一篇</span>你的账号</a>
         </nav>
-
-      </main>
+</main>
     </div>
     <footer class="site-footer">
       <div class="wrap">

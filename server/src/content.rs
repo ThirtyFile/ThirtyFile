@@ -37,6 +37,7 @@ pub struct Received {
 
 /// Received content put where its space keeps content, ready to become a file
 pub struct Staged {
+    md5: Option<String>,
     drive: String,
     kind: Kind,
 }
@@ -69,6 +70,13 @@ pub async fn stage_restored(st: &AppState, into: &Node, received: Received) -> A
 }
 
 async fn stage_inner(st: &AppState, into: &Node, received: Received, restored: bool) -> AppResult<Staged> {
+    let md5 = match tokio::fs::File::open(&received.path).await {
+        Ok(file) => Some(crate::s3::etag::reader(file).await?),
+        // Restoring an already stored version only changes references, even while its storage is offline.
+        // The content-change trigger invalidates the old checksum; its next successful read fills the cache.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound && received.hash.is_some() && !into.in_folder_space() => None,
+        Err(e) => return Err(e.into()),
+    };
     let kind = if into.in_folder_space() {
         Kind::Folder(fsops::stage_upload(st, into, &received.path, received.size).await?)
     } else {
@@ -89,7 +97,7 @@ async fn stage_inner(st: &AppState, into: &Node, received: Received, restored: b
         };
         Kind::Store(staged)
     };
-    Ok(Staged { drive: into.drive().to_string(), kind })
+    Ok(Staged { md5, drive: into.drive().to_string(), kind })
 }
 
 /// What a change to a space holds while it takes the write lock and writes: for a folder space, the space's lock
@@ -178,7 +186,7 @@ pub async fn free_name(conn: &mut SqliteConnection, folder: &Node, name: &str) -
 /// counts in the space's usage; returns the file's id. `modified`: the date of its content when it isn't now (a file of
 /// a folder space has the date its folder gives it). In the write transaction.
 pub async fn create(conn: &mut SqliteConnection, staged: &Staged, owner: i64, folder: &Node, name: &str, modified: Option<i64>) -> AppResult<(String, Written)> {
-    match &staged.kind {
+    let result = match &staged.kind {
         Kind::Store(blob) => {
             let extra = tree::commit_blob(conn, blob).await?;
             let id = new_id();
@@ -198,7 +206,7 @@ pub async fn create(conn: &mut SqliteConnection, staged: &Staged, owner: i64, fo
             .execute(&mut *conn)
             .await?;
             tree::adjust_usage(conn, folder.drive(), blob.size).await?;
-            Ok((id, Written { extra, removed: Default::default() }))
+            Ok::<_, AppError>((id, Written { extra, removed: Default::default() }))
         }
         Kind::Folder(path) => {
             let id = fsops::place_file(conn, path, owner, folder, name).await?;
@@ -207,7 +215,9 @@ pub async fn create(conn: &mut SqliteConnection, staged: &Staged, owner: i64, fo
             }
             Ok((id, Written::default()))
         }
-    }
+    }?;
+    cache_md5(conn, staged, &result.0).await?;
+    Ok(result)
 }
 
 /// The staged content becomes the content of the file `existing`, which keeps its id (and with it its shares,
@@ -218,11 +228,11 @@ pub async fn replace(conn: &mut SqliteConnection, st: &AppState, staged: &Staged
         return Err(AppError::bad_request("This isn't a file"));
     }
     let policy = versions::Policy::of(st);
-    match &staged.kind {
+    let result = match &staged.kind {
         Kind::Store(blob) => {
             let extra = tree::commit_blob(conn, blob).await?;
             let removed = tree::set_content(conn, policy, existing, &blob.hash, blob.size, by).await?;
-            Ok(Written { extra, removed })
+            Ok::<_, AppError>(Written { extra, removed })
         }
         Kind::Folder(path) => {
             let removed = fsops::replace_file(conn, policy, path, existing, by).await?;
@@ -230,7 +240,18 @@ pub async fn replace(conn: &mut SqliteConnection, st: &AppState, staged: &Staged
             tree::adjust_usage(conn, existing.drive(), size - existing.size).await?;
             Ok(Written { extra: None, removed })
         }
-    }
+    }?;
+    cache_md5(conn, staged, &existing.id).await?;
+    Ok(result)
+}
+
+async fn cache_md5(conn: &mut SqliteConnection, staged: &Staged, id: &str) -> AppResult<()> {
+    let Some(md5) = &staged.md5 else { return Ok(()) };
+    let node = tree::get_node(conn, id).await?.ok_or_else(|| AppError::not_found("File not found"))?;
+    let source = crate::files::Source::of(&node)?;
+    let (_, version) = source.describe(node.size as u64).await?;
+    sqlx::query("UPDATE nodes SET content_md5 = ?, md5_version = ? WHERE id = ?").bind(md5).bind(version).bind(id).execute(conn).await?;
+    Ok(())
 }
 
 /// Finds or creates folders under parent following a relative path (a/b/c), returning the id of the deepest folder.

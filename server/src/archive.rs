@@ -194,7 +194,7 @@ pub async fn compress(State(st): State<AppState>, user: User, Json(req): Json<Co
     // Checked now, so a problem is reported at once rather than as a failed task
     let (roots, dest) = {
         let mut c = st.db.acquire().await?;
-        let dest = tree::folder_for(&mut c, &user, &req.parent_id, Need::Write).await?;
+        let dest = tree::folder_for(&mut c, &user, &req.parent_id, Need::Add).await?;
         let mut roots = Vec::with_capacity(ids.len());
         for id in ids {
             roots.push(tree::owned_node(&mut c, &user, id).await?);
@@ -225,7 +225,7 @@ async fn run_compress(st: AppState, user: User, progress: Tracker, roots: Vec<No
     // goes (the ZIP is usually smaller, but how much smaller isn't known until it is written)
     let room = {
         let mut c = st.db.acquire().await?;
-        let dest = tree::folder_for(&mut c, &user, &dest_id, Need::Write).await?;
+        let dest = tree::folder_for(&mut c, &user, &dest_id, Need::Add).await?;
         tree::room_left(&mut c, dest.drive(), None).await?
     };
     if let Some((left, drive)) = &room
@@ -280,7 +280,7 @@ async fn run_compress(st: AppState, user: User, progress: Tracker, roots: Vec<No
 /// Stores a finished temporary file as a new file in `folder_id` (numbered if the name is taken), like an upload
 /// (content.rs). Returns its id and name
 async fn store_new_file(st: &AppState, user: &User, folder_id: &str, name: &str, tmp: &std::path::Path, action: &str) -> AppResult<(String, String)> {
-    let folder = tree::folder_for(&mut *st.db.acquire().await?, user, folder_id, Need::Write).await?;
+    let folder = tree::folder_for(&mut *st.db.acquire().await?, user, folder_id, Need::Add).await?;
     let size = tokio::fs::metadata(tmp).await?.len();
     // Checked first, so a file that can't fit isn't stored at all
     tree::check_quota(&mut *st.db.acquire().await?, folder.drive(), size as i64).await?;
@@ -291,7 +291,7 @@ async fn store_new_file(st: &AppState, user: &User, folder_id: &str, name: &str,
     let result = async {
         turn.ready()?;
         let mut tx = crate::db::begin_write(&st.db).await?;
-        let folder = tree::folder_for(&mut tx, user, folder_id, Need::Write).await?;
+        let folder = tree::folder_for(&mut tx, user, folder_id, Need::Add).await?;
         staged.check(&folder)?;
         tree::check_quota(&mut tx, folder.drive(), size as i64).await?;
         let name = content::free_name(&mut tx, &folder, name).await?;
@@ -335,7 +335,7 @@ pub async fn extract(State(st): State<AppState>, user: User, Json(req): Json<Ext
             return Err(AppError::bad_request("Only ZIP files can be extracted"));
         }
         let parent_id = zip.parent_id.clone().ok_or_else(|| AppError::not_found("Folder not found"))?;
-        let parent = tree::folder_for(&mut c, &user, &parent_id, Need::Write).await?;
+        let parent = tree::folder_for(&mut c, &user, &parent_id, Need::Add).await?;
         (zip, parent)
     };
     let job = jobs::start(&st, user.id, "extract", Limit::Archive)?;
@@ -532,7 +532,7 @@ async fn extract_into(st: &AppState, user: &User, progress: &Tracker, zip: &Node
     })
     .await??;
     progress.set_total(total);
-    let parent = tree::folder_for(&mut *st.db.acquire().await?, user, parent_id, Need::Write).await?;
+    let parent = tree::folder_for(&mut *st.db.acquire().await?, user, parent_id, Need::Add).await?;
     let drive = parent.drive().to_string();
     // What the archive states is checked against the quota before anything is extracted
     tree::check_quota(&mut *st.db.acquire().await?, &drive, total as i64).await?;
@@ -566,7 +566,7 @@ async fn extract_into(st: &AppState, user: &User, progress: &Tracker, zip: &Node
         }
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
-        let parent = tree::folder_for(&mut tx, user, parent_id, Need::Write).await?;
+        let parent = tree::folder_for(&mut tx, user, parent_id, Need::Add).await?;
         for (_, s) in &staged {
             s.check(&parent)?;
         }

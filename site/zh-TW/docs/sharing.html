@@ -57,6 +57,7 @@
           <a href="sharing.html" aria-current="page">分享</a>
           <a href="account.html">你的帳號</a>
           <a href="webdav.html">連線為網路磁碟機</a>
+          <a href="protocols.html">SFTP、S3 與 FTP</a>
           <p>管理</p>
           <a href="users.html">使用者與空間</a>
           <a href="sign-in.html">單一登入</a>
@@ -94,6 +95,7 @@
           <thead><tr><th>角色</th><th>可執行的操作</th></tr></thead>
           <tbody>
             <tr><td><strong>檢視者</strong></td><td>瀏覽、預覽和下載</td></tr>
+            <tr><td><strong>投稿者</strong></td><td>還可新增檔案和資料夾，但只能變更、移動或刪除自己新增的項目，且須帳號獲准執行。上傳的檔案與別人的檔案同名時，兩者都保留。<a href="storage.html#folder-spaces">伺服器資料夾</a>中找到的項目算是別人的；自己建立的資料夾裡有別人的項目時，就無法移動或刪除。不能建立分享連結，也不能管理成員</td></tr>
             <tr><td><strong>編輯者</strong></td><td>還可上傳、編輯、刪除和建立分享連結，但每項操作仍須帳號獲准執行（<strong>控制台 › 使用者</strong>），且分享連結只能在允許編輯者建立連結的空間中建立（<a href="#link-makers">誰可以建立連結</a>）</td></tr>
             <tr><td><strong>管理者</strong></td><td>帳號獲准分享時，還可管理成員與分享權限</td></tr>
             <tr><td><strong>擁有者</strong></td><td>帳號獲准刪除時，還可刪除空間</td></tr>
@@ -143,12 +145,13 @@
           <li><strong>全部檔案</strong>：公司共用空間，管理員可以修改名稱。</li>
           <li><strong>團隊空間</strong>：用於部門或專案，管理者可新增和移除成員。</li>
         </ul>
+
+      <p>資料夾也可發布為 <a href="protocols.html#s3">S3 bucket</a>，供程式存取。管理員或 S3 設定允許的空間管理者可建立資料夾專屬金鑰。個人空間及不允許任何人建立分享連結的空間不能發布。</p>
         <nav class="next" aria-label="更多指南">
           <a href="preview.html"><span>上一篇</span>預覽與編輯</a>
           <a class="forward" href="account.html"><span>下一篇</span>你的帳號</a>
         </nav>
-
-      </main>
+</main>
     </div>
     <footer class="site-footer">
       <div class="wrap">

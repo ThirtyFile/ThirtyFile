@@ -647,6 +647,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn grants_from_0_4_0_are_kept_and_contributors_can_be_added() {
+        let dir = scratch("thirtyfile-040-grants");
+        let path = dir.join("drive.db");
+        // As 0.4.0 left it: its one migration, and a space with a grant
+        let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
+        let db = open(&path, 16, &v040).await.unwrap();
+        sqlx::query("INSERT INTO users (id, username, password_hash, created_at) VALUES (1, 'amy', 'x', 0), (2, 'ben', 'x', 0)").execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO nodes (id, owner_id, kind, name, created_at, updated_at) VALUES ('r', 1, 'folder', 'Team', 0, 0)").execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO drives (id, name, kind, root_id, created_at, location_id) VALUES ('d', 'Team', 'team', 'r', 0, 'local')")
+            .execute(&db)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE nodes SET drive_id = 'd' WHERE id = 'r'").execute(&db).await.unwrap();
+        sqlx::query(
+            "INSERT INTO grants (id, node_id, principal_type, principal_id, role, granted_by, created_at, expires_at) VALUES (7, 'r', 'user', 1, 'owner', 1, 3, 9)",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        assert!(
+            sqlx::query("INSERT INTO grants (node_id, principal_type, principal_id, role, created_at) VALUES ('r', 'user', 2, 'contributor', 0)")
+                .execute(&db)
+                .await
+                .is_err()
+        );
+        db.close().await;
+
+        let db = connect(&path, 16).await.unwrap();
+        let kept: (i64, String, i64, String, Option<i64>, i64, Option<i64>) =
+            sqlx::query_as("SELECT id, principal_type, principal_id, role, granted_by, created_at, expires_at FROM grants").fetch_one(&db).await.unwrap();
+        assert_eq!(kept, (7, "user".into(), 1, "owner".into(), Some(1), 3, Some(9)));
+        sqlx::query("INSERT INTO grants (node_id, principal_type, principal_id, role, created_at) VALUES ('r', 'user', 2, 'contributor', 0)")
+            .execute(&db)
+            .await
+            .unwrap();
+        assert!(
+            sqlx::query("INSERT INTO grants (node_id, principal_type, principal_id, role, created_at) VALUES ('r', 'everyone', 0, 'guest', 0)")
+                .execute(&db)
+                .await
+                .is_err()
+        );
+        // Its index, and the note for backups that the space's grants changed, are made again with it
+        let (index,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'grants_principal'").fetch_one(&db).await.unwrap();
+        let (noted,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM space_changes WHERE drive_id = 'd'").fetch_one(&db).await.unwrap();
+        assert_eq!((index, noted), (1, 1));
+        db.close().await;
+    }
+
+    #[tokio::test]
     async fn a_database_from_0_4_0_gets_the_list_of_unfinished_changes() {
         let dir = scratch("thirtyfile-040");
         let path = dir.join("drive.db");
@@ -1212,6 +1261,37 @@ mod tests {
 
     /// The structure is frozen at 0.4.0 (CI checks that 0001_init.sql is the file of v0.4.0): later changes are new
     /// migration files. A data folder made by 0.4.0 is copied before they run, then upgraded with its data kept.
+    #[tokio::test]
+    async fn a_database_from_0_4_0_keeps_nodes_and_adds_opt_in_s3_credentials_and_cleanup() {
+        let dir = scratch("thirtyfile-040-s3");
+        let path = dir.join("drive.db");
+        let old = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
+        let db = open(&path, 16, &old).await.unwrap();
+        sqlx::query("INSERT INTO users(id,username,password_hash,created_at) VALUES(1,'amy','x',0)").execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO nodes(id,owner_id,kind,name,created_at,updated_at) VALUES('root',1,'folder','Published',0,0)").execute(&db).await.unwrap();
+        db.close().await;
+        let db = connect(&path, 16).await.unwrap();
+        let kept: (String, Option<String>, Option<String>) =
+            sqlx::query_as("SELECT name,content_md5,md5_version FROM nodes WHERE id='root'").fetch_one(&db).await.unwrap();
+        assert_eq!(kept, ("Published".into(), None, None));
+        assert!(get_setting(&db, "s3").await.unwrap().is_none(), "upgrades never enable S3");
+        sqlx::query("INSERT INTO s3_buckets(id,name,node_id,creator_id,created_at) VALUES('b','backups','root',1,0)").execute(&db).await.unwrap();
+        sqlx::query(
+            "INSERT INTO s3_keys(id,bucket_id,access_key,secret,description,writable,created_at) VALUES('k','b','access','encrypted','Upgrade fixture',0,0)",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO s3_uploads(id,bucket_id,key_id,object_key,created_at) VALUES('u','b','k','a.txt',0)").execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO s3_parts(upload_id,number,file_id,size,md5,created_at) VALUES('u',1,'owned-file',1,'md5',0)").execute(&db).await.unwrap();
+        sqlx::query("DELETE FROM s3_buckets WHERE id='b'").execute(&db).await.unwrap();
+        let queued: (String,) = sqlx::query_as("SELECT file_id FROM s3_part_gc").fetch_one(&db).await.unwrap();
+        assert_eq!(queued.0, "owned-file");
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE id='root'").fetch_one(&db).await.unwrap();
+        assert_eq!(count.0, 1);
+        db.close().await;
+    }
+
     #[tokio::test]
     async fn a_database_from_0_4_0_is_copied_then_upgraded_when_a_migration_file_is_added() {
         let dir = scratch("thirtyfile-upgrade");

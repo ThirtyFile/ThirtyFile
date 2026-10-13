@@ -96,7 +96,7 @@ pub async fn place_folder(st: &AppState, user: &User, staged: Staging, dest_id: 
     let locks = lock(st, user, &[dest_id]).await?;
     let w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    let dest = tree::folder_for(&mut tx, user, dest_id, Need::Write).await?;
+    let dest = tree::folder_for(&mut tx, user, dest_id, Need::Add).await?;
     locks.check(&dest)?;
     tree::check_quota(&mut tx, dest.drive(), bytes).await?;
     check_name(name)?;

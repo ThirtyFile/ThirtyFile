@@ -57,6 +57,7 @@
           <a href="sharing.html" aria-current="page">共有</a>
           <a href="account.html">アカウント</a>
           <a href="webdav.html">ネットワークドライブとして割り当て</a>
+          <a href="protocols.html">SFTP、S3、FTP</a>
           <p>管理</p>
           <a href="users.html">ユーザーとスペース</a>
           <a href="sign-in.html">シングルサインオン</a>
@@ -90,6 +91,7 @@
         <h3>ロール</h3>
         <div class="table-scroll"><table><thead><tr><th>ロール</th><th>できること</th></tr></thead><tbody>
           <tr><td><strong>閲覧者</strong></td><td>閲覧、プレビュー、ダウンロード</td></tr>
+          <tr><td><strong>投稿者</strong></td><td>加えてファイルとフォルダーの追加。変更、移動、削除は自分が追加した項目のみで、アカウントに許可されている場合に限ります。他のユーザーのファイルと同じ名前のアップロードは両方を残します。<a href="storage.html#folder-spaces">サーバー上のフォルダー</a>で見つかった項目は他のユーザーの項目として扱い、自分が作ったフォルダーでも他のユーザーの項目があれば移動や削除はできません。共有リンクの作成とメンバーの管理はできません</td></tr>
           <tr><td><strong>編集者</strong></td><td>加えてアップロード、編集、削除、共有リンクの作成。それぞれアカウントに許可されている操作のみ（<strong>コントロールパネル › ユーザー</strong>）。共有リンクは、スペースが編集者に作成を許可している場合のみ（<a href="#link-makers">リンクを作成できるユーザー</a>）</td></tr>
           <tr><td><strong>管理者</strong></td><td>加えてメンバーと共有の管理。アカウントに共有が許可されている場合のみ</td></tr>
           <tr><td><strong>所有者</strong></td><td>加えてスペースの削除。アカウントに削除が許可されている場合のみ</td></tr>
@@ -138,11 +140,12 @@
           <li><strong>すべてのファイル</strong>：会社全体のスペース。管理者が名前を変えられます。</li>
           <li><strong>チームスペース</strong>：部署やプロジェクト向け。管理者がメンバーを追加、削除します。</li>
         </ul>
+      <p>フォルダーをプログラム向けの <a href="protocols.html#s3">S3 バケット</a> として公開することもできます。管理者と S3 設定で許可されたスペース管理者が専用キーを作成できます。個人スペースと共有リンクの作成が禁止されたスペースは公開できません。</p>
         <nav class="next" aria-label="その他のガイド">
           <a href="preview.html"><span>前へ</span>プレビューと編集</a>
           <a class="forward" href="account.html"><span>次へ</span>アカウント</a>
         </nav>
-      </main>
+</main>
     </div>
     <footer class="site-footer">
       <div class="wrap">

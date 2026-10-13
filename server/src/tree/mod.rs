@@ -26,7 +26,7 @@ pub const NODE_COLS: &str = "n.id, n.owner_id, n.parent_id, n.kind, n.name, n.bl
      (SELECT location_id FROM blobs WHERE hash = n.blob_hash) AS blob_location,
      n.fs_path, (SELECT source_path FROM drives WHERE id = n.drive_id AND mode = 'folder') AS fs_root,
      (SELECT read_only OR moving FROM drives WHERE id = n.drive_id) AS space_read_only,
-     (SELECT moving FROM drives WHERE id = n.drive_id) AS space_moving";
+     (SELECT moving FROM drives WHERE id = n.drive_id) AS space_moving, n.found";
 
 #[derive(Debug, Clone, sqlx::FromRow, Serialize)]
 pub struct Node {
@@ -50,6 +50,10 @@ pub struct Node {
     pub drive_id: Option<String>,
     /// Uploader / creator; empty for an item the check of a folder space found on its disk
     pub owner_name: String,
+    /// Found on a folder space's disk by its check, not added in ThirtyFile (`owner_id` is then the space's owner)
+    #[serde(skip)]
+    #[sqlx(default)]
+    pub found: bool,
     /// Whether the current user has favorited it; filled in by mark_own
     #[sqlx(default)]
     pub is_favorite: bool,
@@ -478,7 +482,7 @@ mod tests {
         let db = &env.st.db;
         assert_eq!(read_all::<SpaceKind>(db, "drives", "kind").await, [SpaceKind::Personal, SpaceKind::Company, SpaceKind::Team]);
         assert_eq!(read_all::<SpaceMode>(db, "drives", "mode").await.len(), 2);
-        assert_eq!(read_all::<Role>(db, "grants", "role").await, [Role::Viewer, Role::Editor, Role::Manager, Role::Owner]);
+        assert_eq!(read_all::<Role>(db, "grants", "role").await, [Role::Viewer, Role::Contributor, Role::Editor, Role::Manager, Role::Owner]);
         let types = read_all::<PrincipalType>(db, "grants", "principal_type").await;
         assert_eq!(types, [PrincipalType::User, PrincipalType::Group, PrincipalType::Everyone]);
         assert!(types.iter().all(|t| PrincipalType::parse(t.as_str()) == Some(*t)));
