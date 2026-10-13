@@ -323,6 +323,20 @@ pub(super) fn locked_ids<'a>(dest: &'a str, ids: &'a [String]) -> Vec<&'a str> {
     std::iter::once(dest).chain(ids.iter().map(String::as_str)).collect()
 }
 
+/// An explicit name applies only when copying one item.
+fn copy_name(req: &BatchReq, ids: &[String], dest: &Node) -> AppResult<Option<String>> {
+    Ok(match req.name.as_deref().filter(|_| ids.len() == 1) {
+        Some(n) => {
+            let n = crate::util::validate_name(n)?;
+            if dest.in_folder_space() {
+                fsops::check_name(&n)?;
+            }
+            Some(n)
+        }
+        None => None,
+    })
+}
+
 /// Copies items in the index; what goes to or from a folder space is returned, for its content to be copied next
 pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult<Option<fsops::Across>> {
     let (st, user) = (st.clone(), user.clone());
@@ -332,17 +346,7 @@ pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
     let mut tx = crate::db::begin_write(&st.db).await?;
     let dest = tree::folder_for(&mut tx, &user, req.dest()?, Need::Add).await?;
     locks.check(&dest)?;
-    // The name asked for one item's copy (else each copy has its original's)
-    let named = match req.name.as_deref().filter(|_| ids.len() == 1) {
-        Some(n) => {
-            let n = crate::util::validate_name(n)?;
-            if dest.in_folder_space() {
-                fsops::check_name(&n)?;
-            }
-            Some(n)
-        }
-        None => None,
-    };
+    let named = copy_name(req, &ids, &dest)?;
     let mut plans = Vec::new();
     let mut replaced = Vec::new();
     let mut total = 0i64;
@@ -567,6 +571,9 @@ pub async fn conflicts(State(st): State<AppState>, user: User, Json(req): Json<C
     if let Some(dest) = &req.dest_id {
         let dest = tree::folder_for(&mut c, &user, dest, Need::Read).await?;
         for (name, existing) in tree::find_children(&mut c, &dest.id, &req.names).await? {
+            if tree::role_on(&mut c, &user, &existing).await?.is_none() {
+                continue;
+            }
             out.push(Conflict { id: None, name, kind: None, size: None, updated_at: None, existing });
         }
         for id in &req.ids {
@@ -576,6 +583,9 @@ pub async fn conflicts(State(st): State<AppState>, user: User, Json(req): Json<C
                 continue;
             }
             if let Some(existing) = tree::find_child(&mut c, &dest.id, &node.name).await?.filter(|e| e.id != node.id) {
+                if tree::role_on(&mut c, &user, &existing).await?.is_none() {
+                    continue;
+                }
                 out.push(Conflict {
                     id: Some(node.id.clone()),
                     name: node.name.clone(),
@@ -592,6 +602,9 @@ pub async fn conflicts(State(st): State<AppState>, user: User, Json(req): Json<C
             // Into a folder that will be made: nothing there yet
             let Some(parent) = existing_folder(&mut c, &place).await? else { continue };
             if let Some(existing) = tree::find_child(&mut c, &parent, &node.name).await? {
+                if tree::role_on(&mut c, &user, &existing).await?.is_none() {
+                    continue;
+                }
                 out.push(Conflict {
                     id: Some(node.id.clone()),
                     name: node.name.clone(),

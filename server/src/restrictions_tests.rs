@@ -103,7 +103,7 @@ async fn lists_search_tags_recent_history_notifications_and_counts_hide_restrict
     let (status, _) = request(&f, &f.member_cookie, Method::GET, &format!("/api/files/{}/content", f.secret), None).await;
     assert_eq!(status, StatusCode::OK);
     let _ = crate::notify::add(
-        &mut *f.env.st.db.acquire().await.unwrap(),
+        &mut f.env.st.db.acquire().await.unwrap(),
         &[f.member.id],
         &crate::notify::Notice { kind: "shared", node_id: Some(f.secret.clone()), data: json!({"name":"compensation-secret.txt","item":"file"}) },
     )
@@ -196,7 +196,7 @@ async fn parent_download_filters_hidden_content_but_recursive_mutations_are_refu
 async fn saved_names_of_children_purged_before_restriction_remain_private_afterwards() {
     let f = fixture().await;
     let _ = crate::notify::add(
-        &mut *f.env.st.db.acquire().await.unwrap(),
+        &mut f.env.st.db.acquire().await.unwrap(),
         &[f.member.id, f.owner.id],
         &crate::notify::Notice { kind: "shared", node_id: Some(f.secret.clone()), data: json!({"name":"compensation-secret.txt","item":"file"}) },
     )
@@ -207,7 +207,7 @@ async fn saved_names_of_children_purged_before_restriction_remain_private_afterw
     if let Some(id) = job["id"].as_str().filter(|id| !id.is_empty()) {
         assert_eq!(crate::jobs::wait_for(&f.env.st, id).await.state, "done");
     }
-    assert!(crate::tree::get_node(&mut *f.env.st.db.acquire().await.unwrap(), &f.secret).await.unwrap().is_none());
+    assert!(crate::tree::get_node(&mut f.env.st.db.acquire().await.unwrap(), &f.secret).await.unwrap().is_none());
     restrict(&f).await;
     for path in [format!("/api/activity?drive_id={}", f.env.drive_of(&f.root).await), format!("/api/nodes/{}/activity", f.root), "/api/notifications".into()] {
         let hidden = json_call(&f, &f.member_cookie, Method::GET, &path, None).await;
@@ -269,11 +269,18 @@ async fn trash_restore_and_copy_preserve_boundaries_and_exclude_hidden_items() {
     json_call(&f, &f.own_cookie, Method::POST, "/api/trash/restore", Some(json!({"ids":[f.restricted]}))).await;
     let destination = f.env.folder(&f.owner, &f.root, "Destination").await;
     json_call(&f, &f.own_cookie, Method::POST, "/api/nodes/copy", Some(json!({"ids":[f.restricted],"dest_id":destination}))).await;
-    let copied = crate::paths::child_named(&mut *f.env.st.db.acquire().await.unwrap(), &destination, "Restricted Payroll").await.unwrap().unwrap();
+    let copied = crate::paths::child_named(&mut f.env.st.db.acquire().await.unwrap(), &destination, "Restricted Payroll").await.unwrap().unwrap();
     assert!(copied.restricted);
     assert_eq!(request(&f, &f.member_cookie, Method::GET, &format!("/api/nodes/{}", copied.id), None).await.0, StatusCode::NOT_FOUND);
-    json_call(&f, &f.own_cookie, Method::POST, "/api/nodes/move", Some(json!({"ids":[f.restricted],"dest_id":destination,"resolutions":{(f.restricted.clone()):"keep"}}))).await;
-    assert!(crate::tree::get_node(&mut *f.env.st.db.acquire().await.unwrap(), &f.restricted).await.unwrap().unwrap().restricted);
+    json_call(
+        &f,
+        &f.own_cookie,
+        Method::POST,
+        "/api/nodes/move",
+        Some(json!({"ids":[f.restricted],"dest_id":destination,"resolutions":{(f.restricted.clone()):"keep"}})),
+    )
+    .await;
+    assert!(crate::tree::get_node(&mut f.env.st.db.acquire().await.unwrap(), &f.restricted).await.unwrap().unwrap().restricted);
 }
 
 #[tokio::test]
@@ -296,4 +303,78 @@ async fn public_parent_links_never_include_restricted_children_even_for_an_owner
         request(&f, "", Method::GET, &format!("/api/public/shares/{}/nodes/{}/content", child["id"].as_str().unwrap(), f.secret), None).await.0,
         StatusCode::OK
     );
+}
+
+#[tokio::test]
+async fn collision_previews_do_not_reveal_hidden_existing_nodes() {
+    let f = fixture().await;
+    restrict(&f).await;
+    let found = json_call(
+        &f,
+        &f.member_cookie,
+        Method::POST,
+        "/api/nodes/conflicts",
+        Some(json!({"dest_id":f.department,"names":["Restricted Payroll","minutes.txt"],"ids":[]})),
+    )
+    .await;
+    assert_hidden(&f, &found);
+    assert_eq!(found.as_array().unwrap().len(), 1);
+    assert_eq!(found[0]["existing"]["name"], "minutes.txt");
+}
+
+#[tokio::test]
+async fn planned_archives_stop_after_restriction_or_share_revocation() {
+    let f = fixture().await;
+    let node = crate::tree::get_node(&mut f.env.st.db.acquire().await.unwrap(), &f.restricted).await.unwrap().unwrap();
+    let plan = crate::downloads::zip_plan_checked(
+        &f.env.st,
+        vec![node.clone()],
+        0,
+        Some(crate::downloads::ZipAccess { user: f.member.clone(), publication: None, share: None }),
+    )
+    .await
+    .unwrap();
+    let mut walk = plan.walk();
+    assert!(walk.next(&f.env.st).await.unwrap().is_some());
+    restrict(&f).await;
+    assert!(walk.next(&f.env.st).await.is_err());
+    let link = json_call(&f, &f.own_cookie, Method::POST, "/api/shares", Some(json!({"node_id":f.restricted}))).await;
+    let token = link["id"].as_str().unwrap().to_string();
+    let plan = crate::downloads::zip_plan_checked(
+        &f.env.st,
+        vec![node],
+        0,
+        Some(crate::downloads::ZipAccess { user: f.owner.clone(), publication: Some(f.restricted.clone()), share: Some(token.clone()) }),
+    )
+    .await
+    .unwrap();
+    let mut walk = plan.walk();
+    assert!(walk.next(&f.env.st).await.unwrap().is_some());
+    sqlx::query("DELETE FROM shares WHERE id = ?").bind(token).execute(&f.env.st.db).await.unwrap();
+    assert!(walk.next(&f.env.st).await.is_err());
+}
+
+#[tokio::test]
+async fn local_group_access_ends_on_membership_removal_or_grant_expiry() {
+    let f = fixture().await;
+    restrict(&f).await;
+    let group = crate::util::new_id();
+    sqlx::query("INSERT INTO groups (name,created_at) VALUES (?,?)").bind(group).bind(crate::util::now()).execute(&f.env.st.db).await.unwrap();
+    let (group,): (i64,) = sqlx::query_as("SELECT id FROM groups ORDER BY id DESC LIMIT 1").fetch_one(&f.env.st.db).await.unwrap();
+    sqlx::query("INSERT INTO group_members (group_id,user_id) VALUES (?,?)").bind(group).bind(f.member.id).execute(&f.env.st.db).await.unwrap();
+    crate::db::add_grant(&mut f.env.st.db.acquire().await.unwrap(), &f.restricted, "group", group, "viewer", Some(f.owner.id), Some(crate::util::now() + 300))
+        .await
+        .unwrap();
+    let content = format!("/api/files/{}/content", f.secret);
+    assert_eq!(request(&f, &f.member_cookie, Method::GET, &content, None).await.0, StatusCode::OK);
+    sqlx::query("DELETE FROM group_members WHERE group_id = ? AND user_id = ?").bind(group).bind(f.member.id).execute(&f.env.st.db).await.unwrap();
+    assert_eq!(request(&f, &f.member_cookie, Method::GET, &content, None).await.0, StatusCode::NOT_FOUND);
+    sqlx::query("INSERT INTO group_members (group_id,user_id) VALUES (?,?)").bind(group).bind(f.member.id).execute(&f.env.st.db).await.unwrap();
+    sqlx::query("UPDATE grants SET expires_at = ? WHERE node_id = ? AND principal_type = 'group'")
+        .bind(crate::util::now() - 1)
+        .bind(&f.restricted)
+        .execute(&f.env.st.db)
+        .await
+        .unwrap();
+    assert_eq!(request(&f, &f.member_cookie, Method::GET, &content, None).await.0, StatusCode::NOT_FOUND);
 }

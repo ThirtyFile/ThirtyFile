@@ -25,6 +25,5 @@ export default {
   "Access changed while the folder was being copied. Try again.": "複製資料夾時存取權已變更，請再試一次。",
   "Restricted access": "已限制存取權",
   "Inherited access restored": "已恢復繼承授權",
-  "Your access has ended": "你的存取權已結束",
   "The trash changed": "回收桶內容已變更",
 } satisfies Record<string, string>;

@@ -13,7 +13,7 @@ async fn parent_bucket_hides_restrictions_and_only_explicit_child_publication_ca
     put(&s, "HR/payroll.txt", b"confidential").await;
     put(&s, "minutes.txt", b"public").await;
     let root: (String,) = sqlx::query_as("SELECT node_id FROM s3_buckets WHERE id=?").bind(&s.bucket).fetch_one(&s.env.st.db).await.unwrap();
-    let folder = crate::paths::child_named(&mut *s.env.st.db.acquire().await.unwrap(), &root.0, "HR").await.unwrap().unwrap();
+    let folder = crate::paths::child_named(&mut s.env.st.db.acquire().await.unwrap(), &root.0, "HR").await.unwrap().unwrap();
     let req = serde_json::from_value(serde_json::json!({"restricted":true,"expected":false,"confirmed":true})).unwrap();
     let _ = crate::restrictions::change(State(s.env.st.clone()), s.admin.clone(), Path(folder.id.clone()), Json(req)).await.unwrap();
     for delimiter in ["", "/"] {

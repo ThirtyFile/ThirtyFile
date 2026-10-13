@@ -25,6 +25,5 @@ export default {
   "Access changed while the folder was being copied. Try again.": "フォルダーのコピー中にアクセス権が変更されました。もう一度お試しください。",
   "Restricted access": "アクセスを制限しました",
   "Inherited access restored": "継承アクセス権を復元しました",
-  "Your access has ended": "アクセス権の有効期間が終了しました",
   "The trash changed": "ごみ箱の内容が変更されました",
 } satisfies Record<string, string>;
