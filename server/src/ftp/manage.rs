@@ -183,6 +183,7 @@ pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<Strin
         .bind(id)
         .execute(&mut *tx)
         .await?;
+    crate::logs::record_activity(&mut tx, &user, None, "settings", "Updated FTP receive folder").await?;
     tx.commit().await?;
     Ok(Json(serde_json::json!({"ok":true})))
 }

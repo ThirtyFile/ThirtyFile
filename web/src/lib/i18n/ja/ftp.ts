@@ -1,4 +1,5 @@
 export default {
+  "Updated FTP receive folder": "FTP 受信フォルダーを更新しました",
   "FTP sign-in failed": "FTP サインインに失敗",
   "FTP download interrupted": "FTP ダウンロードが中断されました",
   "Listen address": "待ち受けアドレス",

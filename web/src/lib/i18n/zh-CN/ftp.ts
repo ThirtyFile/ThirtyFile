@@ -1,4 +1,5 @@
 export default {
+  "Updated FTP receive folder": "已更新 FTP 接收文件夹",
   "FTP sign-in failed": "FTP 登录失败",
   "FTP download interrupted": "FTP 下载中断",
   "Listen address": "监听地址",
