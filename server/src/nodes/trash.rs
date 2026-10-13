@@ -283,7 +283,7 @@ pub async fn restore(State(st): State<AppState>, user: User, Json(req): Json<Bat
     let mut tx = crate::db::begin_write(&st.db).await?;
     for id in &outer_first(&mut tx, ids).await? {
         // Restored into the original folder, made again (with the folders above it) if it is in the trash too
-        let (node, place) = trash_root(&mut tx, &user, id, Need::Write).await?;
+        let (node, place) = trash_root(&mut tx, &user, id, Need::Move).await?;
         locks.check(&node)?;
         changes::refuse_busy(&mut tx, &node.id).await?;
         let parent_id = make_way(&mut tx, &user, &locks, &place).await?;
