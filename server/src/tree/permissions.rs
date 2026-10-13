@@ -181,7 +181,7 @@ async fn holds_others(conn: &mut SqliteConnection, user: &User, node: &Node) -> 
 }
 
 /// Enumerates disk paths without following links. A channel holds at most one batch, and traversal keeps at most
-/// 128 directory iterators open. Dropping the receiver after a refusal stops the producer at its next batch.
+/// 128 directory iterators open. Dropping the receiver after a refusal stops the producer before its next entry.
 fn disk_entries(node: &Node, send: tokio::sync::mpsc::Sender<Vec<String>>) -> AppResult<()> {
     let refused = || AppError::forbidden(format!("\"{}\" holds items other people added, so you can't move or delete it", node.name));
     let root = node.fs_pinned().and_then(|p| p.dir()).map_err(|_| refused())?;
@@ -189,6 +189,9 @@ fn disk_entries(node: &Node, send: tokio::sync::mpsc::Sender<Vec<String>>) -> Ap
     let mut stack = vec![(root, node.fs_path.clone().ok_or_else(refused)?, entries)];
     let mut batch = Vec::with_capacity(500);
     while let Some((dir, rel, entries)) = stack.last_mut() {
+        if send.is_closed() {
+            return Ok(());
+        }
         let Some(entry) = entries.next() else {
             stack.pop();
             continue;
