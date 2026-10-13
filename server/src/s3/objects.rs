@@ -18,7 +18,7 @@ pub fn unsupported(headers: &HeaderMap) -> S3Result<()> {
         if name.starts_with("x-amz-grant-")
             || name.starts_with("x-amz-server-side-encryption")
             || name.starts_with("x-amz-object-lock")
-            || name.starts_with("x-amz-meta-")
+            || (name.starts_with("x-amz-meta-") && name != "x-amz-meta-mtime")
             || matches!(name, "x-amz-acl" | "x-amz-tagging" | "x-amz-tagging-directive" | "x-amz-website-redirect-location")
         {
             return Err(s3_error!(NotImplemented, "This S3 setting is not supported"));
@@ -42,19 +42,19 @@ pub fn condition(headers: &HeaderMap, etag: &ETag, modified: i64, copy: bool) ->
         if !etag_matches(v, etag) {
             return Err(s3_error!(PreconditionFailed));
         }
-    } else if let Some(date) = text(unmodified).and_then(|v| httpdate::parse_http_date(v).ok()) {
-        if timestamp(modified) > Timestamp::from(date) {
-            return Err(s3_error!(PreconditionFailed));
-        }
+    } else if let Some(date) = text(unmodified).and_then(|v| httpdate::parse_http_date(v).ok())
+        && timestamp(modified) > Timestamp::from(date)
+    {
+        return Err(s3_error!(PreconditionFailed));
     }
     if let Some(v) = text(none_name) {
         if etag_matches(v, etag) {
             return if copy { Err(s3_error!(PreconditionFailed)) } else { Ok(Some(StatusCode::NOT_MODIFIED)) };
         }
-    } else if let Some(date) = text(modified_name).and_then(|v| httpdate::parse_http_date(v).ok()) {
-        if timestamp(modified) <= Timestamp::from(date) {
-            return if copy { Err(s3_error!(PreconditionFailed)) } else { Ok(Some(StatusCode::NOT_MODIFIED)) };
-        }
+    } else if let Some(date) = text(modified_name).and_then(|v| httpdate::parse_http_date(v).ok())
+        && timestamp(modified) <= Timestamp::from(date)
+    {
+        return if copy { Err(s3_error!(PreconditionFailed)) } else { Ok(Some(StatusCode::NOT_MODIFIED)) };
     }
     Ok(None)
 }
@@ -70,6 +70,7 @@ pub async fn get(st: &AppState, req: S3Request<GetObjectInput>) -> S3Result<S3Re
     let etag = description.etag.clone();
     let mut out =
         GetObjectOutput { e_tag: Some(etag.clone()), last_modified: Some(timestamp(node.updated_at)), accept_ranges: Some("bytes".into()), ..Default::default() };
+    out.metadata = super::metadata::response(description.mtime);
     if condition(&req.headers, &etag, node.updated_at, false)?.is_some() {
         return Err(not_modified(&etag, node.updated_at));
     }
@@ -118,6 +119,7 @@ pub async fn head(st: &AppState, req: S3Request<HeadObjectInput>) -> S3Result<S3
         e_tag: Some(etag.clone()),
         last_modified: Some(timestamp(node.updated_at)),
         accept_ranges: Some("bytes".into()),
+        metadata: super::metadata::response(description.mtime),
         ..Default::default()
     });
     if condition(&req.headers, &etag, node.updated_at, false)?.is_some() {
@@ -131,20 +133,25 @@ pub async fn head(st: &AppState, req: S3Request<HeadObjectInput>) -> S3Result<S3
     Ok(response)
 }
 
+pub struct Incoming<'a> {
+    pub size: Option<i64>,
+    pub md5: Option<&'a str>,
+    pub headers: &'a HeaderMap,
+    pub trailers: Option<&'a s3s::TrailingHeaders>,
+    pub replaced: u64,
+}
+
 pub async fn receive<S, E>(
     st: &AppState,
     identity: &Identity,
     parent: &crate::tree::Node,
     body: S,
-    size: Option<i64>,
-    md5: Option<&str>,
-    headers: &HeaderMap,
-    trailers: Option<&s3s::TrailingHeaders>,
-    replaced: u64,
+    incoming: Incoming<'_>,
 ) -> S3Result<(super::temp::Temporary, u64, Option<String>, ETag)>
 where
     S: Stream<Item = Result<bytes::Bytes, E>> + Unpin,
 {
+    let Incoming { size, md5, headers, trailers, replaced } = incoming;
     let size = size.map(|n| u64::try_from(n).map_err(|_| s3_error!(InvalidArgument))).transpose()?;
     if let Some(size) = size {
         access::check_size(st, size).map_err(super::map_error)?;
@@ -187,14 +194,24 @@ where
 pub async fn put(st: &AppState, mut req: S3Request<PutObjectInput>) -> S3Result<S3Response<PutObjectOutput>> {
     let identity = request_identity(st, &req, Some(&req.input.bucket), true).await?;
     unsupported(&req.headers)?;
+    let mtime = super::metadata::mtime(&req.headers)?;
+    if req.input.key.ends_with('/') && mtime.is_some() {
+        return Err(s3_error!(NotImplemented));
+    }
     let (parent, name) = access::rooted_parent(st, &identity.user, &identity.root.id, &req.input.key).await.map_err(super::map_error)?;
     let up = prepare_upload(st, &identity, &parent, name.clone()).await;
     let replaced = if !req.input.key.ends_with('/') { up?.existing.map_or(0, |n| n.size.max(0) as u64) } else { 0 };
     let body = req.input.body.take().unwrap_or_else(|| StreamingBlob::from_bytes(bytes::Bytes::new()));
-    let (tmp, size, hash, etag) =
-        receive(st, &identity, &parent, body, req.input.content_length, req.input.content_md5.as_deref(), &req.headers, req.trailing_headers.as_ref(), replaced)
-            .await?;
-    let result = async {
+    let (tmp, size, hash, etag) = receive(
+        st,
+        &identity,
+        &parent,
+        body,
+        Incoming { size: req.input.content_length, md5: req.input.content_md5.as_deref(), headers: &req.headers, trailers: req.trailing_headers.as_ref(), replaced },
+    )
+    .await?;
+
+    async {
         if req.input.key.ends_with('/') {
             if size != 0 {
                 return Err(s3_error!(InvalidArgument, "Folder objects must be empty"));
@@ -203,12 +220,11 @@ pub async fn put(st: &AppState, mut req: S3Request<PutObjectInput>) -> S3Result<
                 access::make_folder(st, &identity.user, &parent, &name).await.map_err(super::map_error)?;
             }
         } else {
-            commit(st.clone(), identity.user.clone(), parent, name, tmp, size, hash, identity.root.id.clone()).await?;
+            commit(st.clone(), identity.user.clone(), parent, name, (tmp, size, hash), access::ScopedWrite { root: identity.root.id.clone(), mtime }).await?;
         }
         Ok(S3Response::new(PutObjectOutput { e_tag: Some(etag), ..Default::default() }))
     }
-    .await;
-    result
+    .await
 }
 
 pub async fn delete_key(st: &AppState, identity: &Identity, key: &str) -> S3Result<()> {
@@ -265,6 +281,11 @@ pub async fn copy(st: &AppState, req: S3Request<CopyObjectInput>) -> S3Result<S3
         return Err(s3_error!(InvalidArgument));
     }
     let description = super::etag::describe_node(st, &node).await?;
+    let mtime = match req.headers.get("x-amz-metadata-directive").and_then(|v| v.to_str().ok()).unwrap_or("COPY") {
+        "COPY" => description.mtime.clone(),
+        "REPLACE" => super::metadata::mtime(&req.headers)?,
+        _ => return Err(s3_error!(InvalidArgument)),
+    };
     let etag = description.etag.clone();
     condition(&req.headers, &etag, node.updated_at, true)?;
     let (parent, name) = access::rooted_parent(st, &identity.user, &identity.root.id, &req.input.key).await.map_err(super::map_error)?;
@@ -272,11 +293,13 @@ pub async fn copy(st: &AppState, req: S3Request<CopyObjectInput>) -> S3Result<S3
     let replaced = existing.existing.map_or(0, |n| n.size.max(0) as u64);
     let source = description.source.ok_or_else(|| s3_error!(NoSuchKey))?;
     let body = ReaderStream::with_capacity(source.open(st, 0, description.size).await.map_err(super::internal)?, 256 * 1024);
-    let (tmp, size, hash, received_etag) = receive(st, &identity, &parent, body, Some(description.size as i64), None, &HeaderMap::new(), None, replaced).await?;
+    let (tmp, size, hash, received_etag) =
+        receive(st, &identity, &parent, body, Incoming { size: Some(description.size as i64), md5: None, headers: &HeaderMap::new(), trailers: None, replaced })
+            .await?;
     if received_etag != etag {
         return Err(s3_error!(PreconditionFailed));
     }
-    commit(st.clone(), identity.user, parent, name, tmp, size, hash, identity.root.id).await?;
+    commit(st.clone(), identity.user, parent, name, (tmp, size, hash), access::ScopedWrite { root: identity.root.id, mtime }).await?;
     Ok(S3Response::new(CopyObjectOutput {
         copy_object_result: Some(CopyObjectResult { e_tag: Some(etag), last_modified: Some(timestamp(now())), ..Default::default() }),
         ..Default::default()
@@ -289,13 +312,13 @@ pub async fn commit(
     user: crate::auth::User,
     parent: crate::tree::Node,
     name: String,
-    tmp: super::temp::Temporary,
-    size: u64,
-    hash: Option<String>,
-    root: String,
+    (tmp, size, hash): (super::temp::Temporary, u64, Option<String>),
+    scope: access::ScopedWrite,
 ) -> S3Result<()> {
     tokio::spawn(async move {
-        access::store_in_scope(st, user, parent, name, tmp.path().to_path_buf(), size, hash, &root).await.map_err(super::map_error)?;
+        access::store_in_scope(st, user, parent, name, crate::content::Received { path: tmp.path().to_path_buf(), size, hash }, scope)
+            .await
+            .map_err(super::map_error)?;
         drop(tmp);
         Ok(())
     })

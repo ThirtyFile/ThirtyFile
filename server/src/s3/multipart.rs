@@ -32,6 +32,7 @@ struct Upload {
     bucket_id: String,
     key_id: String,
     object_key: String,
+    mtime: Option<String>,
     created_at: i64,
 }
 
@@ -65,6 +66,7 @@ async fn upload(st: &AppState, identity: &Identity, id: &str, key: &str) -> S3Re
 pub async fn create(st: &AppState, req: S3Request<CreateMultipartUploadInput>) -> S3Result<S3Response<CreateMultipartUploadOutput>> {
     let identity = request_identity(st, &req, Some(&req.input.bucket), true).await?;
     super::objects::unsupported(&req.headers)?;
+    let mtime = super::metadata::mtime(&req.headers)?;
     if req.input.key.ends_with('/') {
         return Err(s3_error!(InvalidArgument));
     }
@@ -73,6 +75,7 @@ pub async fn create(st: &AppState, req: S3Request<CreateMultipartUploadInput>) -
     super::objects::prepare_upload(st, &identity, &parent, name).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await.map_err(super::internal)?;
+    crate::tree::node_for(&mut tx, &identity.user, &parent.id, crate::tree::Need::Add).await.map_err(super::map_error)?;
     let (all, own, bucket): (i64, i64, i64) = sqlx::query_as("SELECT COUNT(*), COALESCE(SUM(key_id=?1),0),COALESCE(SUM(bucket_id=?2),0) FROM s3_uploads")
         .bind(&identity.key.id)
         .bind(&identity.bucket.id)
@@ -83,12 +86,13 @@ pub async fn create(st: &AppState, req: S3Request<CreateMultipartUploadInput>) -
         return Err(s3_error!(SlowDown, "Too many pending multipart uploads"));
     }
     let id = new_id();
-    sqlx::query("INSERT INTO s3_uploads(id,bucket_id,key_id,object_key,created_at) VALUES(?,?,?,?,?)")
+    sqlx::query("INSERT INTO s3_uploads(id,bucket_id,key_id,object_key,created_at,mtime) VALUES(?,?,?,?,?,?)")
         .bind(&id)
         .bind(&identity.bucket.id)
         .bind(&identity.key.id)
         .bind(&req.input.key)
         .bind(now())
+        .bind(mtime)
         .execute(&mut *tx)
         .await
         .map_err(super::internal)?;
@@ -103,6 +107,9 @@ pub async fn part(st: &AppState, req: S3Request<UploadPartInput>) -> S3Result<S3
 async fn part_inner(st: AppState, mut req: S3Request<UploadPartInput>) -> S3Result<S3Response<UploadPartOutput>> {
     let identity = request_identity(&st, &req, Some(&req.input.bucket), true).await?;
     super::objects::unsupported(&req.headers)?;
+    if req.headers.contains_key("x-amz-meta-mtime") {
+        return Err(s3_error!(NotImplemented));
+    }
     if !(1..=10000).contains(&req.input.part_number) {
         return Err(s3_error!(InvalidArgument));
     }
@@ -117,11 +124,13 @@ async fn part_inner(st: AppState, mut req: S3Request<UploadPartInput>) -> S3Resu
         &identity,
         &parent,
         body,
-        req.input.content_length,
-        req.input.content_md5.as_deref(),
-        &req.headers,
-        req.trailing_headers.as_ref(),
-        up.existing.as_ref().map_or(0, |n| n.size.max(0) as u64),
+        super::objects::Incoming {
+            size: req.input.content_length,
+            md5: req.input.content_md5.as_deref(),
+            headers: &req.headers,
+            trailers: req.trailing_headers.as_ref(),
+            replaced: up.existing.as_ref().map_or(0, |n| n.size.max(0) as u64),
+        },
     )
     .await?;
     let file_id = new_id();
@@ -194,7 +203,7 @@ async fn complete_inner(st: AppState, req: S3Request<CompleteMultipartUploadInpu
     super::objects::unsupported(&req.headers)?;
     let turn = lock(&req.input.upload_id);
     let _turn = turn.lock().await;
-    upload(&st, &identity, &req.input.upload_id, &req.input.key).await?;
+    let upload = upload(&st, &identity, &req.input.upload_id, &req.input.key).await?;
     let selected = req.input.multipart_upload.and_then(|u| u.parts).ok_or_else(|| s3_error!(InvalidPart))?;
     if selected.is_empty() || selected.len() > 10000 {
         return Err(s3_error!(InvalidPart));
@@ -232,7 +241,8 @@ async fn complete_inner(st: AppState, req: S3Request<CompleteMultipartUploadInpu
         .await
         .map_err(super::map_error)?;
     let assembled = super::temp::Temporary::new(&st, "complete");
-    let result = async {
+
+    async {
         let mut disk = crate::util::DiskRoom::check(&st.tmp_dir(), size).await.map_err(super::map_error)?;
         let mut out = tokio::fs::File::create(assembled.path()).await.map_err(super::internal)?;
         for part in &parts {
@@ -248,12 +258,19 @@ async fn complete_inner(st: AppState, req: S3Request<CompleteMultipartUploadInpu
         drop(out);
         let etag = ETag::Strong(super::etag::reader(tokio::fs::File::open(assembled.path()).await.map_err(super::internal)?).await.map_err(super::map_error)?);
         let latest = super::credentials::identity(&st, &identity.key.access_key, true).await?;
-        super::objects::commit(st.clone(), latest.user, parent, name, assembled, size, None, identity.root.id.clone()).await?;
+        super::objects::commit(
+            st.clone(),
+            latest.user,
+            parent,
+            name,
+            (assembled, size, None),
+            access::ScopedWrite { root: identity.root.id.clone(), mtime: upload.mtime },
+        )
+        .await?;
         remove(&st, &req.input.upload_id).await?;
         Ok(S3Response::new(CompleteMultipartUploadOutput { bucket: Some(req.input.bucket), key: Some(req.input.key), e_tag: Some(etag), ..Default::default() }))
     }
-    .await;
-    result
+    .await
 }
 
 pub async fn list_parts(st: &AppState, req: S3Request<ListPartsInput>) -> S3Result<S3Response<ListPartsOutput>> {

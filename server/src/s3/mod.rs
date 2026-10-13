@@ -7,6 +7,7 @@ pub(crate) mod credentials;
 pub(crate) mod etag;
 mod listing;
 pub mod manage;
+mod metadata;
 mod multipart;
 mod objects;
 mod temp;
@@ -44,10 +45,10 @@ impl s3s::access::S3Access for Access {
         if context.credentials().is_none() {
             return Err(s3s::s3_error!(AccessDenied));
         }
-        if let Some(verified) = context.extensions_mut().get::<Verified>() {
-            if !verified.0.swap(true, Ordering::Relaxed) {
-                auth::attempt_succeeded(&self.st, &self.rate_key);
-            }
+        if let Some(verified) = context.extensions_mut().get::<Verified>()
+            && !verified.0.swap(true, Ordering::Relaxed)
+        {
+            auth::attempt_succeeded(&self.st, &self.rate_key);
         }
         Ok(())
     }

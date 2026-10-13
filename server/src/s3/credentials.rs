@@ -103,6 +103,21 @@ pub async fn identity(st: &AppState, access_key: &str, write: bool) -> S3Result<
 pub async fn request_identity<T>(st: &AppState, req: &S3Request<T>, bucket: Option<&str>, write: bool) -> S3Result<Identity> {
     let creds = req.credentials.as_ref().ok_or_else(|| s3_error!(AccessDenied))?;
     let identity = identity(st, &creds.access_key, write).await?;
+    if let Some(expiry) = identity.key.expires_at {
+        let values = req.uri.query().map(|q| form_urlencoded::parse(q.as_bytes()).collect::<std::collections::HashMap<_, _>>()).unwrap_or_default();
+        if values.contains_key("X-Amz-Algorithm") {
+            let date = values.get("X-Amz-Date").ok_or_else(|| s3_error!(AccessDenied))?;
+            let seconds: i64 = values.get("X-Amz-Expires").and_then(|v| v.parse().ok()).ok_or_else(|| s3_error!(AccessDenied))?;
+            if date.len() != 16 || !date.is_ascii() {
+                return Err(s3_error!(AccessDenied));
+            }
+            let date = format!("{}-{}-{}T{}:{}:{}Z", &date[0..4], &date[4..6], &date[6..8], &date[9..11], &date[11..13], &date[13..15]);
+            let date = date.parse::<jiff::Timestamp>().map_err(|_| s3_error!(AccessDenied))?;
+            if date.as_second().checked_add(seconds).is_none_or(|until| until > expiry) {
+                return Err(s3_error!(AccessDenied, "The presigned URL outlives this Access Key"));
+            }
+        }
+    }
     if bucket.is_some_and(|name| name != identity.bucket.name) {
         return Err(s3_error!(AccessDenied));
     }

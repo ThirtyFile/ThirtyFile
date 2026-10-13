@@ -39,10 +39,10 @@ pub fn verify(headers: &HeaderMap, trailers: Option<&s3s::TrailingHeaders>, comp
         ("x-amz-checksum-xxhash128", &computed.checksum_xxhash128),
     ];
     for (name, actual) in values {
-        if let Some(expected) = expected.get(name) {
-            if expected.to_str().ok() != actual.as_deref() {
-                return Err(s3_error!(BadDigest));
-            }
+        if let Some(expected) = expected.get(name)
+            && expected.to_str().ok() != actual.as_deref()
+        {
+            return Err(s3_error!(BadDigest));
         }
     }
     Ok(())

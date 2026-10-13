@@ -68,14 +68,14 @@ pub async fn rooted_parent(st: &AppState, user: &User, root: &str, key: &str) ->
             crate::folders::sync_folder(st, &folder).await;
         }
         let child = child_named(&mut *st.db.acquire().await?, &folder.id, &part).await?;
-        if child.is_none() {
-            if let Err(error) = super::make_folder(st, user, &folder, &part).await {
-                // Concurrent PUTs can create the same intermediate folder; reuse only that exact live folder.
-                let mut conn = st.db.acquire().await?;
-                let concurrent = child_named(&mut conn, &folder.id, &part).await?;
-                if !concurrent.is_some_and(|n| n.is_folder() && n.name == part) {
-                    return Err(error);
-                }
+        if child.is_none()
+            && let Err(error) = super::make_folder(st, user, &folder, &part).await
+        {
+            // Concurrent PUTs can create the same intermediate folder; reuse only that exact live folder.
+            let mut conn = st.db.acquire().await?;
+            let concurrent = child_named(&mut conn, &folder.id, &part).await?;
+            if !concurrent.is_some_and(|n| n.is_folder() && n.name == part) {
+                return Err(error);
             }
         }
         let mut conn = st.db.acquire().await?;

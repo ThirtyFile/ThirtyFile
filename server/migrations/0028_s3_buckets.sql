@@ -28,6 +28,7 @@ CREATE TABLE s3_uploads (
     bucket_id TEXT NOT NULL REFERENCES s3_buckets(id) ON DELETE CASCADE,
     key_id TEXT NOT NULL REFERENCES s3_keys(id) ON DELETE CASCADE,
     object_key TEXT NOT NULL,
+    mtime TEXT,
     created_at INTEGER NOT NULL
 );
 CREATE INDEX s3_uploads_bucket_key ON s3_uploads(bucket_id, object_key COLLATE BINARY, id);
@@ -51,9 +52,11 @@ WHEN NEW.file_id != OLD.file_id BEGIN
 END;
 ALTER TABLE nodes ADD COLUMN content_md5 TEXT;
 ALTER TABLE nodes ADD COLUMN md5_version TEXT;
+ALTER TABLE nodes ADD COLUMN s3_mtime TEXT;
+ALTER TABLE nodes ADD COLUMN s3_mtime_version TEXT;
 -- Changes made by scans, copies, restores or future adapters must never retain a stale validator.
 CREATE TRIGGER nodes_md5_invalidated AFTER UPDATE OF blob_hash, size, updated_at ON nodes
 WHEN NEW.blob_hash IS NOT OLD.blob_hash OR NEW.size != OLD.size OR NEW.updated_at != OLD.updated_at
 BEGIN
-    UPDATE nodes SET content_md5 = NULL, md5_version = NULL WHERE id = NEW.id;
+    UPDATE nodes SET content_md5 = NULL, md5_version = NULL, s3_mtime = NULL, s3_mtime_version = NULL WHERE id = NEW.id;
 END;

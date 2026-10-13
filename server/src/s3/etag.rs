@@ -22,14 +22,16 @@ pub struct Described {
     pub source: Option<Source>,
     pub size: u64,
     pub etag: ETag,
+    pub mtime: Option<String>,
 }
 
 pub async fn describe_node(st: &AppState, node: &Node) -> S3Result<Described> {
     if node.is_folder() {
-        return Ok(Described { source: None, size: 0, etag: ETag::Strong(hex::encode(Md5::digest([]))) });
+        return Ok(Described { source: None, size: 0, etag: ETag::Strong(hex::encode(Md5::digest([]))), mtime: None });
     }
     let source = Source::resolve(st, node).await.map_err(super::map_error)?;
     let (size, version) = source.describe(node.size as u64).await.map_err(super::map_error)?;
+    let mtime = super::metadata::read(st, &node.id, &version).await?;
     let cached: Option<(String,)> = sqlx::query_as("SELECT content_md5 FROM nodes WHERE id = ? AND md5_version = ? AND content_md5 IS NOT NULL")
         .bind(&node.id)
         .bind(&version)
@@ -37,7 +39,7 @@ pub async fn describe_node(st: &AppState, node: &Node) -> S3Result<Described> {
         .await
         .map_err(super::internal)?;
     if let Some((md5,)) = cached {
-        return Ok(Described { source: Some(source), size, etag: ETag::Strong(md5) });
+        return Ok(Described { source: Some(source), size, etag: ETag::Strong(md5), mtime });
     }
     let md5 = reader(source.open(st, 0, size).await.map_err(super::internal)?).await.map_err(super::map_error)?;
     let (_, after) = source.describe(size).await.map_err(super::map_error)?;
@@ -55,5 +57,5 @@ pub async fn describe_node(st: &AppState, node: &Node) -> S3Result<Described> {
         .execute(&st.db)
         .await
         .map_err(super::internal)?;
-    Ok(Described { source: Some(source), size, etag: ETag::Strong(md5) })
+    Ok(Described { source: Some(source), size, etag: ETag::Strong(md5), mtime })
 }

@@ -260,6 +260,16 @@ async fn presigned_get_put_readonly_revoked_and_expired_keys_are_enforced_for_ad
     assert!(client.create_multipart_upload().bucket("backups").key("denied.txt").send().await.is_err());
     let signed = client.put_object().bucket("backups").key("denied.txt").presigned(duration).await.unwrap();
     assert_eq!(reqwest::Client::new().put(signed.uri()).body("x").send().await.unwrap().status(), axum::http::StatusCode::FORBIDDEN);
+    sqlx::query("UPDATE s3_keys SET expires_at=? WHERE id=?").bind(now() + 60).bind(&s.key.key.id).execute(&s.env.st.db).await.unwrap();
+    let too_long = s
+        .client
+        .get_object()
+        .bucket("backups")
+        .key("presigned.txt")
+        .presigned(PresigningConfig::expires_in(std::time::Duration::from_secs(300)).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(reqwest::get(too_long.uri()).await.unwrap().status(), axum::http::StatusCode::FORBIDDEN);
     sqlx::query("UPDATE s3_keys SET enabled=0 WHERE id=?").bind(&s.key.key.id).execute(&s.env.st.db).await.unwrap();
     assert!(s.client.list_buckets().send().await.is_err());
     sqlx::query("UPDATE s3_keys SET enabled=1,expires_at=? WHERE id=?").bind(now() - 1).bind(&s.key.key.id).execute(&s.env.st.db).await.unwrap();
@@ -269,7 +279,7 @@ async fn presigned_get_put_readonly_revoked_and_expired_keys_are_enforced_for_ad
 #[tokio::test]
 async fn multipart_parts_are_streamed_replaced_bound_to_the_key_completed_and_cleaned() {
     let s = server(false).await;
-    let upload = s.client.create_multipart_upload().bucket("backups").key("large.bin").send().await.unwrap();
+    let upload = s.client.create_multipart_upload().bucket("backups").key("large.bin").metadata("mtime", "1700000000.123456789").send().await.unwrap();
     let id = upload.upload_id().unwrap();
     let data = vec![b'a'; 5 * 1024 * 1024];
     let _ = s.client.upload_part().bucket("backups").key("large.bin").upload_id(id).part_number(1).body(ByteStream::from(data)).send().await.unwrap();
@@ -306,6 +316,7 @@ async fn multipart_parts_are_streamed_replaced_bound_to_the_key_completed_and_cl
         .build();
     let completed = s.client.complete_multipart_upload().bucket("backups").key("large.bin").upload_id(id).multipart_upload(selection).send().await.unwrap();
     assert!(completed.e_tag().is_some());
+    assert_eq!(s.client.head_object().bucket("backups").key("large.bin").send().await.unwrap().metadata().unwrap().get("mtime").unwrap(), "1700000000.123456789");
     let data = read(&s, "large.bin").await;
     assert_eq!(data.len(), 5 * 1024 * 1024 + 4);
     assert!(data.ends_with(b"last"));
@@ -341,6 +352,68 @@ async fn multipart_parts_are_streamed_replaced_bound_to_the_key_completed_and_cl
     super::multipart::cleanup(&s.env.st).await.unwrap();
     assert!(s.client.list_parts().bucket("backups").key("expired.bin").upload_id(upload.upload_id().unwrap()).send().await.is_err());
     assert!(!std::fs::read_dir(s.env.st.tmp_dir()).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with("s3-part-")));
+}
+
+#[tokio::test]
+async fn rclone_mtime_survives_identical_put_and_copy_but_never_external_or_other_protocol_changes() {
+    use aws_sdk_s3::types::MetadataDirective;
+    for folders in [false, true] {
+        let s = server(folders).await;
+        s.client
+            .put_object()
+            .bucket("backups")
+            .key("mtime.txt")
+            .metadata("mtime", "1700000000.123456789")
+            .body(ByteStream::from_static(b"old"))
+            .send()
+            .await
+            .unwrap();
+        let head = s.client.head_object().bucket("backups").key("mtime.txt").send().await.unwrap();
+        assert_eq!(head.metadata().unwrap().get("mtime").unwrap(), "1700000000.123456789");
+        let get = s.client.get_object().bucket("backups").key("mtime.txt").send().await.unwrap();
+        assert_eq!(get.metadata().unwrap().get("mtime"), head.metadata().unwrap().get("mtime"));
+        s.client.put_object().bucket("backups").key("mtime.txt").metadata("mtime", "1800000000").body(ByteStream::from_static(b"old")).send().await.unwrap();
+        s.client.copy_object().bucket("backups").key("copy.txt").copy_source("backups/mtime.txt").send().await.unwrap();
+        assert_eq!(s.client.head_object().bucket("backups").key("copy.txt").send().await.unwrap().metadata().unwrap().get("mtime").unwrap(), "1800000000");
+        s.client
+            .copy_object()
+            .bucket("backups")
+            .key("mtime.txt")
+            .copy_source("backups/mtime.txt")
+            .metadata_directive(MetadataDirective::Replace)
+            .metadata("mtime", "1900000000")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(s.client.head_object().bucket("backups").key("mtime.txt").send().await.unwrap().metadata().unwrap().get("mtime").unwrap(), "1900000000");
+        for invalid in ["NaN", "inf", "-9999999999999999", "1e999", " padded "] {
+            assert!(s.client.put_object().bucket("backups").key("mtime.txt").metadata("mtime", invalid).body(ByteStream::from_static(b"bad")).send().await.is_err());
+        }
+        assert!(
+            s.client
+                .put_object()
+                .bucket("backups")
+                .key("mtime.txt")
+                .metadata("arbitrary", "not-supported")
+                .body(ByteStream::from_static(b"bad"))
+                .send()
+                .await
+                .is_err()
+        );
+        assert_eq!(read(&s, "mtime.txt").await.as_ref(), b"old");
+        let identity = super::credentials::identity(&s.env.st, &s.key.key.access_key, true).await.unwrap();
+        if folders {
+            let node = crate::access::rooted_item(&s.env.st, &identity.user, &identity.root.id, "mtime.txt", crate::tree::Need::Read).await.unwrap();
+            tokio::fs::write(node.fs_file().unwrap(), b"external longer content").await.unwrap();
+        } else {
+            let up = crate::access::upload_to(&s.env.st, &s.admin, &identity.root, "mtime.txt".into()).await.unwrap();
+            let body = futures_util::stream::iter([Ok::<_, std::io::Error>(bytes::Bytes::from_static(b"other protocol"))]);
+            crate::access::write(&s.env.st, &s.admin, up, body, Some(14)).await.unwrap();
+        }
+        assert!(s.client.head_object().bucket("backups").key("mtime.txt").send().await.unwrap().metadata().is_none_or(|m| !m.contains_key("mtime")));
+        put(&s, "copy.txt", b"old").await;
+        assert!(s.client.head_object().bucket("backups").key("copy.txt").send().await.unwrap().metadata().is_none_or(|m| !m.contains_key("mtime")));
+    }
 }
 
 #[tokio::test]
@@ -402,7 +475,16 @@ async fn cancelling_a_partial_body_removes_its_owned_temporary_file() {
         },
     ));
     use futures_util::StreamExt;
-    let task = tokio::spawn(async move { super::objects::receive(&st, &identity, &identity.root, body, None, None, &axum::http::HeaderMap::new(), None, 0).await });
+    let task = tokio::spawn(async move {
+        super::objects::receive(
+            &st,
+            &identity,
+            &identity.root,
+            body,
+            super::objects::Incoming { size: None, md5: None, headers: &axum::http::HeaderMap::new(), trailers: None, replaced: 0 },
+        )
+        .await
+    });
     tokio::time::timeout(std::time::Duration::from_secs(10), received.notified()).await.unwrap();
     assert!(std::fs::read_dir(s.env.st.tmp_dir()).unwrap().flatten().any(|f| f.file_name().to_string_lossy().starts_with("s3-receive-")));
     task.abort();

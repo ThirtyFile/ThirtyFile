@@ -158,7 +158,17 @@ pub fn encode(key: &str, enabled: bool) -> String {
     if enabled { percent_encoding::utf8_percent_encode(key, percent_encoding::NON_ALPHANUMERIC).to_string() } else { key.into() }
 }
 
-pub async fn page(st: &AppState, identity: &Identity, prefix: &str, delimiter: &str, after: &str, skip_group: bool, limit: i32, url: bool) -> S3Result<Page> {
+struct Listing<'a> {
+    prefix: &'a str,
+    delimiter: &'a str,
+    after: &'a str,
+    skip_group: bool,
+    limit: i32,
+    url: bool,
+}
+
+async fn page(st: &AppState, identity: &Identity, query: Listing<'_>) -> S3Result<Page> {
+    let Listing { prefix, delimiter, after, skip_group, limit, url } = query;
     if prefix.len() > 1024 || delimiter.len() > 64 || after.len() > 1024 || !(0..=1000).contains(&limit) {
         return Err(s3_error!(InvalidArgument));
     }
@@ -208,7 +218,7 @@ pub async fn v2(st: &AppState, req: S3Request<ListObjectsV2Input>) -> S3Result<S
     let after = cursor.as_ref().map(|c| c.key.as_str()).or(i.start_after.as_deref()).unwrap_or_default();
     let limit = i.max_keys.unwrap_or(1000);
     let url = i.encoding_type.is_some();
-    let page = page(st, &identity, prefix, delimiter, after, cursor.as_ref().is_some_and(|c| c.group), limit, i.encoding_type.is_some()).await?;
+    let page = page(st, &identity, Listing { prefix, delimiter, after, skip_group: cursor.as_ref().is_some_and(|c| c.group), limit, url }).await?;
     let next = if page.truncated {
         let (key, group) = page.last.clone().ok_or_else(|| s3_error!(InternalError))?;
         Some(token(st, &Cursor { bucket: identity.bucket.id, prefix: prefix.into(), delimiter: delimiter.into(), key, group })?)
@@ -240,7 +250,7 @@ pub async fn v1(st: &AppState, req: S3Request<ListObjectsInput>) -> S3Result<S3R
     let after = i.marker.as_deref().unwrap_or_default();
     let limit = i.max_keys.unwrap_or(1000);
     let url = i.encoding_type.is_some();
-    let page = page(st, &identity, prefix, delimiter, after, !delimiter.is_empty() && after.ends_with(delimiter), limit, i.encoding_type.is_some()).await?;
+    let page = page(st, &identity, Listing { prefix, delimiter, after, skip_group: !delimiter.is_empty() && after.ends_with(delimiter), limit, url }).await?;
     Ok(S3Response::new(ListObjectsOutput {
         name: Some(i.bucket),
         prefix: i.prefix.map(|v| encode(&v, url)),
