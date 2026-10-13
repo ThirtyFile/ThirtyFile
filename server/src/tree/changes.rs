@@ -222,25 +222,22 @@ pub async fn items_left(st: &AppState, rows: &[Unfinished]) -> AppResult<u64> {
 
 // ───────────── Batches ─────────────
 
+/// Separate the exact path from its descendants so both use the path index, with one limit for the whole batch.
+const REPATH_BATCH_SQL: &str = "UPDATE nodes SET fs_path = ?3 || substr(fs_path, length(?2) + 1)
+    WHERE rowid IN (
+      SELECT rowid FROM nodes
+      WHERE drive_id = ?1 AND fs_path IS NOT NULL AND fs_path = ?2
+      UNION ALL
+      SELECT rowid FROM nodes
+      WHERE drive_id = ?1 AND fs_path IS NOT NULL AND fs_path >= ?2 || '/' AND fs_path < ?2 || '0'
+      LIMIT ?4
+    )";
+
 /// One batch of a path change; returns how many items changed and whether that was the last of them
 async fn repath_batch(conn: &mut SqliteConnection, drive_id: &str, old: &str, new: &str, limit: i64) -> AppResult<(i64, bool)> {
     // A range rather than `substr`, so the index on (drive_id, fs_path) finds the items ('0' comes right after '/').
     // Items changed are out of the range: a path never moves below itself.
-    let n = sqlx::query(
-        "UPDATE nodes SET fs_path = ?3 || substr(fs_path, length(?2) + 1)
-         WHERE rowid IN (
-           SELECT rowid FROM nodes
-           WHERE drive_id = ?1 AND fs_path IS NOT NULL AND (fs_path = ?2 OR (fs_path >= ?2 || '/' AND fs_path < ?2 || '0'))
-           LIMIT ?4
-         )",
-    )
-    .bind(drive_id)
-    .bind(old)
-    .bind(new)
-    .bind(limit)
-    .execute(conn)
-    .await?
-    .rows_affected() as i64;
+    let n = sqlx::query(REPATH_BATCH_SQL).bind(drive_id).bind(old).bind(new).bind(limit).execute(conn).await?.rows_affected() as i64;
     Ok((n, n < limit))
 }
 
@@ -604,6 +601,108 @@ mod tests {
 
     fn req<T: serde::de::DeserializeOwned>(v: serde_json::Value) -> Json<T> {
         Json(serde_json::from_value(v).unwrap())
+    }
+
+    #[tokio::test]
+    async fn repath_uses_a_root_point_lookup_and_a_bounded_descendant_range() {
+        let env = testutil::env().await;
+        let (version,): (String,) = sqlx::query_as("SELECT sqlite_version()").fetch_one(&env.st.db).await.unwrap();
+        let plan: Vec<(i64, i64, i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("EXPLAIN QUERY PLAN {REPATH_BATCH_SQL}")))
+            .bind("test-drive")
+            .bind("A%_資料")
+            .bind("Moved")
+            .bind(BATCH)
+            .fetch_all(&env.st.db)
+            .await
+            .unwrap();
+        let details: Vec<_> = plan.iter().map(|(_, _, _, detail)| detail.as_str()).collect();
+        assert!(
+            details.iter().any(|d| d.contains("nodes_fs_path") && d.contains("drive_id=? AND fs_path=?")),
+            "SQLite {version}: the root needs an indexed point lookup: {details:?}"
+        );
+        assert!(
+            details.iter().any(|d| d.contains("nodes_fs_path") && d.contains("drive_id=? AND fs_path>? AND fs_path<?")),
+            "SQLite {version}: descendants need both indexed path bounds, without scanning unrelated items in the drive: {details:?}"
+        );
+    }
+
+    // Indexed identity and metadata are unchanged when only paths move.
+    type IndexedPath = (String, String, Option<String>, String, String, Option<String>, i64, i64, i64, i64, bool, bool);
+
+    async fn indexed_paths(env: &testutil::TestEnv, drive: &str, other: &str) -> Vec<IndexedPath> {
+        sqlx::query_as(
+            "SELECT id, drive_id, parent_id, kind, name, fs_path, owner_id, size, created_at, updated_at, found, restricted
+             FROM nodes WHERE drive_id IN (?1, ?2) ORDER BY id",
+        )
+        .bind(drive)
+        .bind(other)
+        .fetch_all(&env.st.db)
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn repath_preserves_prefix_boundaries_other_drives_metadata_and_rollback_in_bounded_batches() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let space = env.folder_space("Paths").await;
+        let other = env.folder_space("Other paths").await;
+        for old in ["Sub", "A%_資料"] {
+            for root in [old.to_string(), format!("{old}0"), format!("{old}-neighbor"), format!("{old}suffix")] {
+                for dir in [&space.dir, &other.dir] {
+                    testutil::write_old(&dir.join(format!("{root}/Inner/file.txt")), b"first");
+                    testutil::write_old(&dir.join(format!("{root}/Inner/second.txt")), b"second");
+                    testutil::write_old(&dir.join(format!("{root}/Inner/Deep/leaf.txt")), b"deep");
+                }
+            }
+        }
+        // '%' and '_' are literal characters, not SQL LIKE wildcards; multibyte paths keep their suffix intact.
+        testutil::write_old(&space.dir.join("AXx資料/Inner/file.txt"), b"a similar name");
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        crate::folders::scan(&env.st, &other.drive).await.unwrap();
+        let null_path = env.file(&admin, &space.root, "No indexed disk path.txt").await;
+        for old in ["Sub", "A%_資料"] {
+            let before = indexed_paths(&env, &space.drive, &other.drive).await;
+            let new = format!("Moved {old}");
+            let mut expected = before.clone();
+            let prefix = format!("{old}/");
+            let mut affected = 0;
+            for row in &mut expected {
+                if row.1 == space.drive
+                    && let Some(path) = &mut row.5
+                    && (path.as_str() == old || path.starts_with(&prefix))
+                {
+                    *path = format!("{new}{}", &path[old.len()..]);
+                    affected += 1;
+                }
+            }
+            assert_eq!(affected, 6, "the exact folder, its two folders and three files");
+            {
+                let _w = env.st.write_lock.lock().await;
+                let mut tx = crate::db::begin_write(&env.st.db).await.unwrap();
+                assert_eq!(repath_batch(&mut tx, &space.drive, old, &new, 2).await.unwrap(), (2, false));
+                tx.rollback().await.unwrap();
+            }
+            assert_eq!(indexed_paths(&env, &space.drive, &other.drive).await, before, "rollback restores every path");
+            {
+                let _w = env.st.write_lock.lock().await;
+                let mut tx = crate::db::begin_write(&env.st.db).await.unwrap();
+                let mut batches = vec![];
+                loop {
+                    let (n, done) = repath_batch(&mut tx, &space.drive, old, &new, 2).await.unwrap();
+                    batches.push(n);
+                    assert!(batches.len() <= 4, "a renamed item must leave the old range");
+                    if done {
+                        break;
+                    }
+                }
+                assert_eq!(batches, [2, 2, 2, 0], "one limit bounds root and descendants together, including an exact multiple");
+                tx.commit().await.unwrap();
+            }
+            let after = indexed_paths(&env, &space.drive, &other.drive).await;
+            assert_eq!(after, expected, "only matching paths in this drive may change");
+            assert_eq!(after.iter().find(|row| row.0 == null_path).unwrap().5, None);
+        }
     }
 
     /// A folder "Big" in `parent` with `folders` folders of `files` files each; returns its id
