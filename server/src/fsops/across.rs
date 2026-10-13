@@ -492,29 +492,31 @@ pub(super) async fn placed_for_good(placed: &Placed) {
     }
 }
 
-/// The index side of a move; returns content no longer used and (for items now in the content store) what to remove
-/// from disk (paths below the space's folder, folders before what is in them)
-pub(super) async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: &[Node], placed: &Placed, held: bool) -> AppResult<(Vec<BlobRef>, Vec<Copied>)> {
-    let mut tx = crate::db::begin_write(&st.db).await?;
-    let top = &nodes[0];
+async fn authorize_move(conn: &mut SqliteConnection, user: &User, dest: &Node, top: &Node, held: bool) -> AppResult<()> {
     // Account removal explicitly preserves a personal space for an administrator with both scan locks held and
     // its moving flag set. Ordinary file operations and protocol actors never enter this maintenance path.
     let administrative = held
         && user.is_admin()
         && user.protocol_root.is_none()
         && user.sftp_credential.is_none()
-        && tree::get_drive(&mut tx, top.drive()).await?.is_some_and(|d| d.kind == tree::SpaceKind::Personal && d.moving);
+        && tree::get_drive(conn, top.drive()).await?.is_some_and(|d| d.kind == tree::SpaceKind::Personal && d.moving);
     if administrative {
-        let current = crate::auth::user_by_id(st, &mut tx, user.id).await?.ok_or_else(|| AppError::forbidden("Administrator permission required"))?;
-        if !current.is_admin() {
-            return Err(AppError::forbidden("Administrator permission required"));
-        }
-        crate::drives::manageable_drive(&mut tx, &current, dest.drive()).await?;
+        let current = crate::auth::require_admin(conn, user).await?;
+        crate::drives::manageable_drive(conn, &current, dest.drive()).await?;
     } else {
-        tree::node_for(&mut tx, user, &dest.id, tree::Need::Add).await?;
-        tree::node_for(&mut tx, user, &top.id, tree::Need::Move).await?;
-        tree::require_subtree(&mut tx, user, top, tree::Need::Move).await?;
+        tree::node_for(conn, user, &dest.id, tree::Need::Add).await?;
+        tree::node_for(conn, user, &top.id, tree::Need::Move).await?;
+        tree::require_subtree(conn, user, top, tree::Need::Move).await?;
     }
+    Ok(())
+}
+
+/// The index side of a move; returns content no longer used and (for items now in the content store) what to remove
+/// from disk (paths below the space's folder, folders before what is in them)
+pub(super) async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: &[Node], placed: &Placed, held: bool) -> AppResult<(Vec<BlobRef>, Vec<Copied>)> {
+    let mut tx = crate::db::begin_write(&st.db).await?;
+    let top = &nodes[0];
+    authorize_move(&mut tx, user, dest, top, held).await?;
     // Everything must still be as it was when the content was copied: items added to a folder of the content store
     // meanwhile would be left behind
     let changed = || AppError::conflict(format!("\"{}\" changed while it was being moved. Try again.", top.name));

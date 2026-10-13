@@ -39,7 +39,7 @@ async fn restricted_folders_are_hidden_from_native_listings_and_open_handles_rec
     assert_eq!(&bytes[..], b"confidential");
     env.revoke(&hidden, &member).await;
     assert!(sftp.read("/Shared with me/Department/HR/payroll.txt").await.is_err());
-    assert!(crate::tree::get_node(&mut *env.st.db.acquire().await.unwrap(), &secret).await.unwrap().is_some());
+    assert!(crate::tree::get_node(&mut env.st.db.acquire().await.unwrap(), &secret).await.unwrap().is_some());
     sftp.close().await.unwrap();
 }
 

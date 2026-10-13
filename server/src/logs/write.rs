@@ -24,8 +24,28 @@ pub trait Item: Sync {
 
 /// One sign-in, share-access or error event, queued for the background writer
 pub enum LogEvent {
-    ShareAccess { at: i64, share_id: String, owner_id: i64, node_id: Option<String>, node_name: String, event: &'static str, ip: String, user_agent: String },
-    Login { at: i64, user_id: Option<i64>, username: String, event: &'static str, method: String, ip: String, user_agent: String },
+    ShareAccess {
+        at: i64,
+        share_id: String,
+        owner_id: i64,
+        node_id: Option<String>,
+        node_name: String,
+        parent_id: Option<String>,
+        drive_id: Option<String>,
+        scopes: String,
+        event: &'static str,
+        ip: String,
+        user_agent: String,
+    },
+    Login {
+        at: i64,
+        user_id: Option<i64>,
+        username: String,
+        event: &'static str,
+        method: String,
+        ip: String,
+        user_agent: String,
+    },
     Error(Box<super::ErrorEvent>),
 }
 
@@ -94,14 +114,38 @@ pub fn spawn_writer(st: AppState, mut rx: tokio::sync::mpsc::Receiver<LogEvent>)
     LogWriter { stop, handle }
 }
 
+/// Merge captured and current boundaries: queued events must not lose their scope after a move or purge.
+async fn queued_scopes(conn: &mut SqliteConnection, id: Option<&str>, parent: Option<&str>, drive: Option<&str>, captured: &str) -> AppResult<String> {
+    let mut scopes: Vec<serde_json::Value> = serde_json::from_str(captured).map_err(crate::error::AppError::internal)?;
+    for target in [id, parent] {
+        let current: Vec<serde_json::Value> = serde_json::from_str(&crate::tree::saved_scopes(conn, target).await?).map_err(crate::error::AppError::internal)?;
+        for boundary in current {
+            if !scopes.contains(&boundary) {
+                scopes.push(boundary);
+            }
+        }
+    }
+    for missing in [id, parent].into_iter().flatten() {
+        if crate::tree::get_node(conn, missing).await?.is_none()
+            && let Some(drive) = drive
+        {
+            let boundary = serde_json::json!({"id":missing,"drive":drive});
+            if !scopes.contains(&boundary) {
+                scopes.push(boundary);
+            }
+        }
+    }
+    serde_json::to_string(&scopes).map_err(crate::error::AppError::internal)
+}
+
 async fn write_batch(st: &AppState, batch: &[LogEvent]) {
     let _w = st.write_lock.lock().await;
     let written: AppResult<()> = async {
         let mut tx = crate::db::begin_write(&st.db).await?;
         for e in batch {
             match e {
-                LogEvent::ShareAccess { at, share_id, owner_id, node_id, node_name, event, ip, user_agent } => {
-                    let scopes = crate::tree::saved_scopes(&mut tx, node_id.as_deref()).await?;
+                LogEvent::ShareAccess { at, share_id, owner_id, node_id, node_name, parent_id, drive_id, scopes, event, ip, user_agent } => {
+                    let scopes = queued_scopes(&mut tx, node_id.as_deref(), parent_id.as_deref(), drive_id.as_deref(), scopes).await?;
                     sqlx::query("INSERT INTO share_access (at, share_id, owner_id, node_id, node_name, event, ip, user_agent, restricted_scopes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
                         .bind(at)
                         .bind(share_id)
@@ -188,8 +232,12 @@ pub fn prune_share_views(st: &AppState) {
     st.part::<Memory>().share_views.lock().retain(|_, t| *t > cutoff);
 }
 
-/// Records one access to a share link (queued; downloads aren't slowed down)
-pub fn record_share_access(st: &AppState, share_id: &str, owner_id: i64, node: Option<&dyn Item>, event: &'static str, v: &Visitor) {
+/// Captures the current privacy boundary; the event itself is written by the background queue.
+pub async fn record_share_access(st: &AppState, share_id: &str, owner_id: i64, node: Option<&dyn Item>, event: &'static str, v: &Visitor) {
+    let scopes = match (node, st.db.acquire().await) {
+        (Some(_), Ok(mut c)) => crate::tree::saved_scopes(&mut c, node.map(|n| n.id())).await.unwrap_or_else(|_| "[]".into()),
+        _ => "[]".into(),
+    };
     enqueue(
         st,
         LogEvent::ShareAccess {
@@ -198,6 +246,9 @@ pub fn record_share_access(st: &AppState, share_id: &str, owner_id: i64, node: O
             owner_id,
             node_id: node.map(|n| n.id().to_string()),
             node_name: node.map(|n| n.name().to_string()).unwrap_or_default(),
+            parent_id: node.and_then(|n| n.parent()).map(str::to_string),
+            drive_id: node.and_then(|n| n.space()).map(str::to_string),
+            scopes,
             event,
             ip: v.ip.clone(),
             user_agent: v.user_agent.clone(),
@@ -265,6 +316,31 @@ pub fn record_login_via(st: &AppState, user_id: Option<i64>, username: &str, eve
 mod tests {
     use super::*;
     use crate::testutil;
+
+    #[tokio::test]
+    async fn queued_share_names_keep_their_boundary_after_a_move_or_purge() {
+        let env = testutil::env().await;
+        let owner = env.user("owner", true).await;
+        let member = env.user("member", true).await;
+        let hr = env.folder(&owner, owner.root(), "HR").await;
+        let file = env.file(&owner, &hr, "payroll.txt").await;
+        env.grant(owner.root(), &member, "manager").await;
+        sqlx::query("UPDATE nodes SET restricted = 1 WHERE id = ?").bind(&hr).execute(&env.st.db).await.unwrap();
+        let mut c = env.st.db.acquire().await.unwrap();
+        let captured = crate::tree::saved_scopes(&mut c, Some(&file)).await.unwrap();
+        sqlx::query("UPDATE nodes SET parent_id = ? WHERE id = ?").bind(owner.root()).bind(&file).execute(&mut *c).await.unwrap();
+        let scopes = queued_scopes(&mut c, Some(&file), Some(&hr), Some(owner.root()), &captured).await.unwrap();
+        assert!(scopes.contains(&hr));
+        let drive = crate::tree::get_node(&mut c, &file).await.unwrap().unwrap().drive().to_string();
+        sqlx::query("DELETE FROM nodes WHERE id IN (?,?)").bind(&file).bind(&hr).execute(&mut *c).await.unwrap();
+        let scopes = queued_scopes(&mut c, Some(&file), Some(&hr), Some(&drive), "[]").await.unwrap();
+        let sql = format!("SELECT {}", crate::tree::scopes_visible_sql(member.id, "?1"));
+        let (visible,): (bool,) = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(&scopes).fetch_one(&mut *c).await.unwrap();
+        assert!(!visible);
+        let sql = format!("SELECT {}", crate::tree::scopes_visible_sql(owner.id, "?1"));
+        let (visible,): (bool,) = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(scopes).fetch_one(&mut *c).await.unwrap();
+        assert!(visible);
+    }
 
     #[tokio::test]
     async fn link_views_are_remembered_per_address_block_in_a_record_of_limited_size() {

@@ -59,12 +59,14 @@ function Usage({ d }: { d: Drive }) {
   const pct = d.quota_bytes > 0 ? Math.min(100, (d.used_bytes / d.quota_bytes) * 100) : 0;
   return (
     <>
-      <div className="mt-1.5 mb-1 h-1.5 overflow-hidden rounded-full border bg-muted">
-        <div
-          className={cn("h-full", pct > 90 ? "bg-destructive" : pct > 80 ? "bg-amber-500" : "bg-brand")}
-          style={{ width: `${d.quota_bytes > 0 ? pct : 100}%`, opacity: d.quota_bytes > 0 ? 1 : 0.25 }}
-        />
-      </div>
+      {!d.partial_usage && (
+        <div className="mt-1.5 mb-1 h-1.5 overflow-hidden rounded-full border bg-muted">
+          <div
+            className={cn("h-full", pct > 90 ? "bg-destructive" : pct > 80 ? "bg-amber-500" : "bg-brand")}
+            style={{ width: `${d.quota_bytes > 0 ? pct : 100}%`, opacity: d.quota_bytes > 0 ? 1 : 0.25 }}
+          />
+        </div>
+      )}
       <div className="truncate text-[11px] text-muted-foreground">
         {d.partial_usage
           ? t("{used} in visible files", { used: formatBytes(d.used_bytes) })

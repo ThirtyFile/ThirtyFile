@@ -219,7 +219,9 @@ fn zip_name(plan: &crate::downloads::ZipPlan, roots: &[Node]) -> String {
 }
 
 async fn run_compress(st: AppState, user: User, progress: Tracker, roots: Vec<Node>, dest_id: String, offset: i64) -> AppResult<Outcome> {
-    let plan = crate::downloads::zip_plan_checked(&st, roots.clone(), offset, Some(crate::downloads::ZipAccess { user: user.clone(), publication: None })).await?;
+    let plan =
+        crate::downloads::zip_plan_checked(&st, roots.clone(), offset, Some(crate::downloads::ZipAccess { user: user.clone(), publication: None, share: None }))
+            .await?;
     let name = zip_name(&plan, &roots);
     progress.set_total(plan.bytes);
 

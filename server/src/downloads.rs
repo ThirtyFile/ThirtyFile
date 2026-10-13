@@ -82,6 +82,7 @@ struct Planned {
 pub struct ZipAccess {
     pub user: User,
     pub publication: Option<String>,
+    pub share: Option<String>,
 }
 
 impl ZipAccess {
@@ -93,6 +94,10 @@ impl ZipAccess {
             && !tree::within_publication(&mut c, root, id).await?
         {
             return Err(AppError::not_found("Item not found"));
+        }
+        drop(c);
+        if let Some(token) = &self.share {
+            crate::shares::check_stream_access(st, token).await?;
         }
         Ok(())
     }
@@ -643,7 +648,7 @@ async fn serve_download(st: &AppState, user: &User, headers: &HeaderMap, roots: 
     {
         return serve_blob(st, headers, node_blob(st, one).await?, true).await;
     }
-    zip_response_checked(st, roots, tz, Some(ZipAccess { user: user.clone(), publication: None })).await
+    zip_response_checked(st, roots, tz, Some(ZipAccess { user: user.clone(), publication: None, share: None })).await
 }
 
 /// Multi-select download with the ids in the URL, for a few items (any number goes through `create_download_link`)
