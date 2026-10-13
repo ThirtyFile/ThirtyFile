@@ -141,7 +141,7 @@ export function Explorer(p: ExplorerProps) {
     dimmed,
     measureRef: measure,
     navRef: s.listNav,
-    onDropInto: caps.write && p.folderId ? dropInto : undefined,
+    onDropInto: caps.add && p.folderId ? dropInto : undefined,
     onUploadInto: s.canUpload ? uploadInto : undefined,
     renamingId: dialog?.t === "rename" ? dialog.node.id : null,
     onRename: a.renameItem,

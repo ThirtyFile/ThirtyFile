@@ -38,7 +38,7 @@ import { t } from "@/lib/i18n";
 import { refreshFiles, renamed, saved } from "@/lib/queries";
 import { toastWithUndo } from "@/lib/undo";
 import { categoryOf, isTextLike, typeLabel } from "@/components/FileIcon";
-import { capsOf } from "@/lib/drives";
+import { capsFor, capsOf } from "@/lib/drives";
 import { locationOf } from "@/components/frame/location";
 import { useSort } from "@/lib/sort";
 import { pathOf } from "@/lib/paths";
@@ -126,7 +126,7 @@ export function FileViewPage() {
 
   const path = info.data?.path ?? [];
   const loc = locationOf(info.data);
-  const caps = capsOf(info.data?.role, me, info.data?.read_only, info.data?.drive.link_makers);
+  const caps = capsFor(capsOf(info.data?.role, me, info.data?.read_only, info.data?.drive.link_makers), node ? [node] : [], me);
   // A save from the editor: the new version shows here, in the folder's list and in Recent. The folder's pages aren't
   // loaded again while the file stays open: they're only marked out of date, for the list to reload when it shows
   const onSaved = (n: Node) => {

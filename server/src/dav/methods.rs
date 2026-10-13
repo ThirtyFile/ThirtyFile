@@ -237,7 +237,7 @@ pub(super) async fn lock(st: &AppState, user: &User, segs: &[String], headers: &
         Some(_) => return Err(AppError::forbidden("This folder can't be locked")),
         None => {
             let (parent, name) = parent_and_name(&mut *st.db.acquire().await?, user, segs).await?;
-            let parent = tree::folder_for(&mut *st.db.acquire().await?, user, &parent.id, Need::Write).await?;
+            let parent = tree::folder_for(&mut *st.db.acquire().await?, user, &parent.id, Need::Add).await?;
             let tmp = st.tmp_dir().join(format!("dav-{}", new_id()));
             tokio::fs::write(&tmp, b"").await?;
             let mut path = segs[..segs.len() - 1].to_vec();

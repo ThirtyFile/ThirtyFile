@@ -647,6 +647,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn grants_from_0_4_0_are_kept_and_contributors_can_be_added() {
+        let dir = scratch("thirtyfile-040-grants");
+        let path = dir.join("drive.db");
+        // As 0.4.0 left it: its one migration, and a space with a grant
+        let v040 = migrations_in(&dir.join("v0.4.0"), &[Path::new("migrations").join("0001_init.sql")], None).await;
+        let db = open(&path, 16, &v040).await.unwrap();
+        sqlx::query("INSERT INTO users (id, username, password_hash, created_at) VALUES (1, 'amy', 'x', 0), (2, 'ben', 'x', 0)").execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO nodes (id, owner_id, kind, name, created_at, updated_at) VALUES ('r', 1, 'folder', 'Team', 0, 0)").execute(&db).await.unwrap();
+        sqlx::query("INSERT INTO drives (id, name, kind, root_id, created_at, location_id) VALUES ('d', 'Team', 'team', 'r', 0, 'local')")
+            .execute(&db)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE nodes SET drive_id = 'd' WHERE id = 'r'").execute(&db).await.unwrap();
+        sqlx::query(
+            "INSERT INTO grants (id, node_id, principal_type, principal_id, role, granted_by, created_at, expires_at) VALUES (7, 'r', 'user', 1, 'owner', 1, 3, 9)",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        assert!(
+            sqlx::query("INSERT INTO grants (node_id, principal_type, principal_id, role, created_at) VALUES ('r', 'user', 2, 'contributor', 0)")
+                .execute(&db)
+                .await
+                .is_err()
+        );
+        db.close().await;
+
+        let db = connect(&path, 16).await.unwrap();
+        let kept: (i64, String, i64, String, Option<i64>, i64, Option<i64>) =
+            sqlx::query_as("SELECT id, principal_type, principal_id, role, granted_by, created_at, expires_at FROM grants").fetch_one(&db).await.unwrap();
+        assert_eq!(kept, (7, "user".into(), 1, "owner".into(), Some(1), 3, Some(9)));
+        sqlx::query("INSERT INTO grants (node_id, principal_type, principal_id, role, created_at) VALUES ('r', 'user', 2, 'contributor', 0)")
+            .execute(&db)
+            .await
+            .unwrap();
+        assert!(
+            sqlx::query("INSERT INTO grants (node_id, principal_type, principal_id, role, created_at) VALUES ('r', 'everyone', 0, 'guest', 0)")
+                .execute(&db)
+                .await
+                .is_err()
+        );
+        // Its index, and the note for backups that the space's grants changed, are made again with it
+        let (index,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'grants_principal'").fetch_one(&db).await.unwrap();
+        let (noted,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM space_changes WHERE drive_id = 'd'").fetch_one(&db).await.unwrap();
+        assert_eq!((index, noted), (1, 1));
+        db.close().await;
+    }
+
+    #[tokio::test]
     async fn a_database_from_0_4_0_gets_the_list_of_unfinished_changes() {
         let dir = scratch("thirtyfile-040");
         let path = dir.join("drive.db");
