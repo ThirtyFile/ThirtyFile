@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-TW" data-root="../.." data-page="protocols">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SFTP、S3 與 FTP · ThirtyFile</title>
+    <meta name="description" content="SFTP、S3 與 FTP — ThirtyFile file access." />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/protocols.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/protocols.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/protocols.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/protocols.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/protocols.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到主要內容</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="網站">
+          <a href="../index.html#features" class="hide-small">功能</a>
+          <a href="index.html" aria-current="page">指南</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">語言 </span><span class="lang-name">繁體中文</span></summary>
+            <ul>
+              <li><a href="../../docs/protocols.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="protocols.html" hreflang="zh-TW" lang="zh-TW" aria-current="true">繁體中文</a></li>
+              <li><a href="../../zh-CN/docs/protocols.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+              <li><a href="../../ja/docs/protocols.html" hreflang="ja" lang="ja">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="指南">
+        <details open>
+          <summary>所有指南</summary>
+          <p>開始使用</p>
+          <a href="index.html">安裝</a>
+          <a href="first-steps.html">初次設定</a>
+          <p>日常使用</p>
+          <a href="files.html">檔案操作</a>
+          <a href="preview.html">預覽與編輯</a>
+          <a href="sharing.html">分享</a>
+          <a href="account.html">你的帳號</a>
+          <a href="webdav.html">連線為網路磁碟機</a>
+          <a href="protocols.html" aria-current="page">SFTP、S3 與 FTP</a>
+          <p>管理</p>
+          <a href="users.html">使用者與空間</a>
+          <a href="sign-in.html">單一登入</a>
+          <a href="storage.html">儲存位置</a>
+          <a href="logs.html">紀錄與品牌</a>
+          <p>架設與維運</p>
+          <a href="settings.html">設定</a>
+          <a href="internet.html">從網際網路存取</a>
+          <a href="backup.html">升級與備份</a>
+          <a href="help.html">疑難排解</a>
+          <p>專案</p>
+          <a href="contributing.html">參與貢獻</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+<h1>SFTP、S3 與 FTP</h1>
+<p>程式可透過標準通訊協定操作 ThirtyFile 檔案。管理員啟用後即可使用 SFTP。S3 儲存桶與 FTP 接收資料夾是獨立功能，供應狀態如下說明。</p>
+        <details class="guide-toc">
+          <summary>本頁內容</summary>
+          <ol>
+            <li><a href="#choosing">如何選擇</a></li>
+            <li><a href="#sftp">SFTP</a></li>
+            <li><a href="#s3">S3 儲存桶</a></li>
+            <li><a href="#ftp">FTP 接收資料夾</a></li>
+            <li><a href="#use-cases">使用案例</a></li>
+          </ol>
+        </details>
+<h2 id="choosing">如何選擇</h2>
+<p>使用 <a href="webdav.html">WebDAV</a> 將空間掛載為磁碟；使用 SFTP 透過 WinSCP、FileZilla、Cyberduck、OpenSSH 或 rclone 進行加密傳輸。SFTP 顯示與 WebDAV 相同的目錄樹，遵循相同權限。</p>
+<h2 id="sftp">SFTP</h2>
+<p>在<strong>控制台 › 一般 › 應用程式與通訊協定</strong>開啟<strong>允許 SFTP 存取</strong>，預設關閉。啟動時使用 <code>THIRTYFILE_SFTP_ADDR</code> 設定連接埠（預設 <code>0.0.0.0:2022</code>）。在 Docker Compose 獨立公開連接埠，SFTP 不經 HTTP 反向代理。</p>
+<pre><code>services:
+  thirtyfile:
+    environment:
+      THIRTYFILE_SFTP_ADDR: 0.0.0.0:2022
+    ports:
+      - "8080:8080"
+      - "2022:2022"</code></pre>
+<p>將這些項目加入現有 Compose 服務，保留映像與磁碟區。使用 <code>docker compose up -d</code> 重新啟動，僅在必要的網路範圍開放所選 TCP 連接埠。</p>
+<h3 id="connecting">連線</h3>
+<p>在用戶端選擇 SFTP，輸入伺服器主機名稱、連接埠 2022、ThirtyFile 使用者名稱與<a href="account.html#app-passwords">應用程式密碼</a>。此處不接受帳號密碼。唯讀應用程式密碼無法修改檔案，管理員也一樣。第一次信任連線前，請核對控制台顯示的<strong>主機金鑰指紋</strong>。</p>
+<pre><code>sftp -P 2022 amy@files.example.com
+# After connecting:
+ls
+cd "My files"
+put report.csv
+get report.csv</code></pre>
+<h3 id="ssh-keys">SSH 公開金鑰</h3>
+<p>管理員也須開啟<strong>允許 SSH 金鑰</strong>。在<strong>帳號選單 › SFTP 金鑰</strong>新增名稱與 SSH 公開金鑰，依要求確認目前密碼與雙因素驗證碼。私密金鑰請保留在自己的裝置。對話框顯示指紋與上次使用時間，移除金鑰後會停止存取，包含現有連線。</p>
+<pre><code>sftp -i ~/.ssh/id_ed25519 -P 2022 amy@files.example.com</code></pre>
+<h3 id="limits">SFTP 支援範圍</h3>
+<p>可列出與下載檔案、上傳、從指定位置續傳、建立資料夾、重新命名、移動及移除項目（送到回收站）。寫入先暫存，關閉檔案時才提交，並套用配額、上傳限制、版本及活動紀錄。斷線時捨棄未完成寫入。接受用戶端時間設定但不儲存。不提供 Shell、指令執行、SSH rsync、轉送或符號連結。每個帳號最多五個連線，每個連線最多 32 個開啟項目，閒置五分鐘後逾時。</p>
+<p>首次啟動時，伺服器在資料目錄產生 ed25519 主機金鑰，請一起備份。更換金鑰會改變指紋，用戶端應要求你重新確認。</p>
+<h2 id="s3">S3 儲存桶</h2>
+<p>將資料夾發布為使用獨立 Access Key 的儲存桶是另一項開發中的功能，不使用 SFTP 應用程式密碼。將 ThirtyFile 連線至既有 S3 儲存位置，請參閱<a href="storage.html#types">儲存位置</a>。</p>
+<h2 id="ftp">FTP 接收資料夾</h2>
+<p>目前不提供 FTP 接收伺服器，僅在無法使用 SFTP 的掃描器或攝影機有具體需求時規劃。將既有 FTP 伺服器新增為儲存位置是不同功能。</p>
+<h2 id="use-cases">使用案例</h2>
+<p>伺服器可使用 SSH 金鑰與 SFTP 腳本上傳每晚報表；設計師可使用 Cyberduck 傳輸大型專案。使用 rclone 時執行 <code>rclone config</code>，選擇 SFTP 並設定主機名稱與連接埠，核對主機金鑰，使用應用程式密碼或 SSH 私密金鑰；避免將憑證寫入指令歷史。</p>
+        <nav class="next" aria-label="更多指南">
+          <a href="webdav.html"><span>上一篇</span>連線為網路磁碟機</a>
+          <a class="forward" href="users.html"><span>下一篇</span>使用者與空間</a>
+        </nav>
+</main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">指南</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">原始碼</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">回報問題</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker 映像檔</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>
