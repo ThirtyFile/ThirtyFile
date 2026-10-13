@@ -379,6 +379,34 @@ test("text is formatted from the toolbar and with shortcuts, and the file gets j
   expect(second).toMatch(/<w:rPr><w:color w:val="FF0000"\/><w:sz w:val="28"\/><w:szCs w:val="28"\/><w:highlight w:val="yellow"\/><\/w:rPr><w:t>Second<\/w:t>/);
 });
 
+test("range formatting uses the new paragraph even before selectionchange is delivered", async ({ page }) => {
+  await signIn(page);
+  const dir = await makeFolder(page, "Word selection");
+  const body = HEADING + "<w:p><w:r><w:t>First</w:t></w:r></w:p><w:p><w:r><w:t>Second</w:t></w:r></w:p>";
+  const id = await uploadFile(page, dir, "selection.docx", Buffer.from(await buildDocument(body)));
+  const { frame, text } = await openEditor(page, id, "selection.docx");
+  await frame.getByText("First", { exact: true }).click();
+  await page.getByRole("button", { name: "Center", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Center", exact: true })).toHaveAttribute("aria-pressed", "true");
+
+  // Model the browser delivering selectionchange after the next toolbar command, without a timing-dependent sleep.
+  await text.evaluate((el) => {
+    el.ownerDocument.addEventListener("selectionchange", (event) => event.stopImmediatePropagation(), { capture: true });
+  });
+  await frame.getByText("Second", { exact: true }).click();
+  await page.getByLabel("Paragraph style").selectOption({ label: "Heading 1" });
+  await expect(page.getByLabel("Paragraph style")).toHaveValue("Heading1");
+  const saved = saving(page, id);
+  await page.getByRole("button", { name: "Save" }).click();
+  expect((await saved).ok()).toBe(true);
+  const { xml } = await savedXml(page, id);
+  const paragraphs = [...xml.matchAll(/<w:p>(.*?)<\/w:p>/g)].map((m) => m[1]);
+  const first = paragraphs.find((p) => p.includes("First"))!;
+  expect(first).toContain('<w:jc w:val="center"/>');
+  expect(first).not.toContain("Heading1");
+  expect(paragraphs.find((p) => p.includes("Second"))).toContain('<w:pStyle w:val="Heading1"/>');
+});
+
 test("bulleted and numbered lists are made, and a document without lists gets its numbering part", async ({ page }) => {
   await signIn(page);
   const dir = await makeFolder(page, "Word lists");
