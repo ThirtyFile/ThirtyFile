@@ -18,7 +18,7 @@ use crate::{
     logs,
     state::AppState,
     tree::{
-        self, Need, Node,
+        self, Need, Node, Role,
         changes::{self},
     },
     util::{new_id, now, validate_name},
@@ -37,7 +37,7 @@ pub async fn create_folder(State(st): State<AppState>, user: User, Json(req): Js
     let locks = fsops::lock_seen(&st, &user, &[&req.parent_id]).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    let parent = tree::folder_for(&mut tx, &user, &req.parent_id, Need::Write).await?;
+    let parent = tree::folder_for(&mut tx, &user, &req.parent_id, Need::Add).await?;
     locks.check(&parent)?;
     if tree::name_taken(&mut tx, &parent.id, &name).await? {
         return Err(AppError::conflict(format!("\"{name}\" already exists")));
@@ -217,14 +217,14 @@ pub async fn move_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
     let locks = fsops::lock_seen(&st, &user, &locked_ids(req.dest()?, &ids)).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    let dest = tree::folder_for(&mut tx, &user, req.dest()?, Need::Write).await?;
+    let dest = tree::folder_for(&mut tx, &user, req.dest()?, Need::Add).await?;
     locks.check(&dest)?;
     // Moves between spaces that involve a folder space copy content: done after this transaction, item by item
     let mut across = Vec::new();
     let mut replaced = Vec::new();
     let mut across_items = 0usize;
     for id in &ids {
-        let mut node = tree::node_for(&mut tx, &user, id, Need::Write).await?;
+        let mut node = tree::node_for(&mut tx, &user, id, Need::Move).await?;
         changes::refuse_busy(&mut tx, &node.id).await?;
         locks.check(&node)?;
         not_root(&node)?;
@@ -255,7 +255,9 @@ pub async fn move_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
             let src_drive = tree::get_drive(&mut tx, node.drive()).await?.ok_or_else(|| AppError::not_found("Source space not found"))?;
             let src_root = tree::get_node(&mut tx, &src_drive.root_id).await?.ok_or_else(|| AppError::not_found("Source space not found"))?;
             let member_role = tree::role_on(&mut tx, &user, &src_root).await?;
-            if member_role.is_none_or(|r| tree::allows(&user, r, Need::Delete).is_err()) {
+            // (a contributor moves only what they added, checked above, as they may delete it)
+            let may_delete = |r: Role| tree::allows(&user, if r == Role::Contributor { Role::Editor } else { r }, Need::Delete).is_ok();
+            if !member_role.is_some_and(may_delete) {
                 return Err(AppError::forbidden(format!("\"{}\" was shared with you and can't be moved to another space. Use \"Copy\" instead.", node.name)));
             }
             // Cross-space move: move the whole subtree to the target space and check the target space's quota (added up
@@ -327,7 +329,7 @@ pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
     let locks = fsops::lock_seen(&st, &user, &locked_ids(req.dest()?, &ids)).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    let dest = tree::folder_for(&mut tx, &user, req.dest()?, Need::Write).await?;
+    let dest = tree::folder_for(&mut tx, &user, req.dest()?, Need::Add).await?;
     locks.check(&dest)?;
     // The name asked for one item's copy (else each copy has its original's)
     let named = match req.name.as_deref().filter(|_| ids.len() == 1) {
@@ -435,17 +437,58 @@ pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
 
 pub async fn trash(State(st): State<AppState>, user: User, Json(req): Json<BatchReq>) -> AppResult<Json<Value>> {
     let ids = req.ids()?;
-    let locks = fsops::lock_seen(&st, &user, &ids.iter().map(String::as_str).collect::<Vec<_>>()).await?;
+    trash_ids(&st, &user, &ids, false).await
+}
+
+/// File protocols remove only empty directories; the web's recursive trash keeps its usual behavior.
+pub async fn trash_empty_folder(st: &AppState, user: &User, id: &str) -> AppResult<()> {
+    trash_ids(st, user, &[id.to_string()], true).await.map(|_| ())
+}
+
+async fn trash_ids(st: &AppState, user: &User, ids: &[String], empty_only: bool) -> AppResult<Json<Value>> {
+    let locks = fsops::lock_seen(st, user, &ids.iter().map(String::as_str).collect::<Vec<_>>()).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    for id in &outermost(&mut tx, &ids).await? {
-        let node = tree::node_for(&mut tx, &user, id, Need::Delete).await?;
+    for id in &outermost(&mut tx, ids).await? {
+        let node = tree::node_for(&mut tx, user, id, Need::Delete).await?;
         locks.check(&node)?;
-        trash_one(&mut tx, &user, &locks, &node, "").await?;
+        if empty_only {
+            if !node.is_folder() {
+                return Err(AppError::bad_request("This isn't a folder"));
+            }
+            let (has_children,): (bool,) =
+                sqlx::query_as("SELECT EXISTS(SELECT 1 FROM nodes WHERE parent_id = ? AND trashed_at IS NULL)").bind(&node.id).fetch_one(&mut *tx).await?;
+            if has_children {
+                return Err(AppError::conflict("The folder isn't empty"));
+            }
+            empty_on_disk(&node).await?;
+        }
+        trash_one(&mut tx, user, &locks, &node, "").await?;
+        if empty_only && node.in_folder_space() {
+            // If an external writer added something during the rename, roll the transaction and disk move back.
+            let moved = tree::get_node(&mut tx, &node.id).await?.ok_or_else(|| AppError::not_found("Item not found"))?;
+            empty_on_disk(&moved).await?;
+        }
     }
     tx.commit().await?;
     locks.committed();
     Ok(Json(json!({ "ok": true })))
+}
+
+async fn empty_on_disk(node: &Node) -> AppResult<()> {
+    if !node.in_folder_space() {
+        return Ok(());
+    }
+    let n = node.clone();
+    fsops::on_disk(node.drive(), std::time::Duration::from_secs(5), move || {
+        let path = n.fs_pinned().and_then(|p| p.dir()).map_err(|_| AppError::conflict("The folder isn't empty"))?;
+        let mut entries = std::fs::read_dir(path.as_path()).map_err(|_| AppError::conflict("The folder isn't empty"))?;
+        if entries.next().is_some() {
+            return Err(AppError::conflict("The folder isn't empty"));
+        }
+        Ok(())
+    })
+    .await
 }
 
 /// Moves an item (the user may delete it) and everything in it to the trash; `detail` goes into the activity log

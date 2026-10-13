@@ -9,6 +9,7 @@ export type DialogState =
   | { t: "move" | "copy"; picked: Picked }
   | { t: "trash"; picked: Picked }
   | { t: "share"; node: Node }
+  | { t: "s3"; nodeId: string }
   | { t: "access"; nodeId: string };
 
 /** Inputs that take no typing: shortcuts keep working while one has the focus */

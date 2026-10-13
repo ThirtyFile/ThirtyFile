@@ -13,10 +13,14 @@
 
 mod changes;
 mod paths;
+mod read;
+mod scope;
 mod write;
 
 pub use changes::*;
 pub use paths::*;
+pub use read::*;
+pub use scope::*;
 pub use write::*;
 
 use std::collections::HashMap;
@@ -49,6 +53,39 @@ mod tests {
 
     fn body(text: &'static str) -> impl futures_util::Stream<Item = Result<Bytes, std::io::Error>> + Unpin {
         futures_util::stream::iter([Ok(Bytes::from_static(text.as_bytes()))])
+    }
+
+    #[tokio::test]
+    async fn contributors_add_and_replace_only_their_own_files_even_when_a_name_is_taken_during_receiving() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let ben = env.user("ben", true).await;
+        let library = env.folder(&amy, amy.root(), "Library").await;
+        env.grant(&library, &ben, "contributor").await;
+        let parent = tree::get_node(&mut env.st.db.acquire().await.unwrap(), &library).await.unwrap().unwrap();
+
+        let upload = upload_to(&env.st, &ben, &parent, "ben.txt".into()).await.unwrap();
+        assert!(write(&env.st, &ben, upload, body("first"), Some(5)).await.unwrap());
+        let upload = upload_to(&env.st, &ben, &parent, "ben.txt".into()).await.unwrap();
+        assert!(!write(&env.st, &ben, upload, body("second"), None).await.unwrap());
+
+        let pending = upload_to(&env.st, &ben, &parent, "taken.txt".into()).await.unwrap();
+        let owners = upload_to(&env.st, &amy, &parent, "taken.txt".into()).await.unwrap();
+        assert!(write(&env.st, &amy, owners, body("owner's content"), None).await.unwrap());
+        assert!(write(&env.st, &ben, pending, body("must not overwrite"), None).await.is_err());
+        assert!(upload_to(&env.st, &ben, &parent, "taken.txt".into()).await.is_err());
+        let mut c = env.st.db.acquire().await.unwrap();
+        let taken = crate::paths::child_named(&mut c, &parent.id, "taken.txt").await.unwrap().unwrap();
+        assert_eq!(taken.owner_id, amy.id);
+        let (versions,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM node_versions WHERE node_id = ?").bind(&taken.id).fetch_one(&mut *c).await.unwrap();
+        assert_eq!(versions, 0, "the owner's content was never replaced");
+        drop(c);
+        assert_eq!(std::fs::read(testutil::blob_file(&env, b"owner's content")).unwrap(), b"owner's content");
+
+        let revoked = upload_to(&env.st, &ben, &parent, "revoked.txt".into()).await.unwrap();
+        env.revoke(&library, &ben).await;
+        assert!(write(&env.st, &ben, revoked, body("revoked"), None).await.is_err());
+        assert!(crate::paths::child_named(&mut env.st.db.acquire().await.unwrap(), &parent.id, "revoked.txt").await.unwrap().is_none());
     }
 
     #[tokio::test]

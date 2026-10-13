@@ -58,7 +58,7 @@ export function macMenu(m: MenuEntries): ReactNode {
         m.moveTo,
         m.copyTo,
       ],
-      [m.shareWith, m.shareLink],
+      [m.shareWith, m.shareLink, m.publishBucket],
       [m.favorite, m.tags],
     );
   // What can be made here, pasting, then how the list shows

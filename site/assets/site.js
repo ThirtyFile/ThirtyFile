@@ -17,7 +17,7 @@
   // scripts/check-site.mjs reads both lists (keep each on one line): it fails when a page below is missing in a
   // language, or when the language links of the pages don't match.
   const LANGUAGES = [["en", "English"], ["zh-TW", "繁體中文"], ["zh-CN", "简体中文"], ["ja", "日本語"]];
-  const TRANSLATED = ["index.html", "docs/index.html", "docs/first-steps.html", "docs/files.html", "docs/preview.html", "docs/sharing.html", "docs/account.html", "docs/webdav.html", "docs/users.html", "docs/sign-in.html", "docs/storage.html", "docs/logs.html", "docs/settings.html", "docs/internet.html", "docs/backup.html", "docs/help.html", "docs/contributing.html"];
+  const TRANSLATED = ["index.html", "docs/index.html", "docs/first-steps.html", "docs/files.html", "docs/preview.html", "docs/sharing.html", "docs/account.html", "docs/webdav.html", "docs/protocols.html", "docs/users.html", "docs/sign-in.html", "docs/storage.html", "docs/logs.html", "docs/settings.html", "docs/internet.html", "docs/backup.html", "docs/help.html", "docs/contributing.html"];
 
   const GUIDES = [
     ["Get started", [
@@ -30,6 +30,7 @@
       ["sharing", "Sharing"],
       ["account", "Your account"],
       ["webdav", "Mapping it as a drive"],
+      ["protocols", "SFTP, S3 and FTP"],
     ]],
     ["Administration", [
       ["users", "Users and spaces"],
@@ -52,6 +53,7 @@
   // the glossary in web/src/lib/i18n/glossary.md
   const DICT = {
     "zh-TW": {
+      "SFTP, S3 and FTP": "SFTP、S3 與 FTP",
       "Site": "網站",
       "Features": "功能",
       "Guides": "指南",
@@ -71,6 +73,7 @@
       "Sharing": "分享",
       "Your account": "你的帳號",
       "Mapping it as a drive": "連線為網路磁碟機",
+      "SFTP, S3 and FTP": "SFTP、S3 與 FTP",
       "Administration": "管理",
       "Users and spaces": "使用者與空間",
       "Single sign-on": "單一登入",
@@ -95,6 +98,7 @@
       "On this page": "本頁內容",
     },
     "zh-CN": {
+      "SFTP, S3 and FTP": "SFTP、S3 和 FTP",
       "Site": "网站",
       "Features": "功能",
       "Guides": "指南",
@@ -114,6 +118,7 @@
       "Sharing": "分享",
       "Your account": "你的账号",
       "Mapping it as a drive": "映射为网络驱动器",
+      "SFTP, S3 and FTP": "SFTP、S3 和 FTP",
       "Administration": "管理",
       "Users and spaces": "用户与空间",
       "Single sign-on": "单点登录",
@@ -138,6 +143,7 @@
       "On this page": "本页内容",
     },
     "ja": {
+      "SFTP, S3 and FTP": "SFTP、S3、FTP",
       "Site": "サイト",
       "Features": "機能",
       "Guides": "ガイド",
@@ -157,6 +163,7 @@
       "Sharing": "共有",
       "Your account": "アカウント",
       "Mapping it as a drive": "ネットワークドライブとして割り当て",
+      "SFTP, S3 and FTP": "SFTP、S3、FTP",
       "Administration": "管理",
       "Users and spaces": "ユーザーとスペース",
       "Single sign-on": "シングルサインオン",

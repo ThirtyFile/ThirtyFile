@@ -1,3 +1,4 @@
+import { S3FolderSection } from "@/components/S3Buckets";
 import { useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { TagIcon, XIcon } from "lucide-react";
@@ -11,12 +12,12 @@ import { FileIcon, canBrowserThumbnail, canThumbnail, typeLabel } from "@/compon
 import { Thumb } from "@/components/fileList/thumbs";
 import { Resizer } from "@/components/Resizer";
 import { VersionsSection } from "@/components/VersionsSection";
-import { ROLE_LABEL } from "@/lib/drives";
+import { ROLE_LABEL, capsFor, capsOf } from "@/lib/drives";
 import { actionLabel } from "@/components/logs/actions";
 import { useMediaQuery, useOverlayFocus } from "@/lib/focus";
 import { t, tServer } from "@/lib/i18n";
 import { FOLDER_CONTENTS } from "@/lib/queries";
-import { usePersisted } from "@/lib/session";
+import { useMe, usePersisted } from "@/lib/session";
 import { useSettled } from "@/lib/useSettled";
 import { formatBytes, formatDateTime } from "@/lib/utils";
 
@@ -100,6 +101,7 @@ export function DetailsPane({ selected, folder, onClose, count, whole }: { selec
   // On narrow windows the pane covers the file list: focus moves into it, Esc closes it and focus goes back.
   // The list stays usable beside it, so focus isn't kept inside
   const ref = useRef<HTMLElement>(null);
+  const me = useMe();
   const overlay = useMediaQuery("(max-width: 63.99rem)");
   useOverlayFocus(ref, overlay, { onClose, modal: false });
 
@@ -197,11 +199,14 @@ export function DetailsPane({ selected, folder, onClose, count, whole }: { selec
               </DropdownMenuContent>
             </DropdownMenu>
           )}
+          {ready && node.kind === "folder" && <S3FolderSection nodeId={node.id} />}
           <History node={node} query={history} />
           {error && (
             <ErrorState compact message={error.message} onRetry={() => Promise.all([info.error && info.refetch(), shares.error && shares.refetch(), contents.error && contents.refetch()])} />
           )}
-          {node.kind === "file" && !node.trashed_at && <VersionsSection node={node} ready={ready} canRestore={!!info.data && info.data.role !== "viewer" && !info.data.read_only} />}
+          {node.kind === "file" && !node.trashed_at && (
+            <VersionsSection node={node} ready={ready} canRestore={!!info.data && capsFor(capsOf(info.data.role, me, info.data.read_only), [node], me).write} />
+          )}
         </div>
       </>
     );

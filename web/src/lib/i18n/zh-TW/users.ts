@@ -2,10 +2,12 @@
 export default {
   // Spaces and roles (lib/drives.tsx)
   "Viewer": "檢視者",
+  "Contributor": "投稿者",
   "Editor": "編輯者",
   "Manager": "管理者",
   "Owner": "擁有者",
   "Can browse, preview, and download": "可瀏覽、預覽、下載",
+  "Can add files and folders, and change or delete only what they added": "可新增檔案與資料夾，只能變更或刪除自己新增的項目",
   "Can upload, edit, delete, and create share links, as far as their account and the space allow": "可上傳、編輯、刪除、建立分享連結（視帳號權限與空間設定而定）",
   "Editors, managers and owners": "編輯者、管理者和擁有者",
   "Managers and owners": "管理者和擁有者",
