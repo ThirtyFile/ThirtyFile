@@ -676,6 +676,9 @@ export async function openDocxEditor(pkg: OoxmlPackage, root: HTMLElement, opts:
    * where the caret was; undefined when there is no selection in the view
    */
   const markSelection = (word: boolean): { doc: Document; caret: Caret | null } | undefined => {
+    // A toolbar command can arrive before selectionchange after a click in another paragraph.
+    // Keep that click's selection; a toolbar that took focus still uses the frozen range.
+    keepSelection();
     restoreSelection();
     const sel = getSelection();
     if (!sel?.rangeCount || !editable.contains(sel.anchorNode)) return undefined;

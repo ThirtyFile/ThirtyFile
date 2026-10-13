@@ -15,7 +15,8 @@ pub(super) async fn upload_share(st: &AppState, token: &str, headers: &HeaderMap
     }
     // The creator's current permissions decide (open_share checked they can still share it; uploading checks they
     // can still change the folder, and their space's quota)
-    let user = auth::user_by_id(st, &mut *st.db.acquire().await?, share.owner_id).await?.ok_or_else(gone)?;
+    let mut user = auth::user_by_id(st, &mut *st.db.acquire().await?, share.owner_id).await?.ok_or_else(gone)?;
+    user.protocol_root = Some(root.id.clone());
     // Each browser's uploads are its own: other visitors of the link can't continue, look at or cancel them. A browser
     // without a key gets one with the upload it starts (an upload id from elsewhere then matches nothing).
     let name = visitor_cookie(&share.id);

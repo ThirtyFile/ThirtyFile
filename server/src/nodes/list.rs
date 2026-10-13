@@ -34,12 +34,28 @@ pub struct ListQuery {
     /// so a listing that doesn't check (a share link's) tells nothing about anyone's tags.
     #[serde(skip)]
     pub(super) tagged_by: Option<i64>,
+    /// Internal caller context, never accepted from the request. Trusted maintenance callers can list raw items.
+    #[serde(skip)]
+    pub(super) actor: Option<User>,
+    /// A share link cannot cross a restricted folder, regardless of its creator's access.
+    #[serde(skip)]
+    pub(super) publication: bool,
 }
 
 /// Largest page of a folder or trash listing
 pub const MAX_PAGE: i64 = 5000;
 
 impl ListQuery {
+    pub fn visible_to(mut self, user: &User) -> Self {
+        self.actor = Some(user.clone());
+        self
+    }
+
+    pub fn published(mut self) -> Self {
+        self.publication = true;
+        self
+    }
+
     /// One page of `limit` items in the default order, after `after` (the `next` of the page before; None: from the start)
     pub fn page(after: Option<String>, limit: i64) -> ListQuery {
         ListQuery { after, limit: Some(limit), ..Default::default() }
@@ -198,6 +214,11 @@ pub fn order_clause(sort: Option<&str>, order: Option<&str>) -> String {
 /// SQLite runs NODE_COLS' subqueries after sorting, only for the rows it returns: measured on a folder of 50,000
 /// items, that is faster than joining the same tables for every row, with or without a limit.
 pub async fn list_children(conn: &mut SqliteConnection, parent_id: &str, q: &ListQuery) -> AppResult<Listing<Node>> {
+    if let Some(user) = &q.actor {
+        tree::folder_for(conn, user, parent_id, Need::Read).await?;
+    }
+    let visible = q.actor.as_ref().map(|user| format!("AND {}", tree::visible_sql(user, "n.id"))).unwrap_or_default();
+    let publication = if q.publication { "AND NOT n.restricted" } else { "" };
     let folders_only = q.folders_only == Some(true);
     let kind_filter = if folders_only { "AND n.kind = 'folder'" } else { "" };
     let tag_filter = match (q.tag, q.tagged_by) {
@@ -206,10 +227,15 @@ pub async fn list_children(conn: &mut SqliteConnection, parent_id: &str, q: &Lis
         (None, _) => String::new(),
     };
     // The navigation pane shows an arrow only on folders with folders in them (the index nodes_subfolders answers it)
-    let has_folders =
-        if folders_only { ", EXISTS (SELECT 1 FROM nodes c WHERE c.parent_id = n.id AND c.kind = 'folder' AND c.trashed_at IS NULL) AS has_folders" } else { "" };
-    let held = Held::new(format!("n.parent_id = ?1 AND n.trashed_at IS NULL {kind_filter} {tag_filter}"), vec![Arg::Text(parent_id.to_string())]);
-    list_held(conn, &held, has_folders, q).await
+    let child_visible = q.actor.as_ref().map(|user| format!("AND {}", tree::visible_sql(user, "c.id"))).unwrap_or_default();
+    let has_folders = if folders_only {
+        format!(", EXISTS (SELECT 1 FROM nodes c WHERE c.parent_id = n.id AND c.kind = 'folder' AND c.trashed_at IS NULL {child_visible}) AS has_folders")
+    } else {
+        String::new()
+    };
+    let held =
+        Held::new(format!("n.parent_id = ?1 AND n.trashed_at IS NULL {kind_filter} {tag_filter} {visible} {publication}"), vec![Arg::Text(parent_id.to_string())]);
+    list_held(conn, &held, &has_folders, q).await
 }
 
 /// The items a listing holds, whatever it is (a folder's children, a smart folder's matches): a condition on the item
@@ -245,6 +271,12 @@ impl Held {
     /// What a folder holds: its children, not in the trash
     pub(super) fn children_of(folder: &str) -> Self {
         Held::new("n.parent_id = ?1 AND n.trashed_at IS NULL".into(), vec![Arg::Text(folder.to_string())])
+    }
+
+    fn visible_children(folder: &str, user: &User) -> Self {
+        let mut held = Self::children_of(folder);
+        held.condition += &format!(" AND {}", tree::visible_sql(user, "n.id"));
+        held
     }
 }
 
@@ -423,7 +455,7 @@ pub struct Position {
 pub async fn position(State(st): State<AppState>, user: User, Path(id): Path<String>, Query(q): Query<PositionQuery>) -> AppResult<Json<Position>> {
     let mut c = st.db.acquire().await?;
     let folder = tree::folder_for(&mut c, &user, &id, Need::Read).await?;
-    Ok(Json(position_in(&mut c, &Held::children_of(&folder.id), &q).await?))
+    Ok(Json(position_in(&mut c, &Held::visible_children(&folder.id, &user), &q).await?))
 }
 
 /// Where an item is in the listing of what `held` holds (a listing no index narrows down goes through `run_held`)
@@ -475,7 +507,7 @@ pub struct Selected {
 pub async fn select(State(st): State<AppState>, user: User, Path(id): Path<String>, Json(req): Json<SelectReq>) -> AppResult<Json<Selected>> {
     let mut c = st.db.acquire().await?;
     let folder = tree::folder_for(&mut c, &user, &id, Need::Read).await?;
-    Ok(Json(select_in(&mut c, &Held::children_of(&folder.id), &req).await?))
+    Ok(Json(select_in(&mut c, &Held::visible_children(&folder.id, &user), &req).await?))
 }
 
 /// The ids of the items selected of those `held` holds, a batch at a time (see `select`; a listing no index narrows
@@ -542,7 +574,7 @@ pub async fn children(State(st): State<AppState>, user: User, Path(id): Path<Str
         crate::tags::check_own(&mut c, &user, &[tag]).await?;
         q.tagged_by = Some(user.id);
     }
-    let mut list = list_children(&mut c, &folder.id, &q).await?;
+    let mut list = list_children(&mut c, &folder.id, &q.visible_to(&user)).await?;
     tree::mark_own(&mut c, user.id, list.items_mut()).await?;
     Ok(Json(list))
 }

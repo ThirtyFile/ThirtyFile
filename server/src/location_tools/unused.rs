@@ -215,6 +215,8 @@ pub struct RemoveReq {
 
 /// Removes exactly the content the search `scan_id` found, in the background
 pub async fn remove_unused(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<String>, Json(req): Json<RemoveReq>) -> AppResult<Json<Job>> {
+    let _actor_lock = st.write_lock.lock().await;
+    crate::auth::require_admin(&mut *st.db.acquire().await?, &user).await?;
     let loc = location(&st, &id).await?;
     locations::require_own_place(&st, &id, &loc.kind, st.storage(&id)?.as_ref()).await?;
     let (job, items) = {
@@ -230,6 +232,7 @@ pub async fn remove_unused(State(st): State<AppState>, Admin(user): Admin, Path(
         job.finished_at = None;
         (job.view(), std::mem::take(&mut job.all))
     };
+    drop(_actor_lock);
     let scan_id = job.scan_id.clone();
     tokio::spawn(async move {
         let progress = |r: Removal| {

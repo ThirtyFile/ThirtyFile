@@ -84,6 +84,7 @@
             <li><a href="#rules">不同域名采用不同设置</a></li>
             <li><a href="#link">自行关联账号</a></li>
             <li><a href="#guests">包含来宾的 Microsoft 租户</a></li>
+            <li><a href="#guest-provisioning">通过单点登录创建访客</a></li>
           </ol>
         </details>
         <h2 id="setup">配置身份提供商</h2>
@@ -123,6 +124,8 @@
         <h2 id="guests">包含来宾的 Microsoft 租户</h2>
         <p>设置 tenant ID 后，租户成员可按邮箱匹配。其他组织的来宾也通过你的租户登录，但邮箱由其所属组织提供，而该组织可填写任意地址。所以来宾邮箱不用于匹配或创建账号：来宾应使用密码登录，自行关联 Microsoft 账号。</p>
         <p>若也需按邮箱匹配来宾，在 ID token 添加可选 claim <code>xms_edov</code>：应用注册中选择 <strong>Token configuration › Add optional claim › ID › xms_edov</strong>。Microsoft 会注明来宾邮箱域名是否属于其组织，仅匹配这些来宾。</p>
+        <h2 id="guest-provisioning">通过单点登录创建访客</h2>
+        <p>在提供商的新账号默认值选择<strong>创建访客账号</strong>，或在电子邮件域名规则启用<strong>访客账号</strong>。匹配的域名规则优先于提供商默认值。无论普通个人空间设置如何，访客都不会创建“我的文件”。指定群组必须具有符合访客限制的角色与到期日；不安全的群组成员资格会被拒绝，且不会留下创建到一半的账号。这些默认值仅适用于新建账号，不会转换已关联提供商的现有账号。请在用户页面审阅访问权限后转换现有账号。</p>
         <nav class="next" aria-label="更多指南">
           <a href="users.html"><span>上一篇</span>用户与空间</a>
           <a class="forward" href="storage.html"><span>下一篇</span>存储位置</a>

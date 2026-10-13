@@ -123,6 +123,7 @@ RUN --mount=from=cargo-about,target=/tmp/cargo-about \
 WORKDIR /src/server
 # Only what decides the dependencies: code changes don't redo this
 COPY server/Cargo.toml server/Cargo.lock server/about.toml server/about.hbs ./
+COPY server/vendor/libunftp/ ./vendor/libunftp/
 COPY --from=web /src/notices-web.txt /tmp/
 # cargo metadata reads every crate of the lock file, including those for other systems, hence the full fetch;
 # after it, cargo about only reads the downloaded crates (--offline), so the result depends on nothing else
@@ -182,7 +183,7 @@ ENV PATH=/usr/local/bin \
     THIRTYFILE_ADDR=0.0.0.0:8080
 
 VOLUME ["/data", "/storage"]
-EXPOSE 8080 2022
+EXPOSE 8080 2022 21 30000-30009
 
 # Requests /api/health on the address from THIRTYFILE_ADDR (no need to change this when the port changes)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --start-interval=2s --retries=3 CMD ["thirtyfile", "health"]

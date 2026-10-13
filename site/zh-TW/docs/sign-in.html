@@ -84,6 +84,7 @@
             <li><a href="#rules">不同網域採用不同設定</a></li>
             <li><a href="#link">自行關聯帳號</a></li>
             <li><a href="#guests">包含來賓的 Microsoft 租戶</a></li>
+            <li><a href="#guest-provisioning">透過單一登入建立訪客</a></li>
           </ol>
         </details>
 
@@ -124,6 +125,8 @@
         <h2 id="guests">包含來賓的 Microsoft 租戶</h2>
         <p>設定 tenant ID 後，租戶成員可按電子郵件比對。其他組織的來賓也透過你的租戶登入，但電子郵件信箱由其所屬組織提供，而該組織可填寫任意位址。所以來賓電子郵件信箱不用於比對或建立帳號：來賓應使用密碼登入，自行關聯 Microsoft 帳號。</p>
         <p>若也需按電子郵件比對來賓，在 ID token 新增可選 claim <code>xms_edov</code>：應用程式註冊中選擇 <strong>Token configuration › Add optional claim › ID › xms_edov</strong>。Microsoft 會註明來賓電子郵件網域是否屬於其組織，僅比對這些來賓。</p>
+        <h2 id="guest-provisioning">透過單一登入建立訪客</h2>
+        <p>在提供者的新帳號預設值選擇<strong>建立訪客帳號</strong>，或在電子郵件網域規則啟用<strong>訪客帳號</strong>。符合的網域規則優先於提供者預設值。無論一般個人空間設定為何，訪客都不會建立「我的檔案」。指定群組必須具有符合訪客限制的角色與到期日；不安全的群組成員資格會被拒絕，且不會留下建立到一半的帳號。這些預設值僅適用於新建帳號，不會轉換已連結提供者的現有帳號。請在使用者頁審閱存取權限後轉換現有帳號。</p>
         <nav class="next" aria-label="更多指南">
           <a href="users.html"><span>上一篇</span>使用者與空間</a>
           <a class="forward" href="storage.html"><span>下一篇</span>儲存位置</a>

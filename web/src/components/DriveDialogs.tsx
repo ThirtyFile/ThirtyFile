@@ -72,7 +72,7 @@ export function DrivePropsDialog({ drive, onClose }: { drive: Drive; onClose(): 
   const rows: [string, string][] = [
     [t("Type"), DRIVE_KIND_LABEL[drive.kind]],
     [t("Owner"), drive.kind === "company" ? t("Company") : drive.owner_name],
-    [t("Used"), formatBytes(drive.used_bytes)],
+    [drive.partial_usage ? t("Visible files") : t("Used"), formatBytes(drive.used_bytes)],
     [t("Quota"), drive.quota_bytes ? formatBytes(drive.quota_bytes) : t("Unlimited")],
     [t("Members"), drive.kind === "personal" ? t("Owner only") : t("{n} permission|{n} permissions", { n: drive.member_count })],
     [t("My role"), drive.role ? ROLE_LABEL[drive.role] : "—"],

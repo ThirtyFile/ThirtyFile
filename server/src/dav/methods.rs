@@ -30,7 +30,7 @@ pub(super) async fn propfind(st: &AppState, user: &User, segs: &[String], header
             if depth == 1 {
                 for (name, root) in tops(&mut c, user).await?.spaces {
                     let Some(node) = tree::get_node(&mut c, &root).await? else { continue };
-                    let q = if with_quota { access::space_room(&mut c, &mut quotas, node.drive()).await? } else { None };
+                    let q = if with_quota { access::space_room(&mut c, user, &mut quotas, node.drive()).await? } else { None };
                     out.add(&href(&child(&name), true), &want, node_props(&node, &name, q));
                 }
                 out.add(&href(&child(SHARED), true), &want, folder_props(SHARED));
@@ -40,14 +40,14 @@ pub(super) async fn propfind(st: &AppState, user: &User, segs: &[String], header
             out.add(&href(&path, true), &want, folder_props(SHARED));
             if depth == 1 {
                 for (name, node) in tops(&mut c, user).await?.shared {
-                    let q = if with_quota && node.is_folder() { access::space_room(&mut c, &mut quotas, node.drive()).await? } else { None };
+                    let q = if with_quota && node.is_folder() { access::space_room(&mut c, user, &mut quotas, node.drive()).await? } else { None };
                     out.add(&href(&child(&name), node.is_folder()), &want, node_props(&node, &name, q));
                 }
             }
         }
         Target::Node(node) => {
             let display = path.last().cloned().unwrap_or_default();
-            let q = if with_quota && node.is_folder() { access::space_room(&mut c, &mut quotas, node.drive()).await? } else { None };
+            let q = if with_quota && node.is_folder() { access::space_room(&mut c, user, &mut quotas, node.drive()).await? } else { None };
             out.add(&href(&path, node.is_folder()), &want, node_props(&node, &display, q));
             if depth == 1 && node.is_folder() {
                 if node.in_folder_space() {
@@ -58,7 +58,7 @@ pub(super) async fn propfind(st: &AppState, user: &User, segs: &[String], header
                     c = st.db.acquire().await?;
                 }
                 drop(c);
-                return Ok(children_streamed(st, out, &node.id, path, want, with_quota));
+                return Ok(children_streamed(st, user, out, &node.id, path, want, with_quota));
             }
         }
     }
@@ -70,21 +70,22 @@ const LISTING_PAGE: i64 = if cfg!(test) { 2 } else { 1000 };
 
 /// A folder's listing (`head`: the multistatus so far, with the folder itself) followed by its items, a page at a time
 /// as the client reads them: a folder of 200,000 items is neither held in memory as one answer nor read in one query
-fn children_streamed(st: &AppState, head: Multistatus, folder: &str, path: Vec<String>, want: Want, with_quota: bool) -> Response {
+fn children_streamed(st: &AppState, user: &User, head: Multistatus, folder: &str, path: Vec<String>, want: Want, with_quota: bool) -> Response {
     let (st, folder) = (st.clone(), folder.to_string());
+    let user = user.clone();
     // The state: where the next page starts (Some(None) for the first); None once the last page was sent
     let pages = futures_util::stream::unfold(Some(None::<String>), move |state| {
-        let (st, folder, path, want) = (st.clone(), folder.clone(), path.clone(), want.clone());
+        let (st, folder, path, want, user) = (st.clone(), folder.clone(), path.clone(), want.clone(), user.clone());
         async move {
             let after = state?;
             let page = async {
                 let mut c = st.db.acquire().await?;
-                let mut list = nodes::list_children(&mut c, &folder, &nodes::ListQuery::page(after, LISTING_PAGE)).await?;
+                let mut list = nodes::list_children(&mut c, &folder, &nodes::ListQuery::page(after, LISTING_PAGE).visible_to(&user)).await?;
                 let next = list.next().map(str::to_string);
                 let mut quotas = HashMap::new();
                 let mut part = Multistatus::part();
                 for n in std::mem::take(list.items_mut()) {
-                    let q = if with_quota && n.is_folder() { access::space_room(&mut c, &mut quotas, n.drive()).await? } else { None };
+                    let q = if with_quota && n.is_folder() { access::space_room(&mut c, &user, &mut quotas, n.drive()).await? } else { None };
                     let mut p = path.clone();
                     p.push(n.name.clone());
                     part.add(&href(&p, n.is_folder()), &want, node_props(&n, &n.name, q));

@@ -365,6 +365,7 @@ pub async fn copy(State(st): State<AppState>, Admin(user): Admin, Json(req): Jso
     {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
+        crate::auth::require_admin(&mut tx, &user).await?;
         let res = async {
             sqlx::query(
                 "INSERT INTO backup_sets (id, kind, name, source_location, source_name, dest_location, created_by, created_by_name, created_at)
@@ -614,6 +615,7 @@ pub async fn create_policy(State(st): State<AppState>, Admin(user): Admin, Json(
     {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
+        crate::auth::require_admin(&mut tx, &user).await?;
         let res = async {
             let s = settings(&mut tx, &req, None).await?;
             sqlx::query(
@@ -662,6 +664,7 @@ pub async fn update_policy(State(st): State<AppState>, Admin(user): Admin, Path(
     let (enabled, was) = {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
+        crate::auth::require_admin(&mut tx, &user).await?;
         let res = async {
             let current = super::policy::load(&mut tx, &id).await?.ok_or_else(|| AppError::not_found("This backup policy no longer exists"))?;
             let spaces: Vec<String> = sqlx::query_as::<_, (String,)>("SELECT drive_id FROM backup_policy_spaces WHERE set_id = ?")
@@ -734,6 +737,7 @@ pub async fn run_policy(State(st): State<AppState>, Admin(user): Admin, Path(id)
     {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
+        crate::auth::require_admin(&mut tx, &user).await?;
         let res = crate::logs::record_activity(&mut tx, &user, None, "backup_run", &set.name).await;
         crate::db::settle(tx, res).await?;
     }
@@ -749,12 +753,13 @@ async fn job_state(st: &AppState, id: &str) -> AppResult<(runner::Job, runner::J
 }
 
 /// Pauses a job: a running one stops after the item it is working on, keeping what it did
-pub async fn pause(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
+pub async fn pause(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
+    let _actor_lock = st.write_lock.lock().await;
+    crate::auth::require_admin(&mut *st.db.acquire().await?, &user).await?;
     if let Some(ctl) = st.part::<Memory>().queue.running.lock().get(&id) {
         ctl.pause.store(true, Ordering::SeqCst);
         return Ok(Json(json!({ "ok": true })));
     }
-    let _w = st.write_lock.lock().await;
     let n = sqlx::query("UPDATE backup_jobs SET state = 'paused' WHERE id = ? AND state IN ('queued', 'waiting')").bind(&id).execute(&st.db).await?.rows_affected();
     if n == 0 {
         return Err(AppError::conflict("This job can't be paused now"));
@@ -763,9 +768,10 @@ pub async fn pause(State(st): State<AppState>, _: Admin, Path(id): Path<String>)
 }
 
 /// Resumes a paused or failed job (or tries one again): it waits for its turn, then continues where it stopped
-pub async fn resume(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
+pub async fn resume(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
+    let _actor_lock = st.write_lock.lock().await;
+    crate::auth::require_admin(&mut *st.db.acquire().await?, &user).await?;
     {
-        let _w = st.write_lock.lock().await;
         let n = sqlx::query("UPDATE backup_jobs SET state = 'queued', error = NULL WHERE id = ? AND state IN ('paused', 'failed', 'waiting')")
             .bind(&id)
             .execute(&st.db)
@@ -780,7 +786,9 @@ pub async fn resume(State(st): State<AppState>, _: Admin, Path(id): Path<String>
 }
 
 /// Cancels a job. The source is never changed; a copy that never completed is removed from its destination.
-pub async fn cancel(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
+pub async fn cancel(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
+    let _actor_lock = st.write_lock.lock().await;
+    crate::auth::require_admin(&mut *st.db.acquire().await?, &user).await?;
     let (job, state) = job_state(&st, &id).await?;
     if job.kind == "remove" {
         return Err(AppError::conflict("Deleting a copy can't be cancelled: a copy half deleted can't be restored from. Pause it instead."));
@@ -792,6 +800,7 @@ pub async fn cancel(State(st): State<AppState>, _: Admin, Path(id): Path<String>
     if !matches!(state, runner::JobState::Queued | runner::JobState::Paused | runner::JobState::Failed | runner::JobState::Waiting) {
         return Err(AppError::conflict("This job can't be cancelled now"));
     }
+    drop(_actor_lock);
     super::cancelled(&st, &job).await?;
     Ok(Json(json!({ "ok": true })))
 }
@@ -818,6 +827,7 @@ pub async fn verify(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
     {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
+        crate::auth::require_admin(&mut tx, &user).await?;
         let res = async {
             set_idle(&mut tx, &id).await?;
             let (complete,): (i64,) =
@@ -840,6 +850,7 @@ pub async fn delete(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
     {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
+        crate::auth::require_admin(&mut tx, &user).await?;
         let res = async {
             set_idle(&mut tx, &id).await?;
             queue_remove(&mut tx, Some(user.id), &user.username, &id).await?;
@@ -909,6 +920,7 @@ pub async fn import(State(st): State<AppState>, Admin(user): Admin, Json(req): J
         }
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
+        crate::auth::require_admin(&mut tx, &user).await?;
         let res = async {
             sqlx::query(
                 "INSERT INTO backup_sets (id, kind, name, source_name, dest_location, created_by, created_by_name, created_at) VALUES (?, 'imported', ?, ?, ?, ?, ?, ?)",
@@ -1164,6 +1176,7 @@ pub async fn restore(State(st): State<AppState>, Admin(user): Admin, Path(id): P
     {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
+        crate::auth::require_admin(&mut tx, &user).await?;
         let res = async {
             let params = serde_json::to_value(&params).unwrap();
             insert_job(&mut tx, &user, NewJob { id: &job_id, kind: "restore", set: &set.id, snapshot: Some(&id), params: &params, label: &label }).await?;

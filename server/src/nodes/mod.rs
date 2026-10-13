@@ -76,6 +76,10 @@ pub struct NodeInfo {
 async fn visible_path(conn: &mut SqliteConnection, user: &User, node: &Node) -> AppResult<(Vec<Crumb>, bool)> {
     let path = tree::path_of(conn, &node.id).await?;
     let member_of = tree::member_of(conn, user).await?;
+    let hidden_start = tree::visible_path_start(conn, user, &path).await?;
+    if hidden_start > 0 {
+        return Ok((path.into_iter().skip(hidden_start).collect(), true));
+    }
     if member_of.iter().any(|d| d == node.drive()) {
         return Ok((path, false));
     }
@@ -115,6 +119,9 @@ pub async fn get(State(st): State<AppState>, user: User, Path(id): Path<String>)
         }
     };
     let (read_only, moving) = (drive.read_only || drive.moving, drive.moving);
+    if via_share && path.first().is_some_and(|crumb| crumb.id == node.id) {
+        node.parent_id = None;
+    }
     Ok(Json(NodeInfo { node, path, is_root, drive: drive.into(), role, via_share, location, offline, read_only, moving }))
 }
 
@@ -147,7 +154,7 @@ pub async fn contents(State(st): State<AppState>, user: User, Json(req): Json<Co
     // A folder selected together with a folder around it would be counted twice
     let folders = outermost(&mut c, &folders).await?;
     // Only the columns needed, and only folders are expanded, so even a large space is summed quickly
-    let (size, files, folders): (i64, i64, i64) = sqlx::query_as(
+    let (size, files, folders): (i64, i64, i64) = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "WITH RECURSIVE sub(id, kind, size) AS (
            SELECT n.id, n.kind, n.size FROM nodes n
            WHERE n.parent_id IN (SELECT value FROM json_each(?1)) AND n.trashed_at IS NULL
@@ -155,9 +162,10 @@ pub async fn contents(State(st): State<AppState>, user: User, Json(req): Json<Co
            SELECT n.id, n.kind, n.size FROM nodes n JOIN sub ON n.parent_id = sub.id
            WHERE sub.kind = 'folder' AND n.trashed_at IS NULL
          )
-         SELECT COALESCE(SUM(CASE WHEN kind = 'file' THEN size ELSE 0 END), 0),
-                COALESCE(SUM(kind = 'file'), 0), COALESCE(SUM(kind = 'folder'), 0) FROM sub",
-    )
+         SELECT COALESCE(SUM(CASE WHEN sub.kind = 'file' THEN sub.size ELSE 0 END), 0),
+                COALESCE(SUM(sub.kind = 'file'), 0), COALESCE(SUM(sub.kind = 'folder'), 0) FROM sub WHERE {}",
+        tree::visible_sql(&user, "sub.id")
+    )))
     .bind(serde_json::to_string(&folders).unwrap())
     .fetch_one(&mut *c)
     .await?;
@@ -208,16 +216,41 @@ async fn locate(st: &AppState, user: &User, mut nodes: Vec<Node>) -> AppResult<V
     // One query for the paths of all parents instead of one recursive query per row
     let parent_ids: Vec<String> = nodes.iter().filter_map(|n| n.parent_id.clone()).collect::<HashSet<_>>().into_iter().collect();
     let paths = tree::paths_of(&mut c, &parent_ids).await?;
+    let restricted_drives: std::collections::HashSet<String> =
+        sqlx::query_as::<_, (String,)>("SELECT DISTINCT drive_id FROM nodes WHERE restricted").fetch_all(&mut *c).await?.into_iter().map(|(id,)| id).collect();
+    let mut visible_starts: HashMap<String, usize> = HashMap::new();
     let mut out = Vec::with_capacity(nodes.len());
-    for node in nodes {
+    for mut node in nodes {
         let path = match &node.parent_id {
             Some(p) => paths.get(p).cloned().unwrap_or_default(),
             None => Vec::new(),
         };
-        let space = drives.get(node.drive()).cloned();
+        let hidden_start = if restricted_drives.contains(node.drive()) {
+            match node.parent_id.as_ref() {
+                Some(parent) if visible_starts.contains_key(parent) => visible_starts[parent],
+                Some(parent) => {
+                    let start = tree::visible_path_start(&mut c, user, &path).await?;
+                    visible_starts.insert(parent.clone(), start);
+                    start
+                }
+                None => 0,
+            }
+        } else {
+            0
+        };
+        let space = drives.get(node.drive()).cloned().filter(|_| hidden_start == 0);
         // Accessed through a folder share: only shown from the shared folder down
-        let start = if space.is_some() { 0 } else { tree::shared_start(&path, &shared).unwrap_or(path.len()) };
+        let start = if hidden_start > 0 {
+            hidden_start
+        } else if space.is_some() {
+            0
+        } else {
+            tree::shared_start(&path, &shared).unwrap_or(path.len())
+        };
         let location_path: Vec<String> = path[start..].iter().map(|p| p.name.clone()).collect();
+        if space.is_none() && start == path.len() {
+            node.parent_id = None;
+        }
         let first = space.as_ref().map_or(paths::SHARED, |s| s.name.as_str());
         let location = std::iter::once(first).chain(location_path.iter().map(String::as_str)).collect::<Vec<_>>().join("/");
         out.push(Located { node, location, location_space: space, location_path, deleted_by: None });

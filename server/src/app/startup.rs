@@ -22,6 +22,21 @@ pub struct Settings {
     /// SSH file transfer listen address; access is enabled separately in Control panel
     #[arg(long, env = "THIRTYFILE_SFTP_ADDR", default_value = "0.0.0.0:2022")]
     pub sftp_addr: String,
+    /// FTP receive folder listen address; disabled until enabled in Control panel
+    #[arg(long, env = "THIRTYFILE_FTP_ADDR", default_value = "0.0.0.0:21")]
+    pub ftp_addr: String,
+    /// Ports clients connect to for passive FTP transfers
+    #[arg(long, env = "THIRTYFILE_FTP_PASSIVE", default_value = "30000-30009")]
+    pub ftp_passive: String,
+    /// Public hostname or IPv4 address advertised for passive transfers behind NAT
+    #[arg(long, env = "THIRTYFILE_FTP_PASSIVE_HOST", default_value = "")]
+    pub ftp_passive_host: String,
+    /// Mounted PEM certificate chain for explicit FTPS
+    #[arg(long, env = "THIRTYFILE_FTP_CERT")]
+    pub ftp_cert: Option<PathBuf>,
+    /// Mounted PEM private key for explicit FTPS
+    #[arg(long, env = "THIRTYFILE_FTP_KEY")]
+    pub ftp_key: Option<PathBuf>,
     /// Data directory (database, files, thumbnails)
     #[arg(long, env = "THIRTYFILE_DATA", default_value = "./data")]
     pub data: PathBuf,
@@ -83,6 +98,7 @@ pub struct Server {
     log_writer: logs::LogWriter,
     _lock: Option<std::fs::File>,
     sftp_addr: String,
+    ftp: crate::ftp::Settings,
 }
 
 /// Opens the database of the data folder, with the key of the secrets saved in it
@@ -190,7 +206,8 @@ pub async fn start(cfg: Settings, storage: PathBuf, db: sqlx::SqlitePool) -> Res
     #[cfg(target_os = "linux")]
     watch::spawn_watchers(state.clone());
 
-    Ok(Server { state, addr: cfg.addr, log_writer, _lock: lock, sftp_addr: cfg.sftp_addr })
+    let ftp = crate::ftp::Settings { address: cfg.ftp_addr, passive: cfg.ftp_passive, host: cfg.ftp_passive_host, cert: cfg.ftp_cert, key: cfg.ftp_key };
+    Ok(Server { state, addr: cfg.addr, log_writer, _lock: lock, sftp_addr: cfg.sftp_addr, ftp })
 }
 
 /// What the features' parts start with: settings, and what startup loaded from the database
@@ -229,6 +246,7 @@ pub fn parts(l: Loaded) -> Parts {
         .with(location_tools::Memory::default())
         .with(crate::sftp::Memory::default())
         .with(crate::s3::config::Memory::default())
+        .with(crate::ftp::Memory::default())
         .with(shares::Memory::default());
     #[cfg(target_os = "linux")]
     let parts = parts.with(watch::Memory::default());
@@ -251,9 +269,11 @@ impl Server {
 
         let listener = tokio::net::TcpListener::bind(&self.addr).await?;
         let sftp = crate::sftp::supervise(self.state.clone(), &self.sftp_addr);
+        let ftp = crate::ftp::supervise(self.state.clone(), self.ftp.clone());
         tracing::info!("ThirtyFile started: http://{}", self.addr);
         serve(listener, app).await?;
         sftp.finish().await;
+        ftp.finish().await;
         // Background loops end, giving back the connections they hold
         crate::util::stop_background();
         // Sign-in and share access events still queued are written before exiting

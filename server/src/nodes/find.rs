@@ -126,6 +126,7 @@ impl Criteria {
               OR n.id IN (WITH RECURSIVE s(id) AS (SELECT value FROM json_each({f}) UNION ALL SELECT c.id FROM nodes c JOIN s ON c.parent_id = s.id) SELECT id FROM s))
              AND n.trashed_at IS NULL AND n.parent_id IS NOT NULL"
         );
+        sql += &format!(" AND {}", tree::visible_to_sql(self.tagged_by, "n.id"));
         if let Some(below) = &self.below {
             let p = arg(Arg::Text(below.clone()));
             sql += &format!(
@@ -280,8 +281,9 @@ pub async fn favorites(State(st): State<AppState>, user: User, Query(q): Query<L
     let (drives, folders) = tree::scope(&mut *st.db.acquire().await?, &user).await?;
     let sql = format!(
         "SELECT {NODE_COLS} FROM favorites f JOIN nodes n ON n.id = f.node_id
-         WHERE f.user_id = ?3 AND {} AND n.trashed_at IS NULL {}",
+         WHERE f.user_id = ?3 AND {} AND n.trashed_at IS NULL AND {} {}",
         tree::scope_sql(1, 2),
+        tree::visible_sql(&user, "n.id"),
         order_clause(q.sort.as_deref(), q.order.as_deref())
     );
     let nodes: Vec<Node> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(drives).bind(folders).bind(user.id).fetch_all(&st.db).await?;
@@ -299,8 +301,9 @@ pub async fn tagged(State(st): State<AppState>, user: User, Path(tag): Path<i64>
     let (drives, folders) = tree::scope(&mut c, &user).await?;
     let sql = format!(
         "SELECT {NODE_COLS} FROM tagged t JOIN nodes n ON n.id = t.node_id
-         WHERE t.tag_id = ?3 AND t.owner_id = ?4 AND {} AND n.trashed_at IS NULL {} LIMIT ?5",
+         WHERE t.tag_id = ?3 AND t.owner_id = ?4 AND {} AND n.trashed_at IS NULL AND {} {} LIMIT ?5",
         tree::scope_sql(1, 2),
+        tree::visible_sql(&user, "n.id"),
         order_clause(q.sort.as_deref(), q.order.as_deref())
     );
     let mut nodes: Vec<Node> =
@@ -368,9 +371,10 @@ pub async fn recent(State(st): State<AppState>, user: User) -> AppResult<Json<Ve
          ),
          latest(id, at) AS (SELECT id, MAX(at) FROM cand GROUP BY id)
          SELECT {NODE_COLS} FROM latest JOIN nodes n ON n.id = latest.id
-         WHERE {} AND n.kind = 'file' AND n.trashed_at IS NULL
+         WHERE {} AND {} AND n.kind = 'file' AND n.trashed_at IS NULL
          ORDER BY latest.at DESC LIMIT ?5",
-        tree::scope_sql(1, 2)
+        tree::scope_sql(1, 2),
+        tree::visible_sql(&user, "n.id")
     );
     let nodes: Vec<Node> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
         .bind(drives)

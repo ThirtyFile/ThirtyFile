@@ -28,8 +28,8 @@ test("a new folder shows at the end being renamed, and stays there after renamin
   const done = renamed(page);
   const listed = listing(page, dir, done);
   await box(page).press("Enter");
-  await expect(page.locator("[data-node-id]").nth(2)).toHaveText(/Beta/);
   expect((await done).ok()).toBe(true);
+  await expect(page.locator("[data-node-id]").nth(2)).toHaveText(/Beta/);
   // The list loads again after the change: the folder stays where it is, selected, with the focus
   await listed;
   expect(await names(page)).toEqual(["Alpha", "Zulu", "Beta"]);

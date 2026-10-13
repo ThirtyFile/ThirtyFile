@@ -234,6 +234,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn webdav_filters_restricted_folders_and_refuses_recursive_copy_and_move() {
+        let env = testutil::env().await;
+        let owner = env.user("owner", true).await;
+        let member = env.user("member", true).await;
+        let department = env.folder(&owner, owner.root(), "Department").await;
+        let hr = env.folder(&owner, &department, "HR").await;
+        env.upload(&owner, &hr, "payroll.txt", b"confidential").await;
+        env.upload(&owner, &department, "minutes.txt", b"public").await;
+        env.grant(&department, &member, "manager").await;
+        let dav = Client::new(&env, &member, "write").await;
+        let path = "/dav/Shared%20with%20me/Department/";
+        assert!(dav.propfind(path, "1").await.body.contains("HR"));
+        let req = serde_json::from_value(json!({"restricted":true,"expected":false,"confirmed":true})).unwrap();
+        let _ = crate::restrictions::change(State(env.st.clone()), owner, axum::extract::Path(hr.clone()), Json(req)).await.unwrap();
+        let list = dav.propfind(path, "1").await;
+        assert_eq!(list.status, StatusCode::MULTI_STATUS);
+        assert!(list.body.contains("minutes.txt"));
+        assert!(!list.body.contains("HR"));
+        assert!(!list.body.contains("quota-used-bytes"));
+        assert_eq!(dav.send("GET", "/dav/Shared%20with%20me/Department/HR/payroll.txt", &[], "").await.status, StatusCode::NOT_FOUND);
+        for method in ["COPY", "MOVE"] {
+            let result = dav.send(method, path, &[("destination", "http://files.example.com/dav/My%20files/Department")], "").await;
+            assert_eq!(result.status, StatusCode::FORBIDDEN, "{method}: {}", result.body);
+            assert!(!result.body.contains("HR"));
+        }
+        env.grant(&hr, &member, "viewer").await;
+        assert!(dav.propfind(path, "1").await.body.contains("HR"));
+        assert_eq!(dav.send("GET", "/dav/Shared%20with%20me/Department/HR/payroll.txt", &[], "").await.body, "confidential");
+        env.revoke(&hr, &member).await;
+        assert_eq!(dav.send("GET", "/dav/Shared%20with%20me/Department/HR/payroll.txt", &[], "").await.status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
     async fn propfind_lists_spaces_shared_items_and_folders() {
         let env = testutil::env().await;
         let admin = env.admin().await;
