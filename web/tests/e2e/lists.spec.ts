@@ -22,7 +22,10 @@ test("the control panel's tiles are one Tab stop, and the arrows and Enter work"
   await expect(next).not.toHaveAccessibleName(/^Users/);
   await expect(next).toBeFocused();
   await page.keyboard.press("Home");
-  await expect(users).toHaveAttribute("aria-selected", "true");
+  const first = page.getByRole("option").first();
+  await expect(first).toHaveAttribute("aria-selected", "true");
+  await expect(first).toBeFocused();
+  await users.click();
   await page.keyboard.press("Enter");
   await page.waitForURL("**/admin/users");
 
