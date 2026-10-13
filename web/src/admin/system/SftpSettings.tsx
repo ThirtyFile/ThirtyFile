@@ -8,7 +8,7 @@ import { t } from "@/lib/i18n";
 
 export function SftpSettings() {
   const qc = useQueryClient();
-  const q = useQuery({ queryKey: ["sftp-settings"], queryFn: api.sftpSettings });
+  const q = useQuery({ queryKey: ["sftp-settings"], queryFn: api.sftpSettings, refetchInterval: 5000 });
   const save = useMutation({ mutationFn: api.updateSftpSettings, onSuccess: (data) => qc.setQueryData(["sftp-settings"], data), onError: (e) => toast.error(e.message) });
   return (
     <>
@@ -18,6 +18,11 @@ export function SftpSettings() {
           <Pending query={q} loading={<Skeleton className="h-20" />} />
         ) : (
           <>
+            {q.data.error && (
+              <p role="alert" className="text-xs text-destructive">
+                {t("SFTP is unavailable: {reason}", { reason: q.data.error })}
+              </p>
+            )}
             <div className="flex items-center justify-between gap-3">
               <span>{t("Allow SFTP access")}</span>
               <Toggle

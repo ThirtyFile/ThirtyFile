@@ -141,7 +141,7 @@ try {
     await view.locator('.guide-toc a[href="#windows"]').click();
     assert.ok(view.url().endsWith("#windows"));
     await view.locator("nav.next a.forward").click();
-    assert.ok(view.url().endsWith(`/${folder(language)}docs/users.html`));
+    assert.ok(view.url().endsWith(`/${folder(language)}docs/protocols.html`));
     assert.equal(await view.locator("html").getAttribute("lang"), language);
     await noScript.close();
   }

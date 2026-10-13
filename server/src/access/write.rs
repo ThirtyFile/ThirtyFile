@@ -132,21 +132,36 @@ where
 /// Stores a received file as `name` in `parent`, replacing a file of that name, and removes the received file; true
 /// when it was created. `hash`: the content's SHA-256 when it was computed while receiving it
 pub async fn store(st: AppState, user: User, parent: Node, name: String, tmp: PathBuf, size: u64, hash: Option<String>) -> AppResult<bool> {
-    let result = store_file(&st, &user, &parent, &name, &tmp, size, hash, None).await;
+    let result = store_file(&st, &user, &parent, &name, &tmp, size, (hash, false, None)).await;
+    let _ = tokio::fs::remove_file(&tmp).await;
+    result
+}
+
+/// Commits a create-only upload, checking the name again after staging and waiting for the space's turn.
+pub async fn store_new(st: AppState, user: User, parent: Node, name: String, tmp: PathBuf, size: u64) -> AppResult<bool> {
+    let result = store_file(&st, &user, &parent, &name, &tmp, size, (None, true, None)).await;
     let _ = tokio::fs::remove_file(&tmp).await;
     result
 }
 
 /// Stores an upload only if the destination is still inside the protocol's published folder.
 pub async fn store_in_scope(st: AppState, user: User, parent: Node, name: String, tmp: PathBuf, size: u64, hash: Option<String>, root: &str) -> AppResult<bool> {
-    let result = store_file(&st, &user, &parent, &name, &tmp, size, hash, Some(root)).await;
+    let result = store_file(&st, &user, &parent, &name, &tmp, size, (hash, false, Some(root))).await;
     let _ = tokio::fs::remove_file(tmp).await;
     result
 }
 
 /// Makes the received file `name` in `parent` (content.rs), or gives the file of that name its content; true when
 /// it was created
-async fn store_file(st: &AppState, user: &User, parent: &Node, name: &str, tmp: &Path, size: u64, hash: Option<String>, scope: Option<&str>) -> AppResult<bool> {
+async fn store_file(
+    st: &AppState,
+    user: &User,
+    parent: &Node,
+    name: &str,
+    tmp: &Path,
+    size: u64,
+    (hash, create_only, scope): (Option<String>, bool, Option<&str>),
+) -> AppResult<bool> {
     let staged = content::stage(st, parent, content::Received { path: tmp.to_path_buf(), size, hash }).await?;
     let size = size as i64;
     let mut turn = staged.turn(st).await;
@@ -164,6 +179,7 @@ async fn store_file(st: &AppState, user: &User, parent: &Node, name: &str, tmp: 
             }
         }
         let (created, written) = match child_named(&mut tx, &folder.id, name).await? {
+            Some(_) if create_only => return Err(AppError::conflict(format!("\"{name}\" already exists"))),
             Some(n) if n.is_folder() => return Err(AppError::new(StatusCode::METHOD_NOT_ALLOWED, "A folder has this name")),
             Some(n) => {
                 if scope.is_some() && n.name != name {

@@ -286,3 +286,104 @@ async fn rmdir_rechecks_disk_contents_after_waiting_for_a_space_turn() {
     ssh.disconnect(russh::Disconnect::ByApplication, "Test complete", "en").await.unwrap();
     server.finish().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn exclusive_create_and_staged_size_changes_enforce_conflicts_quota_and_modes() {
+    use russh_sftp::protocol::FileAttributes;
+    let env = testutil::env().await;
+    let amy = env.user("amy", true).await;
+    sqlx::query("UPDATE users SET quota_bytes = 8 WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
+    let token = token(&env, &amy, "write").await;
+    let server = on(&env).await;
+    let (ssh, sftp) = client(&env, &amy, &token).await;
+    let flags = OpenFlags::CREATE | OpenFlags::WRITE | OpenFlags::EXCLUDE;
+    let mut first = sftp.open_with_flags("/My files/a.txt", flags).await.unwrap();
+    let mut second = sftp.open_with_flags("/My files/a.txt", flags).await.unwrap();
+    first.write_all(b"one").await.unwrap();
+    first.shutdown().await.unwrap();
+    second.write_all(b"two").await.unwrap();
+    assert!(second.shutdown().await.is_err());
+    assert_eq!(sftp.read("/My files/a.txt").await.unwrap(), b"one");
+    let mut file = sftp.open_with_flags("/My files/a.txt", OpenFlags::WRITE).await.unwrap();
+    file.set_metadata(FileAttributes { size: Some(8), ..Default::default() }).await.unwrap();
+    file.set_metadata(FileAttributes { size: Some(2), ..Default::default() }).await.unwrap();
+    assert!(file.set_metadata(FileAttributes { permissions: Some(0o600), ..Default::default() }).await.is_err());
+    file.shutdown().await.unwrap();
+    assert_eq!(sftp.read("/My files/a.txt").await.unwrap(), b"on");
+    let mut file = sftp.open_with_flags("/My files/a.txt", OpenFlags::WRITE).await.unwrap();
+    assert!(file.set_metadata(FileAttributes { size: Some(9), ..Default::default() }).await.is_err());
+    assert!(file.shutdown().await.is_err());
+    assert_eq!(sftp.read("/My files/a.txt").await.unwrap(), b"on");
+    sftp.close().await.unwrap();
+    ssh.disconnect(russh::Disconnect::ByApplication, "Test complete", "en").await.unwrap();
+    server.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn webdav_and_sftp_share_the_same_sign_in_failure_budget() {
+    use crate::auth::app_passwords::{self, Credential};
+    use axum::{extract::ConnectInfo, http::Request};
+    let env = testutil::env().await;
+    let amy = env.user("amy", true).await;
+    let token = token(&env, &amy, "write").await;
+    let server = on(&env).await;
+    let mut request = Request::builder().method("PROPFIND").body(()).unwrap();
+    request.extensions_mut().insert(ConnectInfo("127.0.0.1:9000".parse::<std::net::SocketAddr>().unwrap()));
+    let (parts, _) = request.into_parts();
+    for _ in 0..29 {
+        assert!(app_passwords::authenticate(&parts, &env.st, Credential::Basic { username: amy.username.clone(), token: "wrong".into() }).await.is_err());
+    }
+    let mut ssh = connection(&env).await;
+    assert!(!ssh.authenticate_password(&amy.username, "wrong").await.unwrap().success());
+    assert!(!ssh.authenticate_password(&amy.username, &token).await.unwrap().success());
+    let error = app_passwords::authenticate(&parts, &env.st, Credential::Basic { username: amy.username.clone(), token }).await.unwrap_err();
+    assert_eq!(error.status, axum::http::StatusCode::TOO_MANY_REQUESTS);
+    ssh.disconnect(russh::Disconnect::ByApplication, "Test complete", "en").await.unwrap();
+    server.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn optional_listener_does_not_bind_until_enabled_and_retries_a_conflicting_port() {
+    let env = testutil::env().await;
+    let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = occupied.local_addr().unwrap().to_string();
+    let server = super::supervise(env.st.clone(), &address);
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while env.st.part::<super::Memory>().fingerprint.read().is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(env.st.part::<super::Memory>().error.read().is_none(), "a disabled feature does not try to bind an occupied port");
+    crate::db::set_setting(&mut env.st.db.acquire().await.unwrap(), "sftp_enabled", "1").await.unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while env.st.part::<super::Memory>().error.read().is_none() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    drop(occupied);
+    tokio::time::timeout(std::time::Duration::from_secs(8), async {
+        while env.st.part::<super::Memory>().error.read().is_some() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(tokio::net::TcpStream::connect(&address).await.is_ok());
+    crate::db::set_setting(&mut env.st.db.acquire().await.unwrap(), "sftp_enabled", "0").await.unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            if let Ok(listener) = tokio::net::TcpListener::bind(&address).await {
+                drop(listener);
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    server.finish().await;
+}

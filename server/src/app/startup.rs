@@ -82,7 +82,7 @@ pub struct Server {
     addr: String,
     log_writer: logs::LogWriter,
     _lock: Option<std::fs::File>,
-    sftp: crate::sftp::Listener,
+    sftp_addr: String,
 }
 
 /// Opens the database of the data folder, with the key of the secrets saved in it
@@ -190,8 +190,7 @@ pub async fn start(cfg: Settings, storage: PathBuf, db: sqlx::SqlitePool) -> Res
     #[cfg(target_os = "linux")]
     watch::spawn_watchers(state.clone());
 
-    let sftp = crate::sftp::start(state.clone(), &cfg.sftp_addr).await?;
-    Ok(Server { state, addr: cfg.addr, log_writer, _lock: lock, sftp })
+    Ok(Server { state, addr: cfg.addr, log_writer, _lock: lock, sftp_addr: cfg.sftp_addr })
 }
 
 /// What the features' parts start with: settings, and what startup loaded from the database
@@ -251,9 +250,10 @@ impl Server {
         let app = self.router();
 
         let listener = tokio::net::TcpListener::bind(&self.addr).await?;
+        let sftp = crate::sftp::supervise(self.state.clone(), &self.sftp_addr);
         tracing::info!("ThirtyFile started: http://{}", self.addr);
         serve(listener, app).await?;
-        self.sftp.finish().await;
+        sftp.finish().await;
         // Background loops end, giving back the connections they hold
         crate::util::stop_background();
         // Sign-in and share access events still queued are written before exiting

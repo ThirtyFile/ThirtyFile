@@ -12,6 +12,7 @@ export interface SftpSettings {
   keys_enabled: boolean;
   address: string;
   fingerprint: string;
+  error: string | null;
 }
 export const sftpApi = {
   sftpKeys: () => get<SftpKey[]>("/auth/sftp-keys"),
