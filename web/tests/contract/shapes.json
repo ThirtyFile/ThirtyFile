@@ -369,7 +369,7 @@
     "mime": "",
     "name": "",
     "owner_name": "",
-    "parent_id": "",
+    "parent_id": null,
     "restricted": false,
     "role": "",
     "sharer": "",
