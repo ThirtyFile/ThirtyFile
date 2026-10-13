@@ -1264,6 +1264,7 @@ export interface GuestConversionPreview {
   changed_grants: { id: number; item_name: string; old_role: Role; old_expires_at: number | null; role: Role; expires_at: number }[];
   share_links: number;
   s3_buckets: number;
+  ftp_folders: number;
 }
 
 export interface UserRow {

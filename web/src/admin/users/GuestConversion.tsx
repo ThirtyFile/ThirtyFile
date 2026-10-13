@@ -18,6 +18,9 @@ export function GuestConversion({ query, confirmed, onConfirm }: { query: UseQue
       <p className="text-xs text-muted-foreground">{t('Files are kept. "My files" is hidden while the account is a guest and becomes available again if it is changed back.')}</p>
       {p.personal_space && <p className="text-xs">{t("Personal files kept: {n} · {size}", { n: p.personal_files, size: formatBytes(p.personal_bytes) })}</p>}
       <p className="text-xs">{t("Existing share links and protocol publications stop working while this account is a guest.")}</p>
+      <p className="text-xs text-muted-foreground">
+        {t("Share links: {links} · S3 buckets: {buckets} · FTP receive folders: {folders}", { links: p.share_links, buckets: p.s3_buckets, folders: p.ftp_folders })}
+      </p>
       {p.owned_spaces.length > 0 && (
         <div className="grid gap-1 text-xs text-destructive">
           <p>{t("Transfer these spaces to another owner first:")}</p>

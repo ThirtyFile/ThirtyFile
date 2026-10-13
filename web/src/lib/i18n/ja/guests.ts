@@ -1,4 +1,5 @@
 export default {
+  "Share links: {links} · S3 buckets: {buckets} · FTP receive folders: {folders}": "共有リンク: {links} · S3 バケット: {buckets} · FTP 受信フォルダー: {folders}",
   "Guest": "ゲスト",
   "Account type": "アカウントの種類",
   "Create guest accounts": "ゲストアカウントを作成",

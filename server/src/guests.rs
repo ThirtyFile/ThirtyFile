@@ -137,6 +137,7 @@ pub struct ConversionPreview {
     pub changed_grants: Vec<GrantChange>,
     pub share_links: i64,
     pub s3_buckets: i64,
+    pub ftp_folders: i64,
 }
 
 pub async fn preview_in(conn: &mut SqliteConnection, id: i64) -> AppResult<ConversionPreview> {
@@ -162,14 +163,14 @@ pub async fn preview_in(conn: &mut SqliteConnection, id: i64) -> AppResult<Conve
         grant.role = Some(grant.old_role.min(Role::Editor));
         grant.expires_at = Some(grant.old_expires_at.unwrap_or(end).min(end));
     }
-    let (share_links, s3_buckets): (i64, i64) =
-        sqlx::query_as("SELECT (SELECT COUNT(*) FROM shares WHERE owner_id = ?1), (SELECT COUNT(*) FROM s3_buckets WHERE creator_id = ?1)")
+    let (share_links, s3_buckets, ftp_folders): (i64, i64, i64) =
+        sqlx::query_as("SELECT (SELECT COUNT(*) FROM shares WHERE owner_id = ?1), (SELECT COUNT(*) FROM s3_buckets WHERE creator_id = ?1), (SELECT COUNT(*) FROM ftp_receive_folders WHERE creator_id = ?1)")
             .bind(id)
             .fetch_one(&mut *conn)
             .await?;
     let owned_spaces: Vec<String> = owned.into_iter().map(|(n,)| n).collect();
     let grants: Vec<_> = changed_grants.iter().map(|g| (g.id, &g.item_name, g.old_role, g.old_expires_at)).collect();
-    let revision = crate::util::sha256_hex(serde_json::to_vec(&serde_json::json!({"max_days":max_days,"personal_files":personal_files,"personal_bytes":personal_bytes,"personal_space":personal_space,"owned_spaces":owned_spaces,"unsafe_groups":unsafe_groups,"grants":grants,"share_links":share_links,"s3_buckets":s3_buckets})).map_err(AppError::internal)?.as_slice());
+    let revision = crate::util::sha256_hex(serde_json::to_vec(&serde_json::json!({"max_days":max_days,"personal_files":personal_files,"personal_bytes":personal_bytes,"personal_space":personal_space,"owned_spaces":owned_spaces,"unsafe_groups":unsafe_groups,"grants":grants,"share_links":share_links,"s3_buckets":s3_buckets,"ftp_folders":ftp_folders})).map_err(AppError::internal)?.as_slice());
     Ok(ConversionPreview {
         revision,
         max_days,
@@ -181,6 +182,7 @@ pub async fn preview_in(conn: &mut SqliteConnection, id: i64) -> AppResult<Conve
         changed_grants,
         share_links,
         s3_buckets,
+        ftp_folders,
     })
 }
 
