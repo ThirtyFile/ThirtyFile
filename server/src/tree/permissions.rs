@@ -380,7 +380,13 @@ pub async fn node_with_role(conn: &mut SqliteConnection, user: &User, id: &str) 
 
 /// Gets a node and checks the required capability
 pub async fn node_for(conn: &mut SqliteConnection, user: &User, id: &str, need: Need) -> AppResult<Node> {
-    let current = if user.protocol_key.is_some() { Some(crate::s3::credentials::actor_in_transaction(conn, user, need).await?) } else { None };
+    let current = if user.ftp_credential.is_some() {
+        Some(crate::ftp::credentials::actor_in_transaction(conn, user, need).await?)
+    } else if user.protocol_key.is_some() {
+        Some(crate::s3::credentials::actor_in_transaction(conn, user, need).await?)
+    } else {
+        None
+    };
     let user = current.as_ref().unwrap_or(user);
     let current = crate::auth::current_user(conn, user).await?;
     let user = &current;

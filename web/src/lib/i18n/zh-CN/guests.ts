@@ -1,4 +1,5 @@
 export default {
+  "Share links: {links} · S3 buckets: {buckets} · FTP receive folders: {folders}": "分享链接：{links}・S3 存储桶：{buckets}・FTP 接收文件夹：{folders}",
   "Guest": "访客",
   "Account type": "账号类型",
   "Create guest accounts": "创建访客账号",

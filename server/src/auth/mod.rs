@@ -170,6 +170,9 @@ pub struct User {
     #[sqlx(skip)]
     #[serde(skip)]
     pub sftp_credential: Option<sftp::SftpCredential>,
+    #[sqlx(skip)]
+    #[serde(skip)]
+    pub ftp_credential: Option<crate::ftp::credentials::Credential>,
 }
 
 impl User {
@@ -206,6 +209,7 @@ pub async fn current_user(conn: &mut sqlx::SqliteConnection, actor: &User) -> Ap
     current.protocol_root = actor.protocol_root.clone();
     current.protocol_key = actor.protocol_key.clone();
     current.sftp_credential = actor.sftp_credential.clone();
+    current.ftp_credential = actor.ftp_credential.clone();
     Ok(current)
 }
 

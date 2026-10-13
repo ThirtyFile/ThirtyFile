@@ -25,7 +25,9 @@ mod error;
 mod files;
 mod folders;
 mod fsops;
+mod ftp;
 mod guests;
+
 mod hashing;
 mod history;
 mod http_body;

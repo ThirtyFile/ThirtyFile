@@ -1,3 +1,4 @@
+import ftp from "./ftp";
 import guests from "./guests";
 import restrictedFolders from "./restrictedFolders";
 import sftp from "./sftp";
@@ -34,4 +35,4 @@ import replicas from "./replicas";
 
 export const LANG = "zh-CN";
 
-export const DICT: Record<string, string> = { ...guests, ...restrictedFolders, ...s3, ...sftp, ...server, ...settings, ...spaces, ...users, ...explorer, ...sharing, ...viewer, ...login, ...notices, ...core, ...sso, ...wording, ...accessibility, ...undo, ...largeFolders, ...accountSecurity, ...shareLinks, ...conflicts, ...details, ...dragAndDrop, ...webdav, ...search, ...archives, ...addressBar, ...notifications, ...folderSpaces, ...backups, ...replicas };
+export const DICT: Record<string, string> = { ...ftp, ...guests, ...restrictedFolders, ...s3, ...sftp, ...server, ...settings, ...spaces, ...users, ...explorer, ...sharing, ...viewer, ...login, ...notices, ...core, ...sso, ...wording, ...accessibility, ...undo, ...largeFolders, ...accountSecurity, ...shareLinks, ...conflicts, ...details, ...dragAndDrop, ...webdav, ...search, ...archives, ...addressBar, ...notifications, ...folderSpaces, ...backups, ...replicas };

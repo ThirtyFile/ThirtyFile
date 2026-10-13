@@ -25,6 +25,7 @@ export type ControlPanelKey =
   | "groups"
   | "shares"
   | "s3"
+  | "ftp"
   | "drives"
   | "storage"
   | "moves"
@@ -63,6 +64,16 @@ export const CONTROL_PANEL_CATEGORIES: { id: ControlPanelCategory; label: string
 export const controlPanelCategoryLabel = (id: ControlPanelCategory) => CONTROL_PANEL_CATEGORIES.find((c) => c.id === id)?.label ?? id;
 
 export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
+  {
+    key: "ftp",
+    to: adminPath("ftp"),
+    title: t("FTP receive folders"),
+    desc: t("Manage device credentials, upload folders and their end dates"),
+    icon: KeyRoundIcon,
+    tone: "bg-teal-500/12 text-teal-700 dark:text-teal-300",
+    category: "users",
+    keywords: "ftp ftps scanner camera device receive protocol",
+  },
   {
     key: "s3",
     to: adminPath("s3"),
