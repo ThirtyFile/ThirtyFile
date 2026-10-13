@@ -52,7 +52,7 @@ rust-embed = "8"
 flate2 = "1.1"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp"] }
 object_store = { version = "0.14.2", features = ["aws"] }
-russh = "0.63"
+russh = "0.64"
 russh-sftp = "3"
 suppaftp = { version = "12", features = ["tokio-rustls-aws-lc-rs"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
