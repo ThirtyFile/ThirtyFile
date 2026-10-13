@@ -1543,6 +1543,34 @@ mod tests {
         }
         let _ = move_nodes(State(env.st.clone()), ben.clone(), batch(&[&own], &dest)).await.unwrap();
         assert_eq!(std::fs::read(space.dir.join("Destination/Mine/500.txt")).unwrap(), b"mine");
+        let _ = trash(State(env.st.clone()), ben.clone(), ids(&[&own])).await.unwrap();
+        // Let the trash's path update finish, under the same scan lock a later change would take.
+        drop(crate::fsops::lock_seen(&env.st, &ben, &[&own]).await.unwrap());
+        let _ = restore(State(env.st.clone()), ben.clone(), ids(&[&own])).await.unwrap();
+        drop(crate::fsops::lock_seen(&env.st, &ben, &[&own]).await.unwrap());
+        assert_eq!(std::fs::read(space.dir.join("Destination/Mine/500.txt")).unwrap(), b"mine");
+        let _ = trash(State(env.st.clone()), ben.clone(), ids(&[&own])).await.unwrap();
+        drop(crate::fsops::lock_seen(&env.st, &ben, &[&own]).await.unwrap());
+        let _ = delete_forever(State(env.st.clone()), ben.clone(), ids(&[&own])).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_contributor_cant_restore_their_folder_if_it_contains_someone_elses_items() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let ben = env.user("ben", true).await;
+        let space = env.folder_space("Library").await;
+        env.grant(&space.root, &ben, "contributor").await;
+        let req = Json(serde_json::from_value(serde_json::json!({ "parent_id": space.root, "name": "Mine" })).unwrap());
+        let own = create_folder(State(env.st.clone()), ben.clone(), req).await.unwrap().0.id;
+        let others = env.upload(&admin, &own, "others.txt", b"another person's content").await;
+        let _ = trash(State(env.st.clone()), admin, ids(&[&own])).await.unwrap();
+        drop(crate::fsops::lock_seen(&env.st, &ben, &[&own]).await.unwrap());
+        assert_eq!(restore(State(env.st.clone()), ben, ids(&[&own])).await.unwrap_err().status, StatusCode::FORBIDDEN);
+        let folder = tree::get_node(&mut env.st.db.acquire().await.unwrap(), &own).await.unwrap().unwrap();
+        assert!(folder.trashed_at.is_some());
+        assert_eq!(std::fs::read(folder.fs_file().unwrap().join("others.txt")).unwrap(), b"another person's content");
+        assert!(tree::get_node(&mut env.st.db.acquire().await.unwrap(), &others).await.unwrap().is_some());
     }
 
     #[tokio::test]

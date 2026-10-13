@@ -165,7 +165,7 @@ async fn holds_others(conn: &mut SqliteConnection, user: &User, node: &Node) -> 
     let check = async {
         while let Some(paths) = receive.recv().await {
             let (owned,): (i64,) = sqlx::query_as(
-                "SELECT COUNT(*) FROM nodes WHERE drive_id = ? AND owner_id = ? AND NOT found AND trashed_at IS NULL
+                "SELECT COUNT(*) FROM nodes WHERE drive_id = ? AND owner_id = ? AND NOT found
                  AND fs_path IN (SELECT value FROM json_each(?))",
             )
             .bind(node.drive())
