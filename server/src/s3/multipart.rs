@@ -1,15 +1,15 @@
 //! Multipart parts stay in owned temporary files. Per-upload locks make replacing parts, completing and cleanup
 //! mutually exclusive; no request holds the application's write lock while receiving network content.
 
-use std::{collections::HashMap, sync::{Arc, OnceLock, Mutex, Weak}};
+use std::{collections::HashMap, sync::{Arc, OnceLock, Weak}};
 use s3s::{S3Request, S3Response, S3Result, s3_error, dto::*};
 use tokio::io::AsyncWriteExt;
 use crate::{access, state::AppState, util::{now, new_id}};
 use super::credentials::{Identity, request_identity};
 
 fn lock(id: &str) -> Arc<tokio::sync::Mutex<()>> {
-    static LOCKS: OnceLock<Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>> = OnceLock::new();
-    let mut locks = LOCKS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    static LOCKS: OnceLock<crate::sync::Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>> = OnceLock::new();
+    let mut locks = LOCKS.get_or_init(Default::default).lock();
     locks.retain(|_, l| l.strong_count() > 0);
     if let Some(lock) = locks.get(id).and_then(Weak::upgrade) { return lock; }
     let lock = Arc::new(tokio::sync::Mutex::new(())); locks.insert(id.into(), Arc::downgrade(&lock)); lock
@@ -55,7 +55,7 @@ pub async fn part(st: &AppState, mut req: S3Request<UploadPartInput>) -> S3Resul
     let (parent, name) = access::rooted_parent(st, &identity.user, &identity.root.id, &req.input.key).await.map_err(super::map_error)?;
     let up = access::upload_to(st, &identity.user, &parent, name).await.map_err(super::map_error)?;
     let body = req.input.body.take().unwrap_or_else(|| StreamingBlob::from_bytes(bytes::Bytes::new()));
-    let (tmp, size, _, etag) = super::objects::receive(st, &identity, &parent, body, req.input.content_length, req.input.content_md5.as_deref()).await?;
+    let (mut tmp, size, _, etag) = super::objects::receive(st, &identity, &parent, body, req.input.content_length, req.input.content_md5.as_deref(), &req.headers, req.trailing_headers.as_ref(), up.existing.as_ref().map_or(0, |n| n.size.max(0) as u64)).await?;
     let file_id = new_id(); let file = path(st, &file_id);
     let result = async {
         let (total,): (i64,) = sqlx::query_as("SELECT COALESCE(SUM(size),0) FROM s3_parts WHERE upload_id = ? AND number != ?").bind(&req.input.upload_id).bind(req.input.part_number).fetch_one(&st.db).await.map_err(super::internal)?;
@@ -64,9 +64,10 @@ pub async fn part(st: &AppState, mut req: S3Request<UploadPartInput>) -> S3Resul
         let mut c = st.db.acquire().await.map_err(super::internal)?;
         crate::tree::check_quota(&mut c, parent.drive(), total as i64 - up.existing.map_or(0, |n| n.size)).await.map_err(super::map_error)?;
         drop(c);
-        tokio::fs::rename(&tmp, &file).await.map_err(super::internal)?;
+        tmp.rename(file.clone()).await.map_err(super::internal)?;
         // The key may have been removed while this part was received; never leave an unreferenced new part.
         super::credentials::identity(st, &identity.key.access_key, true).await?;
+        let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await.map_err(super::internal)?;
         let old: Option<(String,)> = sqlx::query_as("SELECT file_id FROM s3_parts WHERE upload_id = ? AND number = ?").bind(&req.input.upload_id).bind(req.input.part_number).fetch_optional(&mut *tx).await.map_err(super::internal)?;
         sqlx::query("INSERT INTO s3_parts(upload_id,number,file_id,size,md5,created_at) VALUES(?,?,?,?,?,?) ON CONFLICT(upload_id,number) DO UPDATE SET file_id=excluded.file_id,size=excluded.size,md5=excluded.md5,created_at=excluded.created_at")
@@ -75,8 +76,7 @@ pub async fn part(st: &AppState, mut req: S3Request<UploadPartInput>) -> S3Resul
         if let Some((old,)) = old { let _ = tokio::fs::remove_file(path(st, &old)).await; }
         Ok(S3Response::new(UploadPartOutput { e_tag: Some(etag), ..Default::default() }))
     }.await;
-    let _ = tokio::fs::remove_file(tmp).await;
-    if result.is_err() { let _ = tokio::fs::remove_file(file).await; }
+    if result.is_ok() { tmp.persist(); }
     result
 }
 
@@ -117,10 +117,10 @@ pub async fn complete(st: &AppState, req: S3Request<CompleteMultipartUploadInput
     let (parent, name) = access::rooted_parent(st, &identity.user, &identity.root.id, &req.input.key).await.map_err(super::map_error)?;
     let up = access::upload_to(st, &identity.user, &parent, name.clone()).await.map_err(super::map_error)?;
     crate::tree::check_quota(&mut *st.db.acquire().await.map_err(super::internal)?, parent.drive(), size as i64 - up.existing.map_or(0, |n| n.size)).await.map_err(super::map_error)?;
-    let assembled = st.tmp_dir().join(format!("s3-complete-{}", new_id()));
+    let assembled = super::temp::Temporary::new(st, "complete");
     let result = async {
         let mut disk = crate::util::DiskRoom::check(&st.tmp_dir(), size).await.map_err(super::map_error)?;
-        let mut out = tokio::fs::File::create(&assembled).await.map_err(super::internal)?;
+        let mut out = tokio::fs::File::create(assembled.path()).await.map_err(super::internal)?;
         for part in &parts {
             disk.before(part.size as u64).await.map_err(super::map_error)?;
             let mut source = tokio::fs::File::open(path(st, &part.file_id)).await.map_err(super::internal)?;
@@ -128,13 +128,12 @@ pub async fn complete(st: &AppState, req: S3Request<CompleteMultipartUploadInput
             if copied != part.size as u64 { return Err(s3_error!(InvalidPart)); }
         }
         out.flush().await.map_err(super::internal)?; out.sync_data().await.map_err(super::internal)?; drop(out);
-        let etag = ETag::Strong(super::etag::reader(tokio::fs::File::open(&assembled).await.map_err(super::internal)?).await.map_err(super::map_error)?);
+        let etag = ETag::Strong(super::etag::reader(tokio::fs::File::open(assembled.path()).await.map_err(super::internal)?).await.map_err(super::map_error)?);
         let latest = super::credentials::identity(st, &identity.key.access_key, true).await?;
-        access::store_in_scope(st.clone(), latest.user, parent, name, assembled.clone(), size, None, &identity.root.id).await.map_err(super::map_error)?;
+        super::objects::commit(st.clone(), latest.user, parent, name, assembled, size, None, identity.root.id.clone()).await?;
         remove(st, &req.input.upload_id).await?;
         Ok(S3Response::new(CompleteMultipartUploadOutput { bucket: Some(req.input.bucket), key: Some(req.input.key), e_tag: Some(etag), ..Default::default() }))
     }.await;
-    let _ = tokio::fs::remove_file(assembled).await;
     result
 }
 

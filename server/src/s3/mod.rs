@@ -5,17 +5,32 @@ pub mod config;
 pub(crate) mod credentials;
 pub mod manage;
 mod objects;
+#[cfg(test)]
+mod tests;
 mod listing;
 mod multipart;
+mod checksums;
+mod temp;
 pub(crate) mod etag;
 
-use std::sync::Arc;
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use axum::{extract::{State, Request, ConnectInfo}, middleware::Next, response::{Response, IntoResponse}, http::{StatusCode, header}};
 use s3s::{S3Error, S3ErrorCode, service::S3ServiceBuilder, config::{S3Config, StaticConfigProvider}};
 use crate::{auth, error::AppError, state::AppState};
 
 #[derive(Clone)]
 pub struct Service(pub AppState);
+#[derive(Clone)]
+struct Verified(Arc<AtomicBool>);
+struct Access;
+#[async_trait::async_trait]
+impl s3s::access::S3Access for Access {
+    async fn check(&self, context: &mut s3s::access::S3AccessContext<'_>) -> s3s::S3Result<()> {
+        if context.credentials().is_none() { return Err(s3s::s3_error!(AccessDenied)); }
+        if let Some(verified) = context.extensions_mut().get::<Verified>() { verified.0.store(true, Ordering::Relaxed); }
+        Ok(())
+    }
+}
 
 pub fn internal(e: impl std::fmt::Display) -> S3Error {
     tracing::warn!("S3 operation failed: {}", crate::redact::redact(&e.to_string()));
@@ -39,13 +54,13 @@ fn wire_error(status: StatusCode, code: &str, message: &str) -> Response {
     (status, [(header::CONTENT_TYPE, "application/xml")], format!("<?xml version=\"1.0\"?><Error><Code>{code}</Code><Message>{message}</Message></Error>")).into_response()
 }
 
-pub async fn dispatch(State(st): State<AppState>, req: Request, next: Next) -> Response {
+pub async fn dispatch(State(st): State<AppState>, mut req: Request, next: Next) -> Response {
     let cfg = match config::load(&st).await { Ok(c) => c, Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response() };
     let host = req.headers().get(header::HOST).and_then(|v| v.to_str().ok()).and_then(|v| v.split(':').next()).unwrap_or_default();
     if cfg.hostname.is_empty() || !host.eq_ignore_ascii_case(&cfg.hostname) { return next.run(req).await; }
     if !cfg.enabled { return wire_error(StatusCode::FORBIDDEN, "AccessDenied", "S3 access is disabled"); }
     let peer = req.extensions().get::<ConnectInfo<std::net::SocketAddr>>().map(|v| v.0).unwrap_or_else(|| ([127,0,0,1], 0).into());
-    let key = auth::limit_key_ip(&auth::client_ip(&st, peer, req.headers()));
+    let key = format!("ip:{}", auth::limit_key_ip(&auth::client_ip(&st, peer, req.headers())));
     // Reserve first; concurrent signature failures cannot all pass the shared sign-in limit.
     if !auth::begin_attempt(&st, &key, auth::IP_FAIL_LIMIT) { return wire_error(StatusCode::TOO_MANY_REQUESTS, "SlowDown", "Too many failed sign-ins. Try again later."); }
     if !time_ok(&req) { return wire_error(StatusCode::FORBIDDEN, "RequestTimeTooSkewed", "The request time differs from the server by more than 15 minutes"); }
@@ -57,13 +72,16 @@ pub async fn dispatch(State(st): State<AppState>, req: Request, next: Next) -> R
     config.put_object_max_size = Some(if st.max_upload > 0 { st.max_upload.min(5 * 1024 * 1024 * 1024) } else { 5 * 1024 * 1024 * 1024 });
     let mut builder = S3ServiceBuilder::new(Service(st.clone()));
     builder.set_auth(credentials::Auth(st.clone()));
+    builder.set_access(Access);
     builder.set_config(Arc::new(StaticConfigProvider::new(Arc::new(config))));
+    let verified = Verified(Arc::new(AtomicBool::new(false)));
+    req.extensions_mut().insert(verified.clone());
     let (parts, body) = req.into_parts();
     let req = axum::http::Request::from_parts(parts, s3s::Body::http_body_unsync(body));
     match builder.build().call(req).await {
         Ok(res) => {
             // Authenticated operation errors (missing objects, quota…) are not failed sign-ins.
-            if !matches!(res.status(), StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) { auth::attempt_succeeded(&st, &key); }
+            if verified.0.load(Ordering::Relaxed) { auth::attempt_succeeded(&st, &key); }
             let (parts, body) = res.into_parts();
             Response::from_parts(parts, axum::body::Body::new(body))
         }
@@ -123,6 +141,7 @@ pub async fn maintain(st: &AppState) {
 }
 
 async fn expiry_notices(st: &AppState) -> crate::error::AppResult<()> {
+    let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     let rows: Vec<(String, i64, String, String, String, i64, bool)> = sqlx::query_as("SELECT k.id,b.creator_id,b.node_id,b.name,k.description,k.expires_at,k.writable FROM s3_keys k JOIN s3_buckets b ON b.id=k.bucket_id WHERE k.enabled=1 AND b.enabled=1 AND k.expiry_notified=0 AND k.expires_at>? AND k.expires_at<=? LIMIT 1000").bind(crate::util::now()).bind(crate::util::now()+crate::notify::EXPIRY_NOTICE).fetch_all(&mut *tx).await?;
     let mut outgoing = Vec::new();

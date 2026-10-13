@@ -56,7 +56,8 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Publ
     if !bucket_name(&req.name) { return Err(AppError::bad_request("Use 3–63 lowercase letters, digits and hyphens for the bucket name")); }
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    publisher(&mut tx, &user, &req.node_id, config.managers_publish).await?;
+    let current = crate::auth::user_by_id(&st, &mut tx, user.id).await?.ok_or_else(|| AppError::forbidden("The account no longer has access"))?;
+    publisher(&mut tx, &current, &req.node_id, config.managers_publish).await?;
     let bucket = Bucket { id: new_id(), name: req.name, node_id: req.node_id, creator_id: user.id, enabled: true, created_at: now(), last_used_at: None };
     let result = sqlx::query("INSERT INTO s3_buckets (id, name, node_id, creator_id, created_at) VALUES (?, ?, ?, ?, ?)").bind(&bucket.id).bind(&bucket.name).bind(&bucket.node_id).bind(user.id).bind(bucket.created_at).execute(&mut *tx).await;
     if result.as_ref().is_err_and(|e| e.as_database_error().is_some_and(|e| e.is_unique_violation())) { return Err(AppError::conflict("An S3 bucket has this name")); }
@@ -65,11 +66,12 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Publ
     Ok(Json(bucket))
 }
 
-async fn managed(st: &AppState, user: &User, id: &str) -> AppResult<Bucket> {
-    let config = super::config::load(st).await?;
-    let mut conn = st.db.acquire().await?;
+async fn managed(st: &AppState, conn: &mut sqlx::SqliteConnection, user: &User, id: &str) -> AppResult<Bucket> {
+    let current = crate::auth::user_by_id(st, conn, user.id).await?.ok_or_else(|| AppError::forbidden("The account no longer has access"))?;
+    let stored: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key='s3'").fetch_optional(&mut *conn).await?;
+    let config: super::config::Config = stored.and_then(|(value,)| serde_json::from_str(&value).ok()).unwrap_or_default();
     let bucket: Bucket = sqlx::query_as("SELECT * FROM s3_buckets WHERE id = ?").bind(id).fetch_optional(&mut *conn).await?.ok_or_else(|| AppError::not_found("Bucket not found"))?;
-    if !user.is_admin() { publisher(&mut conn, user, &bucket.node_id, config.managers_publish).await?; }
+    if !current.is_admin() { publisher(conn, &current, &bucket.node_id, config.managers_publish).await?; }
     Ok(bucket)
 }
 
@@ -77,14 +79,20 @@ async fn managed(st: &AppState, user: &User, id: &str) -> AppResult<Bucket> {
 pub struct Enabled { pub enabled: bool }
 
 pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<String>, Json(req): Json<Enabled>) -> AppResult<Json<serde_json::Value>> {
-    managed(&st, &user, &id).await?;
-    sqlx::query("UPDATE s3_buckets SET enabled = ? WHERE id = ?").bind(req.enabled).bind(id).execute(&st.db).await?;
+    let _w = st.write_lock.lock().await;
+    let mut tx = crate::db::begin_write(&st.db).await?;
+    managed(&st, &mut tx, &user, &id).await?;
+    sqlx::query("UPDATE s3_buckets SET enabled = ? WHERE id = ?").bind(req.enabled).bind(id).execute(&mut *tx).await?;
+    tx.commit().await?;
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
 pub async fn delete(State(st): State<AppState>, user: User, Path(id): Path<String>) -> AppResult<Json<serde_json::Value>> {
-    managed(&st, &user, &id).await?;
-    sqlx::query("DELETE FROM s3_buckets WHERE id = ?").bind(id).execute(&st.db).await?;
+    let _w = st.write_lock.lock().await;
+    let mut tx = crate::db::begin_write(&st.db).await?;
+    managed(&st, &mut tx, &user, &id).await?;
+    sqlx::query("DELETE FROM s3_buckets WHERE id = ?").bind(id).execute(&mut *tx).await?;
+    tx.commit().await?;
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
@@ -95,9 +103,11 @@ pub struct NewKey { pub description: String, pub writable: bool, pub expires_at:
 pub struct CreatedKey { #[serde(flatten)] pub key: Key, pub secret_key: String }
 
 pub async fn new_key(State(st): State<AppState>, user: User, Path(bucket_id): Path<String>, Json(req): Json<NewKey>) -> AppResult<Json<CreatedKey>> {
-    let bucket = managed(&st, &user, &bucket_id).await?;
-    let config = super::config::load(&st).await?;
-    let mut conn = st.db.acquire().await?;
+    let _w = st.write_lock.lock().await;
+    let mut conn = crate::db::begin_write(&st.db).await?;
+    let bucket = managed(&st, &mut conn, &user, &bucket_id).await?;
+    let stored: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key='s3'").fetch_optional(&mut *conn).await?;
+    let config: super::config::Config = stored.and_then(|(value,)| serde_json::from_str(&value).ok()).unwrap_or_default();
     let creator = crate::auth::user_by_id(&st, &mut conn, bucket.creator_id).await?.ok_or_else(|| AppError::forbidden("The bucket's creator no longer has access"))?;
     let root = publisher(&mut conn, &creator, &bucket.node_id, config.managers_publish).await?;
     if req.writable && root.space_read_only { return Err(crate::tree::read_only_space()); }
@@ -109,18 +119,25 @@ pub async fn new_key(State(st): State<AppState>, user: User, Path(bucket_id): Pa
     let secret_key = random_token(40);
     let key = Key { id: id.clone(), bucket_id, access_key: format!("TF{}", hex::encode(rand::random::<[u8; 10]>()).to_uppercase()), secret: crate::secrets::seal(&format!("s3-key:{id}"), &secret_key), description: req.description.trim().into(), writable: req.writable, enabled: true, expires_at: req.expires_at, created_at: now(), last_used_at: None };
     sqlx::query("INSERT INTO s3_keys (id,bucket_id,access_key,secret,description,writable,expires_at,created_at) VALUES (?,?,?,?,?,?,?,?)").bind(&key.id).bind(&key.bucket_id).bind(&key.access_key).bind(&key.secret).bind(&key.description).bind(key.writable).bind(key.expires_at).bind(key.created_at).execute(&mut *conn).await?;
+    conn.commit().await?;
     Ok(Json(CreatedKey { key, secret_key }))
 }
 
 pub async fn revoke_key(State(st): State<AppState>, user: User, Path((bucket, key)): Path<(String, String)>, Json(req): Json<Enabled>) -> AppResult<Json<serde_json::Value>> {
-    managed(&st, &user, &bucket).await?;
-    sqlx::query("UPDATE s3_keys SET enabled = ? WHERE id = ? AND bucket_id = ?").bind(req.enabled).bind(key).bind(bucket).execute(&st.db).await?;
+    let _w = st.write_lock.lock().await;
+    let mut tx = crate::db::begin_write(&st.db).await?;
+    managed(&st, &mut tx, &user, &bucket).await?;
+    sqlx::query("UPDATE s3_keys SET enabled = ? WHERE id = ? AND bucket_id = ?").bind(req.enabled).bind(key).bind(bucket).execute(&mut *tx).await?;
+    tx.commit().await?;
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
 pub async fn delete_key(State(st): State<AppState>, user: User, Path((bucket, key)): Path<(String, String)>) -> AppResult<Json<serde_json::Value>> {
-    managed(&st, &user, &bucket).await?;
-    sqlx::query("DELETE FROM s3_keys WHERE id = ? AND bucket_id = ?").bind(key).bind(bucket).execute(&st.db).await?;
+    let _w = st.write_lock.lock().await;
+    let mut tx = crate::db::begin_write(&st.db).await?;
+    managed(&st, &mut tx, &user, &bucket).await?;
+    sqlx::query("DELETE FROM s3_keys WHERE id = ? AND bucket_id = ?").bind(key).bind(bucket).execute(&mut *tx).await?;
+    tx.commit().await?;
     Ok(Json(serde_json::json!({"ok": true})))
 }
 

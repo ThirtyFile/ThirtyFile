@@ -22,13 +22,14 @@ pub async fn inside(conn: &mut SqliteConnection, root: &str, node: &str) -> AppR
 pub async fn rooted_item(st: &AppState, user: &User, root: &str, key: &str, need: Need) -> AppResult<Node> {
     let parts = relative_parts(key)?;
     let mut node = tree::folder_for(&mut *st.db.acquire().await?, user, root, Need::Read).await?;
-    for part in parts {
+    let last = parts.len().saturating_sub(1);
+    for (index, part) in parts.into_iter().enumerate() {
         if !node.is_folder() { return Err(AppError::not_found("Object not found")); }
         if node.in_folder_space() { crate::folders::sync_folder(st, &node).await; }
         let mut conn = st.db.acquire().await?;
         node = child_named(&mut conn, &node.id, &part).await?.ok_or_else(|| AppError::not_found("Object not found"))?;
         if node.name != part { return Err(AppError::conflict("Object keys that differ only in case conflict in this space")); }
-        node = tree::node_for(&mut conn, user, &node.id, need).await?;
+        node = tree::node_for(&mut conn, user, &node.id, if index == last { need } else { Need::Read }).await?;
         if !inside(&mut conn, root, &node.id).await? { return Err(AppError::forbidden("Object is outside the bucket")); }
     }
     if node.is_folder() != key.ends_with('/') { return Err(AppError::not_found("Object not found")); }
@@ -43,17 +44,11 @@ pub async fn rooted_parent(st: &AppState, user: &User, root: &str, key: &str) ->
         if folder.in_folder_space() { crate::folders::sync_folder(st, &folder).await; }
         let child = child_named(&mut *st.db.acquire().await?, &folder.id, &part).await?;
         if child.is_none() {
-            // Under the common write lock, recheck the scope before adding anything.
-            let _w = st.write_lock.lock().await;
-            let mut tx = crate::db::begin_write(&st.db).await?;
-            let parent = tree::folder_for(&mut tx, user, &folder.id, Need::Add).await?;
-            if !inside(&mut tx, root, &parent.id).await? { return Err(AppError::forbidden("Object is outside the bucket")); }
-            if child_named(&mut tx, &parent.id, &part).await?.is_none() && !parent.in_folder_space() {
-                crate::content::create_folder(&mut tx, user.id, &parent.id, &part).await?;
-                tx.commit().await?;
-            } else if parent.in_folder_space() {
-                drop(tx); drop(_w);
-                super::make_folder(st, user, &parent, &part).await?;
+            if let Err(error) = super::make_folder(st, user, &folder, &part).await {
+                // Concurrent PUTs can create the same intermediate folder; reuse only that exact live folder.
+                let mut conn = st.db.acquire().await?;
+                let concurrent = child_named(&mut conn, &folder.id, &part).await?;
+                if !concurrent.is_some_and(|n| n.is_folder() && n.name == part) { return Err(error); }
             }
         }
         let mut conn = st.db.acquire().await?;

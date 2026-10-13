@@ -42,6 +42,8 @@ impl<'a> Walk<'a> {
 
     async fn next(&mut self) -> S3Result<Option<(String, Node)>> {
         while let Some(frame) = self.frames.last_mut() {
+            // A stopped key or publisher must fail the page; never turn it into a successful partial listing.
+            super::credentials::identity(self.st, &self.identity.key.access_key, false).await?;
             if frame.rows.is_empty() {
                 if !frame.scanned {
                     if frame.folder.in_folder_space() { crate::folders::sync_folder(self.st, &frame.folder).await; }
@@ -67,7 +69,11 @@ impl<'a> Walk<'a> {
             let mut conn = self.st.db.acquire().await.map_err(super::internal)?;
             let live = tree::node_for(&mut conn, &self.identity.user, &node.id, Need::Read).await;
             drop(conn);
-            if live.is_err() { continue; }
+            match live {
+                Ok(_) => (),
+                Err(error) if error.status == axum::http::StatusCode::NOT_FOUND => continue,
+                Err(error) => return Err(super::map_error(error)),
+            }
             if may_contain {
                 self.frames.push(Frame { folder: node.clone(), prefix: key.clone(), after: String::new(), rows: VecDeque::new(), scanned: false });
             }
@@ -105,9 +111,9 @@ pub async fn page(st: &AppState, identity: &Identity, prefix: &str, delimiter: &
             page.last = Some((group.clone(), true));
             page.groups.push(CommonPrefix { prefix: Some(encode(&group, url)) });
         } else {
-            let etag = super::etag::for_node(st, &node).await?;
+            let description = super::etag::describe_node(st, &node).await?;
             page.last = Some((key.clone(), false));
-            page.objects.push(Object { key: Some(encode(&key, url)), size: Some(node.size), e_tag: Some(etag), last_modified: Some(super::objects::timestamp(node.updated_at)), ..Default::default() });
+            page.objects.push(Object { key: Some(encode(&key, url)), size: Some(description.size as i64), e_tag: Some(description.etag), last_modified: Some(super::objects::timestamp(node.updated_at)), ..Default::default() });
         }
     }
     Ok(page)

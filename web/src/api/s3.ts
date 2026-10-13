@@ -36,7 +36,8 @@ export const s3Api = {
   publishS3Bucket: (nodeId: string, name: string) => post<S3Bucket>("/s3/buckets", { node_id: nodeId, name }),
   setS3Bucket: (id: string, enabled: boolean) => request("PATCH", enc`/s3/buckets/${id}`, { enabled }),
   deleteS3Bucket: (id: string) => request("DELETE", enc`/s3/buckets/${id}`),
-  newS3Key: (id: string, description: string, writable: boolean, expiresAt: number | null) => post<S3Key & { secret_key: string }>(enc`/s3/buckets/${id}/keys`, { description, writable, expires_at: expiresAt }),
+  newS3Key: (id: string, description: string, writable: boolean, expiresAt: number | null) =>
+    post<S3Key & { secret_key: string }>(enc`/s3/buckets/${id}/keys`, { description, writable, expires_at: expiresAt }),
   setS3Key: (id: string, key: string, enabled: boolean) => request("PATCH", enc`/s3/buckets/${id}/keys/${key}`, { enabled }),
   deleteS3Key: (id: string, key: string) => request("DELETE", enc`/s3/buckets/${id}/keys/${key}`),
 };
