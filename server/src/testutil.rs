@@ -134,6 +134,7 @@ impl TestEnv {
                 username: name,
                 password_hash: &password_hash,
                 role: crate::auth::UserRole::User,
+                guest: false,
                 can_write: true,
                 can_delete: true,
                 can_share,

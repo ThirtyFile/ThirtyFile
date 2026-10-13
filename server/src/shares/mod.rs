@@ -144,6 +144,11 @@ enum Manage {
 /// folder, the item's owner while they still have access to it, and an administrator; in someone else's personal space
 /// an administrator without such a role may only revoke it (None: nothing)
 async fn manage(conn: &mut SqliteConnection, user: &User, creator: i64, node: &Node) -> AppResult<Option<Manage>> {
+    let current = auth::current_user(conn, user).await?;
+    let user = &current;
+    if user.guest {
+        return Ok(None);
+    }
     if creator == user.id {
         return Ok(Some(Manage::All));
     }
@@ -211,6 +216,10 @@ pub struct ListQuery {
 
 pub async fn list(State(st): State<AppState>, user: User, Query(q): Query<ListQuery>) -> AppResult<Json<Vec<ShareInfo>>> {
     let mut c = st.db.acquire().await?;
+    let user = auth::current_user(&mut c, &user).await?;
+    if user.guest {
+        return Ok(Json(Vec::new()));
+    }
     // Which links besides the caller's own are listed: all of them, or those in spaces the caller manages and on
     // items the caller owns in spaces they can open
     let (all, managed, accessible) = match (&q.node_id, q.scope.as_deref()) {

@@ -58,6 +58,7 @@ export const keys = {
 
   // Sharing
   access: (nodeId: string) => ["access", nodeId],
+  restriction: (nodeId: string) => ["restriction", nodeId],
   directory: (q: string) => ["directory", q],
   /** Every answer about share links */
   shares: () => ["shares"],

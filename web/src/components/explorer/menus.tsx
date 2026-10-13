@@ -4,6 +4,7 @@
  * does, with submenus on empty space and a row of icon buttons on items.
  */
 import { PublishBucketMenu } from "@/components/S3Buckets";
+import { FtpFolderMenu } from "@/components/FtpFolders";
 import { Fragment, type ReactNode } from "react";
 import {
   ClipboardPasteIcon,
@@ -190,7 +191,12 @@ export function explorerMenus(p: ExplorerProps, s: ExplorerState, a: ExplorerAct
       <Share2Icon /> {t("Create share link")}
     </DropdownMenuItem>
   );
-  const publishBucket = single?.kind === "folder" && <PublishBucketMenu key="s3" nodeId={single.id} onPublish={() => setDialog({ t: "s3", nodeId: single.id })} />;
+  const publishBucket = single?.kind === "folder" && (
+    <>
+      <PublishBucketMenu key="s3" nodeId={single.id} onPublish={() => setDialog({ t: "s3", nodeId: single.id })} />
+      <FtpFolderMenu key="ftp" nodeId={single.id} onPublish={() => setDialog({ t: "ftp", nodeId: single.id })} />
+    </>
+  );
   const favorite = (
     <DropdownMenuItem key="favorite" onClick={toggleFavorite}>
       {allFavorite ? <StarOffIcon /> : <StarIcon />} {allFavorite ? t("Remove from favorites") : t("Add to favorites")}

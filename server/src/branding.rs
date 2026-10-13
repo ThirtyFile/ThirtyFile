@@ -105,8 +105,9 @@ pub async fn load(db: &sqlx::SqlitePool) -> Branding {
 async fn save(st: &AppState, b: &Branding, detail: &str, user: &crate::auth::User) -> AppResult<()> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
+    let user = crate::auth::require_admin(&mut tx, user).await?;
     set_setting(&mut tx, "branding", &serde_json::to_string(b).unwrap()).await?;
-    logs::record_activity(&mut tx, user, None, "settings", detail).await?;
+    logs::record_activity(&mut tx, &user, None, "settings", detail).await?;
     tx.commit().await?;
     *st.part::<Memory>().settings.write() = b.clone();
     Ok(())
@@ -352,12 +353,16 @@ pub async fn upload_logo(State(st): State<AppState>, Admin(user): Admin, Path(v)
     let ts = now();
     // A name of its own each time: two uploads within a second must not share one (the older file is removed after)
     let file = format!("logo-{}-{ts}-{}.{ext}", if dark { "dark" } else { "light" }, crate::util::new_id());
-    tokio::fs::write(dir.join(&file), &body).await?;
+    let staged = dir.join(&file);
+    tokio::fs::write(&staged, &body).await?;
 
     let mut b = st.part::<Memory>().settings.read().clone();
     let old = if dark { b.logo_dark.replace(LogoFile { file, mime: mime.into() }) } else { b.logo.replace(LogoFile { file, mime: mime.into() }) };
     b.version = ts;
-    save(&st, &b, if dark { "Updated dark mode logo" } else { "Updated logo" }, &user).await?;
+    if let Err(e) = save(&st, &b, if dark { "Updated dark mode logo" } else { "Updated logo" }, &user).await {
+        let _ = tokio::fs::remove_file(&staged).await;
+        return Err(e);
+    }
     if let Some(old) = old {
         let _ = tokio::fs::remove_file(dir.join(old.file)).await;
     }
@@ -391,12 +396,16 @@ pub async fn upload_background(State(st): State<AppState>, Admin(user): Admin, b
     tokio::fs::create_dir_all(&dir).await?;
     let ts = now();
     let file = format!("login-bg-{ts}-{}.{ext}", crate::util::new_id());
-    tokio::fs::write(dir.join(&file), &body).await?;
+    let staged = dir.join(&file);
+    tokio::fs::write(&staged, &body).await?;
 
     let mut b = st.part::<Memory>().settings.read().clone();
     let old = b.login_background.replace(LogoFile { file, mime: mime.into() });
     b.version = ts;
-    save(&st, &b, "Updated sign-in page background", &user).await?;
+    if let Err(e) = save(&st, &b, "Updated sign-in page background", &user).await {
+        let _ = tokio::fs::remove_file(&staged).await;
+        return Err(e);
+    }
     if let Some(old) = old {
         let _ = tokio::fs::remove_file(dir.join(old.file)).await;
     }

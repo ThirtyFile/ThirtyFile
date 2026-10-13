@@ -1,5 +1,6 @@
 /** File explorer dialogs: move / copy, delete, share and access (creating and renaming are edited inline in the list) */
 import { S3BucketDialog } from "@/components/S3Buckets";
+import { FtpFolderDialog } from "@/components/FtpFolders";
 import { AccessDialog } from "@/components/AccessDialog";
 import { ConfirmDialog } from "@/components/dialogs";
 import { FolderPickerDialog } from "@/components/FolderPickerDialog";
@@ -49,6 +50,7 @@ export function ExplorerDialogs({ p, s, a }: { p: ExplorerProps; s: ExplorerStat
       )}
       {dialog?.t === "share" && <ShareDialog node={dialog.node} onClose={() => setDialog(null)} />}
       {dialog?.t === "s3" && <S3BucketDialog nodeId={dialog.nodeId} onClose={() => setDialog(null)} />}
+      {dialog?.t === "ftp" && <FtpFolderDialog nodeId={dialog.nodeId} onClose={() => setDialog(null)} />}
       {dialog?.t === "access" && <AccessDialog nodeId={dialog.nodeId} onClose={() => setDialog(null)} />}
     </>
   );

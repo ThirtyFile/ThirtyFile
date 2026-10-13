@@ -292,13 +292,18 @@ mod tests {
             }
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
-        let rows = query_access(&env.st, &AccessQuery { share_id: Some(token.clone()), ..Default::default() }, Some(amy.id), None, 10).await.unwrap();
+        let rows = query_access(&env.st, &AccessQuery { share_id: Some(token.clone()), ..Default::default() }, Some(amy.id), None, amy.id, 10).await.unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!((rows[0].event.as_str(), rows[0].ip.as_str(), rows[0].user_agent.as_str()), ("view", "198.51.100.7", "TestBrowser/1.0"));
         assert_eq!(rows[1].ip, "203.0.113.9");
         // Others can't see them
         let other = env.user("ben", true).await;
-        assert!(query_access(&env.st, &AccessQuery { share_id: Some(token.clone()), ..Default::default() }, Some(other.id), None, 10).await.unwrap().is_empty());
+        assert!(
+            query_access(&env.st, &AccessQuery { share_id: Some(token.clone()), ..Default::default() }, Some(other.id), None, other.id, 10)
+                .await
+                .unwrap()
+                .is_empty()
+        );
         // The share list shows the view count
         let Json(list) = crate::shares::list(State(env.st.clone()), amy.clone(), Query(serde_json::from_value(json!({})).unwrap())).await.unwrap();
         assert_eq!(serde_json::to_value(&list).unwrap()[0]["views"], 2);

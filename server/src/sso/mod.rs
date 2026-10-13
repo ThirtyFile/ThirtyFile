@@ -79,6 +79,7 @@ pub enum Provisioning {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct NewUserDefaults {
+    pub guest: bool,
     pub can_write: bool,
     pub can_delete: bool,
     pub can_share: bool,
@@ -88,7 +89,7 @@ pub struct NewUserDefaults {
 
 impl Default for NewUserDefaults {
     fn default() -> Self {
-        Self { can_write: true, can_delete: true, can_share: true, quota_bytes: None }
+        Self { guest: false, can_write: true, can_delete: true, can_share: true, quota_bytes: None }
     }
 }
 
@@ -98,6 +99,7 @@ impl Default for NewUserDefaults {
 pub struct DomainRule {
     /// Lowercase, without @
     pub domain: String,
+    pub guest: bool,
     pub can_write: bool,
     pub can_delete: bool,
     pub can_share: bool,
@@ -114,6 +116,7 @@ impl Default for DomainRule {
     fn default() -> Self {
         Self {
             domain: String::new(),
+            guest: false,
             can_write: true,
             can_delete: true,
             can_share: true,
@@ -1053,7 +1056,7 @@ mod tests {
             s.allowed_domains = vec!["other.example".into()];
             s.google.provisioning = Provisioning::Create;
             s.google.allowed_domains = vec!["example.com".into()];
-            s.google.defaults = NewUserDefaults { can_write: true, can_delete: false, can_share: false, quota_bytes: Some(1 << 30) };
+            s.google.defaults = NewUserDefaults { guest: false, can_write: true, can_delete: false, can_share: false, quota_bytes: Some(1 << 30) };
             s.google.groups = vec![gid, 9999];
             s.github.provisioning = Provisioning::Off;
         });
@@ -1109,6 +1112,7 @@ mod tests {
                     username: &format!("bulk{i}@example.com"),
                     password_hash: &hash,
                     role: crate::auth::UserRole::User,
+                    guest: false,
                     can_write: true,
                     can_delete: true,
                     can_share: true,
@@ -1140,7 +1144,7 @@ mod tests {
             sqlx::query_as("INSERT INTO groups (name, description, created_at) VALUES ('partners', '', 0) RETURNING id").fetch_one(&env.st.db).await.unwrap();
         enable(&env, |s| {
             s.google.provisioning = Provisioning::Create;
-            s.google.defaults = NewUserDefaults { can_write: true, can_delete: true, can_share: true, quota_bytes: None };
+            s.google.defaults = NewUserDefaults { guest: false, can_write: true, can_delete: true, can_share: true, quota_bytes: None };
             s.domain_rules = vec![DomainRule {
                 domain: "partner.example".into(),
                 can_write: true,
@@ -1252,6 +1256,66 @@ mod tests {
         let r = login(&env, &m, "google", None, |n| google(n, "g-32", "zoe@example.com", true)).await;
         assert_eq!(location(&r), "/files/abc");
         assert_eq!(space("zoe@example.com").await.1.as_deref(), Some(crate::locations::BUILTIN));
+        *MOCK_BASE.lock() = None;
+    }
+    #[tokio::test]
+    async fn guest_defaults_and_domain_rules_apply_only_to_new_accounts_and_reject_unsafe_group_join_atomically() {
+        let _g = SERIAL.lock().await;
+        let env = testutil::env().await;
+        let (m, base) = mock_server().await;
+        *MOCK_BASE.lock() = Some(base);
+        enable(&env, |s| {
+            s.google.provisioning = Provisioning::Create;
+            s.google.defaults.guest = true;
+            s.domain_rules = vec![DomainRule { domain: "staff.example.com".into(), guest: false, ..Default::default() }];
+        });
+        let r = login(&env, &m, "google", None, |n| google(n, "outside-1", "outside@example.com", true)).await;
+        assert_eq!(location(&r), "/files/abc");
+        let (guest, root, share): (bool, Option<String>, bool) =
+            sqlx::query_as("SELECT guest,root_id,can_share FROM users WHERE username='outside@example.com'").fetch_one(&env.st.db).await.unwrap();
+        assert!(guest && root.is_none());
+        // The stored capability is harmless: account extraction and permission gates enforce Guest's no-sharing policy.
+        assert!(share);
+        let r = login(&env, &m, "google", None, |n| google(n, "staff-1", "staff@staff.example.com", true)).await;
+        assert_eq!(location(&r), "/files/abc");
+        let (guest, root): (bool, Option<String>) =
+            sqlx::query_as("SELECT guest,root_id FROM users WHERE username='staff@staff.example.com'").fetch_one(&env.st.db).await.unwrap();
+        assert!(!guest && root.is_some());
+        env.st.part::<Memory>().settings.write().domain_rules[0].guest = true;
+        let r = login(&env, &m, "google", None, |n| google(n, "staff-1", "staff@staff.example.com", true)).await;
+        assert_eq!(location(&r), "/files/abc");
+        let (guest,): (bool,) = sqlx::query_as("SELECT guest FROM users WHERE username='staff@staff.example.com'").fetch_one(&env.st.db).await.unwrap();
+        assert!(!guest, "changing provisioning defaults must not silently convert a linked account");
+        let (g,): (i64,) =
+            sqlx::query_as("INSERT INTO groups(name,description,created_at) VALUES('Unsafe group','',0) RETURNING id").fetch_one(&env.st.db).await.unwrap();
+        let company = env.st.shared_root().unwrap();
+        sqlx::query("INSERT INTO grants(node_id,principal_type,principal_id,role,created_at) VALUES(?,'group',?,'manager',?)")
+            .bind(&company)
+            .bind(g)
+            .bind(now())
+            .execute(&env.st.db)
+            .await
+            .unwrap();
+        env.st.part::<Memory>().settings.write().google.groups = vec![g];
+        let r = login(&env, &m, "google", None, |n| google(n, "blocked-1", "blocked@example.com", true)).await;
+        assert!(location(&r).contains("sso_error"));
+        let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users WHERE username='blocked@example.com'").fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(count, 0, "a failed guest group join must roll back the account itself");
+        sqlx::query("UPDATE grants SET role='editor',expires_at=? WHERE principal_type='group' AND principal_id=?")
+            .bind(now() + 86400)
+            .bind(g)
+            .execute(&env.st.db)
+            .await
+            .unwrap();
+        let r = login(&env, &m, "google", None, |n| google(n, "blocked-1", "blocked@example.com", true)).await;
+        assert_eq!(location(&r), "/files/abc");
+        let (count,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM group_members m JOIN users u ON u.id=m.user_id WHERE u.username='blocked@example.com' AND m.group_id=?")
+                .bind(g)
+                .fetch_one(&env.st.db)
+                .await
+                .unwrap();
+        assert_eq!(count, 1);
         *MOCK_BASE.lock() = None;
     }
 }

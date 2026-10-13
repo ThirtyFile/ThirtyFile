@@ -248,6 +248,7 @@ pub async fn create(State(st): State<AppState>, Admin(user): Admin, Json(req): J
     let saved = async {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
+        crate::auth::require_admin(&mut tx, &user).await?;
         let res = async {
             check_place_free(&mut tx, None, &kind, &config).await?;
             sqlx::query("INSERT INTO storage_locations (id, name, kind, config, is_default, created_at) VALUES (?, ?, ?, ?, 0, ?)")
@@ -328,6 +329,7 @@ pub async fn update(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
     {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
+        crate::auth::require_admin(&mut tx, &user).await?;
         let res = async {
             sqlx::query("UPDATE storage_locations SET name = ? WHERE id = ?").bind(&name).bind(&id).execute(&mut *tx).await?;
             if let Some((_, cfg)) = &new_backend {
@@ -404,6 +406,7 @@ pub async fn set_default(State(st): State<AppState>, Admin(user): Admin, Path(id
     }
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
+    crate::auth::require_admin(&mut tx, &user).await?;
     // Check that it exists first (the UPDATE affects all rows, so rows_affected can't tell)
     let (name,): (String,) = sqlx::query_as("SELECT name FROM storage_locations WHERE id = ?")
         .bind(&id)
@@ -422,6 +425,7 @@ pub async fn delete(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
     }
     let w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
+    crate::auth::require_admin(&mut tx, &user).await?;
     let (name, kind, config, is_default, blobs, drives): (String, String, String, bool, i64, i64) = sqlx::query_as(
         "SELECT name, kind, config, is_default, (SELECT COUNT(*) FROM blobs WHERE location_id = ?1), (SELECT COUNT(*) FROM drives WHERE location_id = ?1)
          FROM storage_locations WHERE id = ?1",

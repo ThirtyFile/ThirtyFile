@@ -197,7 +197,9 @@ pub async fn compress(State(st): State<AppState>, user: User, Json(req): Json<Co
         let dest = tree::folder_for(&mut c, &user, &req.parent_id, Need::Add).await?;
         let mut roots = Vec::with_capacity(ids.len());
         for id in ids {
-            roots.push(tree::owned_node(&mut c, &user, id).await?);
+            let node = tree::owned_node(&mut c, &user, id).await?;
+            tree::require_subtree(&mut c, &user, &node, Need::Read).await?;
+            roots.push(node);
         }
         (roots, dest)
     };
@@ -217,7 +219,9 @@ fn zip_name(plan: &crate::downloads::ZipPlan, roots: &[Node]) -> String {
 }
 
 async fn run_compress(st: AppState, user: User, progress: Tracker, roots: Vec<Node>, dest_id: String, offset: i64) -> AppResult<Outcome> {
-    let plan = crate::downloads::zip_plan(&st, roots.clone(), offset).await?;
+    let plan =
+        crate::downloads::zip_plan_checked(&st, roots.clone(), offset, Some(crate::downloads::ZipAccess { user: user.clone(), publication: None, share: None }))
+            .await?;
     let name = zip_name(&plan, &roots);
     progress.set_total(plan.bytes);
 
@@ -272,14 +276,22 @@ async fn run_compress(st: AppState, user: User, progress: Tracker, roots: Vec<No
             _ => e,
         });
     }
-    let result = store_new_file(&st, &user, &dest_id, &name, &tmp, "compress").await;
+    let result = store_new_file(&st, &user, &dest_id, &name, &tmp, "compress", &roots).await;
     let _ = tokio::fs::remove_file(&tmp).await;
     result.map(|(id, name)| Outcome::node(id, name))
 }
 
 /// Stores a finished temporary file as a new file in `folder_id` (numbered if the name is taken), like an upload
 /// (content.rs). Returns its id and name
-async fn store_new_file(st: &AppState, user: &User, folder_id: &str, name: &str, tmp: &std::path::Path, action: &str) -> AppResult<(String, String)> {
+async fn store_new_file(
+    st: &AppState,
+    user: &User,
+    folder_id: &str,
+    name: &str,
+    tmp: &std::path::Path,
+    action: &str,
+    reads: &[Node],
+) -> AppResult<(String, String)> {
     let folder = tree::folder_for(&mut *st.db.acquire().await?, user, folder_id, Need::Add).await?;
     let size = tokio::fs::metadata(tmp).await?.len();
     // Checked first, so a file that can't fit isn't stored at all
@@ -291,6 +303,10 @@ async fn store_new_file(st: &AppState, user: &User, folder_id: &str, name: &str,
     let result = async {
         turn.ready()?;
         let mut tx = crate::db::begin_write(&st.db).await?;
+        for before in reads {
+            let node = tree::node_for(&mut tx, user, &before.id, Need::Read).await?;
+            tree::require_subtree(&mut tx, user, &node, Need::Read).await?;
+        }
         let folder = tree::folder_for(&mut tx, user, folder_id, Need::Add).await?;
         staged.check(&folder)?;
         tree::check_quota(&mut tx, folder.drive(), size as i64).await?;

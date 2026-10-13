@@ -16,6 +16,9 @@ use axum::{
 #[path = "regressions_limits.rs"]
 mod regressions_limits;
 
+#[path = "restricted_regressions.rs"]
+mod restricted_regressions;
+
 struct Server {
     env: testutil::TestEnv,
     client: Client,

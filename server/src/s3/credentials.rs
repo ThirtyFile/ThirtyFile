@@ -51,6 +51,11 @@ pub struct Identity {
 
 /// Administrators can publish team spaces even without a membership grant; personal spaces never become buckets.
 pub async fn publisher(conn: &mut SqliteConnection, user: &User, node_id: &str, managers: bool) -> AppResult<Node> {
+    let current = auth::current_user(conn, user).await?;
+    let user = &current;
+    if user.guest {
+        return Err(AppError::forbidden("Guests can't publish protocol folders"));
+    }
     let node = tree::get_node(conn, node_id).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
     let drive = tree::get_drive(conn, node.drive()).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
     if !node.is_folder() || drive.kind == SpaceKind::Personal || drive.disabled || drive.link_makers == LinkMakers::Nobody {

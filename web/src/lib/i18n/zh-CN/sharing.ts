@@ -56,8 +56,6 @@ export default {
   "Members of “{name}”": "“{name}”的成员",
   "Share “{name}”": "共享“{name}”",
   "Manage access": "管理访问权限",
-  "Members can access all files in this space.": "成员可以访问这个空间中的所有文件。",
-  "People you share with can access this item (for a folder, everything in it). It appears in their Shared with me.": "被共享的人可以访问这个项目（文件夹则包括其中的所有内容），它会出现在对方的“与我共享”中。",
   "A personal space can't be shared as a whole. Right-click a folder in it and choose Share with….": "个人空间无法整体共享。请右键单击其中的文件夹，选择“共享给…”。",
   "short::Expiration": "有效期",
   "{role}: {hint}": "{role}：{hint}",
