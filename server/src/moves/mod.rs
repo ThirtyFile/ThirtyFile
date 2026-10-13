@@ -711,6 +711,7 @@ pub async fn cancel(State(st): State<AppState>, Admin(user): Admin, Path(id): Pa
         .await;
         crate::db::settle(tx, res).await?;
     }
+    drop(_actor_lock);
     remove_copies(&st, &job).await?;
     Ok(Json(json!({ "ok": true })))
 }
