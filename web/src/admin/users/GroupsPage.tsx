@@ -186,6 +186,7 @@ function GroupDialog({ group, onClose }: { group: Group | null; onClose(): void 
                     }}
                   />
                   {u.username}
+                  {u.guest && <span className="text-xs text-muted-foreground">{t("Guest")}</span>}
                   {u.disabled && <span className="text-xs text-muted-foreground">{t("(disabled)")}</span>}
                 </label>
               ))}

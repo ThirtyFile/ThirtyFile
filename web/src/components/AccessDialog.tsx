@@ -16,6 +16,7 @@ import { useMe } from "@/lib/session";
 import { cn, formatDate } from "@/lib/utils";
 import { t, tServer, tc } from "@/lib/i18n";
 import { NativeSelect } from "@/components/ui/native-select";
+import { GrantExpiry } from "@/components/GrantExpiry";
 
 const PRINCIPAL_ICON = { user: UserIcon, group: UsersIcon, everyone: GlobeIcon } as const;
 
@@ -54,7 +55,7 @@ function PrincipalPicker(props: { value: Principal | null; onChange(p: Principal
   const results = useQuery({ queryKey: keys.directory(debounced), queryFn: () => api.directory(debounced), enabled: open });
   const options: Principal[] = [
     ...(props.allowEveryone && t("Everyone").toLowerCase().includes(q.trim().toLowerCase())
-      ? [{ principal_type: "everyone" as const, principal_id: 0, name: t("Everyone"), detail: t("All users") }]
+      ? [{ guest: false, principal_type: "everyone" as const, principal_id: 0, name: t("Everyone"), detail: t("All users") }]
       : []),
     ...(results.data ?? []),
   ];
@@ -152,6 +153,7 @@ function PrincipalPicker(props: { value: Principal | null; onChange(p: Principal
                 {/* The whole name, on two lines if it must: a cut-off name can't tell similar ones apart */}
                 <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{o.name}</span>
                 <span className="shrink-0 text-xs text-muted-foreground">{o.principal_type === "group" ? `${t("Groups")} · ${tServer(o.detail)}` : roleDetail(o.detail)}</span>
+                {o.guest && o.principal_type === "group" && <span className="text-xs text-muted-foreground">{t("Includes guests")}</span>}
               </div>
             );
           })}
@@ -160,11 +162,21 @@ function PrincipalPicker(props: { value: Principal | null; onChange(p: Principal
   );
 }
 
-function GrantRow(props: { g: Grant; editable: boolean; roles: Role[]; onRole?(r: Role): void; onRemove?(): void; removeLabel?: string }) {
+function GrantRow(props: {
+  g: Grant;
+  editable: boolean;
+  roles: Role[];
+  onRole?(r: Role): void;
+  onExpiry?(expiry: number | null): void;
+  pending?: boolean;
+  maxDays?: number;
+  onRemove?(): void;
+  removeLabel?: string;
+}) {
   const { g } = props;
   const Icon = PRINCIPAL_ICON[g.principal_type];
   return (
-    <div className="flex items-center gap-2.5 py-2">
+    <div className="flex flex-wrap items-center gap-2.5 py-2">
       <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted">
         <Icon className="size-4 text-muted-foreground" />
       </span>
@@ -172,6 +184,7 @@ function GrantRow(props: { g: Grant; editable: boolean; roles: Role[]; onRole?(r
         <div className="truncate text-sm">
           {principalName(g)}
           {g.principal_type === "group" && <span className="ml-1.5 text-xs text-muted-foreground">{t("Groups")}</span>}
+          {g.guest && <span className="ml-1.5 text-xs text-muted-foreground">{g.principal_type === "group" ? t("Includes guests") : t("Guest")}</span>}
         </div>
         <div className="truncate text-xs text-muted-foreground">
           {g.inherited_from ? t("Inherited from “{name}”", { name: g.inherited_from }) : g.granted_by_name ? t("Granted by {name}", { name: g.granted_by_name }) : t("System default")}
@@ -193,6 +206,9 @@ function GrantRow(props: { g: Grant; editable: boolean; roles: Role[]; onRole?(r
         <Button size="icon-sm" variant="ghost" title={props.removeLabel ?? t("Remove")} aria-label={props.removeLabel ?? t("Remove")} onClick={props.onRemove}>
           <XIcon />
         </Button>
+      )}
+      {props.editable && props.onExpiry && (
+        <GrantExpiry key={`${g.id}-${g.expires_at}`} expiry={g.expires_at} guest={g.guest} maxDays={props.maxDays ?? 90} pending={!!props.pending} onSave={props.onExpiry} />
       )}
     </div>
   );
@@ -307,6 +323,12 @@ export function AccessDialog({ nodeId, onClose }: { nodeId: string; onClose(): v
   const info = q.data;
   const personalRoot = info?.drive.kind === "personal" && info.is_drive_root;
   const roles: Role[] = info?.is_drive_root && info.drive.kind === "team" ? ["viewer", "contributor", "editor", "manager", "owner"] : ["viewer", "contributor", "editor", "manager"];
+  const guestRoles = roles.filter((r) => !atLeast(r, "manager"));
+  const effectiveRole = principal?.guest && atLeast(role, "manager") ? "editor" : role;
+  const maxDays = info?.guest_max_days ?? 90;
+  const effectiveDays = principal?.guest ? Math.min(days || 7, maxDays) : days;
+  const expiryOptions = EXPIRY.filter((x) => !principal?.guest || (x.days > 0 && x.days <= maxDays));
+  if (principal?.guest && !expiryOptions.some((x) => x.days === maxDays)) expiryOptions.push({ label: t("{n} day|{n} days", { n: maxDays }), days: maxDays });
   const title = info ? (info.is_drive_root ? t("Members of “{name}”", { name: info.drive.name }) : t("Share “{name}”", { name: info.node.name })) : t("Manage access");
 
   return (
@@ -346,23 +368,23 @@ export function AccessDialog({ nodeId, onClose }: { nodeId: string; onClose(): v
                   add.mutate({
                     principal_type: principal.principal_type,
                     principal_id: principal.principal_id,
-                    role,
-                    expires_at: days ? Math.floor(Date.now() / 1000) + days * 86400 : null,
+                    role: effectiveRole,
+                    expires_at: effectiveDays ? Math.floor(Date.now() / 1000) + effectiveDays * 86400 : null,
                   });
                 }}
               >
                 {/* On a phone, the person or group on a line of its own */}
                 <div className="flex flex-wrap items-start gap-2 sm:flex-nowrap">
-                  <PrincipalPicker value={principal} onChange={setPrincipal} allowEveryone={info.drive.kind !== "personal"} />
-                  <NativeSelect size="sm" value={role} onChange={(e) => setRole(e.target.value as Role)} aria-label={t("Role")}>
-                    {roles.map((r) => (
+                  <PrincipalPicker value={principal} onChange={setPrincipal} allowEveryone={info.drive.kind !== "personal" && (!info.share_own_groups || me.role === "admin")} />
+                  <NativeSelect size="sm" value={effectiveRole} onChange={(e) => setRole(e.target.value as Role)} aria-label={t("Role")}>
+                    {(principal?.guest ? guestRoles : roles).map((r) => (
                       <option key={r} value={r}>
                         {ROLE_LABEL[r]}
                       </option>
                     ))}
                   </NativeSelect>
-                  <NativeSelect size="sm" value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label={tc("short", "Expiration")}>
-                    {EXPIRY.map((x) => (
+                  <NativeSelect size="sm" value={effectiveDays} onChange={(e) => setDays(Number(e.target.value))} aria-label={tc("short", "Expiration")}>
+                    {expiryOptions.map((x) => (
                       <option key={x.days} value={x.days}>
                         {x.label}
                       </option>
@@ -373,7 +395,13 @@ export function AccessDialog({ nodeId, onClose }: { nodeId: string; onClose(): v
                     {t("Add")}
                   </Button>
                 </div>
-                <p className="text-xs text-muted-foreground">{t("{role}: {hint}", { role: ROLE_LABEL[role], hint: ROLE_HINT[role] })}</p>
+                <p className="text-xs text-muted-foreground">{t("{role}: {hint}", { role: ROLE_LABEL[effectiveRole], hint: ROLE_HINT[effectiveRole] })}</p>
+                {principal?.guest && (
+                  <p className="text-xs text-muted-foreground">{t("Guest access requires an end date within {n} days, including for groups with guests.", { n: maxDays })}</p>
+                )}
+                {info.share_own_groups && me.role !== "admin" && (
+                  <p className="text-xs text-muted-foreground">{t("New and changed access can only be given within your current groups. Existing grants are kept.")}</p>
+                )}
                 <ErrorText>{add.error?.message}</ErrorText>
               </form>
             )}
@@ -387,9 +415,12 @@ export function AccessDialog({ nodeId, onClose }: { nodeId: string; onClose(): v
                     <GrantRow
                       key={g.id}
                       g={g}
-                      roles={roles}
+                      roles={g.guest ? guestRoles : roles}
                       editable={info.can_manage}
                       onRole={(r) => add.mutate({ principal_type: g.principal_type, principal_id: g.principal_id, role: r, expires_at: g.expires_at })}
+                      onExpiry={(expiry) => add.mutate({ principal_type: g.principal_type, principal_id: g.principal_id, role: g.role, expires_at: expiry })}
+                      maxDays={maxDays}
+                      pending={add.isPending}
                       onRemove={info.can_manage || canLeave ? () => confirmRemove(g, self) : undefined}
                       removeLabel={canLeave && !info.can_manage ? t("Leave") : t("Remove")}
                     />

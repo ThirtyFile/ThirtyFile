@@ -37,6 +37,7 @@ pub async fn create_folder(State(st): State<AppState>, user: User, Json(req): Js
     let locks = fsops::lock_seen(&st, &user, &[&req.parent_id]).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
+    let user = crate::auth::current_user(&mut tx, &user).await?;
     let parent = tree::folder_for(&mut tx, &user, &req.parent_id, Need::Add).await?;
     locks.check(&parent)?;
     if tree::name_taken(&mut tx, &parent.id, &name).await? {
@@ -63,6 +64,7 @@ pub async fn rename(State(st): State<AppState>, user: User, Path(id): Path<Strin
     let locks = fsops::lock_seen(&st, &user, &[&id]).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
+    let user = crate::auth::current_user(&mut tx, &user).await?;
     let node = tree::node_for(&mut tx, &user, &id, Need::Write).await?;
     locks.check(&node)?;
     let parent = node.parent_id.clone().ok_or_else(|| AppError::bad_request("The root folder of a space can't be renamed"))?;
@@ -217,6 +219,7 @@ pub async fn move_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
     let locks = fsops::lock_seen(&st, &user, &locked_ids(req.dest()?, &ids)).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
+    let user = crate::auth::current_user(&mut tx, &user).await?;
     let dest = tree::folder_for(&mut tx, &user, req.dest()?, Need::Add).await?;
     locks.check(&dest)?;
     // Moves between spaces that involve a folder space copy content: done after this transaction, item by item
@@ -344,6 +347,7 @@ pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
     let locks = fsops::lock_seen(&st, &user, &locked_ids(req.dest()?, &ids)).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
+    let user = crate::auth::current_user(&mut tx, &user).await?;
     let dest = tree::folder_for(&mut tx, &user, req.dest()?, Need::Add).await?;
     locks.check(&dest)?;
     let named = copy_name(req, &ids, &dest)?;
@@ -455,8 +459,9 @@ async fn trash_ids(st: &AppState, user: &User, ids: &[String], empty_only: bool)
     let locks = fsops::lock_seen(st, user, &ids.iter().map(String::as_str).collect::<Vec<_>>()).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
+    let user = crate::auth::current_user(&mut tx, &user).await?;
     for id in &outermost(&mut tx, ids).await? {
-        let node = tree::node_for(&mut tx, user, id, Need::Delete).await?;
+        let node = tree::node_for(&mut tx, &user, id, Need::Delete).await?;
         locks.check(&node)?;
         if empty_only {
             if !node.is_folder() {
@@ -469,7 +474,7 @@ async fn trash_ids(st: &AppState, user: &User, ids: &[String], empty_only: bool)
             }
             empty_on_disk(&node).await?;
         }
-        trash_one(&mut tx, user, &locks, &node, "").await?;
+        trash_one(&mut tx, &user, &locks, &node, "").await?;
         if empty_only && node.in_folder_space() {
             // If an external writer added something during the rename, roll the transaction and disk move back.
             let moved = tree::get_node(&mut tx, &node.id).await?.ok_or_else(|| AppError::not_found("Item not found"))?;

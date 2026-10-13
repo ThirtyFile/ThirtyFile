@@ -85,6 +85,7 @@
             <li><a href="#email">Notification emails</a></li>
             <li><a href="#privacy">What administrators can see</a></li>
             <li><a href="#password">Forgotten passwords</a></li>
+            <li><a href="#guests">Guest accounts</a></li>
           </ol>
         </details>
         <h2 id="users">Users</h2>
@@ -163,6 +164,9 @@
         <p>Otherwise, or for accounts without an email address, an administrator sets a new password under <strong>Control panel › Users</strong>. If the administrator's own password is lost, see <a href="help.html#password">Troubleshooting</a>.</p>
       <p><strong>Control panel › S3 buckets</strong> lists published folders and their creators, Access Keys, end dates and last use. Filter the list, stop or delete a bucket, and revoke individual keys. Files remain in their folders. See <a href="protocols.html#s3">S3 setup</a>.</p>
         <p><strong>Control panel › FTP receive folders</strong> manages device credentials, their published folder, listing/download permissions and end dates. Password rotation ends existing sessions. Guest accounts cannot create publications; device credentials cannot sign in to the website. See <a href="protocols.html#ftp">FTP receive folders</a>.</p>
+        <h2 id="guests">Guest accounts</h2>
+        <p>In <strong>Control panel › Users</strong>, choose <strong>Guest</strong> as the account type for an external collaborator. A guest can use only folders and spaces explicitly shared with them, directly or through a group. Membership in <strong>Everyone</strong> does not give a guest access. Guests have no <strong>My files</strong>, cannot create spaces, share links or give other people access, and cannot be administrators, managers or owners. WebDAV and SFTP app passwords still work within the same shared folders.</p><p>To change an existing account to Guest, review the conversion preview and confirm your own identity. Personal files are kept but become inaccessible to that guest. Existing share links and protocol publications stop working. The preview lists direct grants whose roles or end dates will change. Transfer ownership of team spaces first. A group with Manager or Owner access, no end date, or an end date beyond the guest limit must be corrected before conversion or before a guest joins it; other group members are never silently changed. Changing back to a standard account restores access to its preserved personal files, but does not undo the direct grant changes.</p>
+
         <nav class="next" aria-label="More guides">
           <a href="protocols.html"><span>Previous</span>SFTP, S3 and FTP</a>
           <a class="forward" href="sign-in.html"><span>Next</span>Single sign-on</a>

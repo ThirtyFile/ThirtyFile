@@ -420,3 +420,62 @@ async fn optional_listener_does_not_bind_until_enabled_and_retries_a_conflicting
     .unwrap();
     server.finish().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_open_sftp_session_loses_personal_access_on_guest_conversion_but_can_use_explicit_shares() {
+    let env = testutil::env().await;
+    let admin = env.admin().await;
+    let amy = env.user("amy", true).await;
+    let shared = env.folder(&admin, admin.root(), "Client").await;
+    env.grant(&shared, &amy, "editor").await;
+    sqlx::query("UPDATE grants SET expires_at=? WHERE node_id=? AND principal_type='user' AND principal_id=?")
+        .bind(now() + 86400)
+        .bind(&shared)
+        .bind(amy.id)
+        .execute(&env.st.db)
+        .await
+        .unwrap();
+    let token = token(&env, &amy, "write").await;
+    let server = on(&env).await;
+    let (ssh, sftp) = client(&env, &amy, &token).await;
+    let mut original = sftp.create("/My files/kept.txt").await.unwrap();
+    original.write_all(b"original").await.unwrap();
+    original.shutdown().await.unwrap();
+    let mut replacement = sftp.create("/My files/kept.txt").await.unwrap();
+    replacement.write_all(b"replacement").await.unwrap();
+    replacement.flush().await.unwrap();
+    let preview = crate::guests::preview_in(&mut env.st.db.acquire().await.unwrap(), amy.id).await.unwrap();
+    let _ = crate::admin::update(
+        axum::extract::State(env.st.clone()),
+        crate::auth::Admin(admin),
+        axum::extract::Path(amy.id),
+        axum::Json(
+            serde_json::from_value(serde_json::json!({"guest":true,"confirm_guest":true,"guest_revision":preview.revision,"my_password":testutil::password()}))
+                .unwrap(),
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(replacement.shutdown().await.is_err());
+    assert!(sftp.open("/My files/kept.txt").await.is_err());
+    let entries = sftp.read_dir("/").await.unwrap();
+    assert!(!entries.into_iter().any(|entry| entry.file_name() == "My files" || entry.file_name() == "All files"));
+    let mut upload = sftp.create("/Shared with me/Client/guest.txt").await.unwrap();
+    upload.write_all(b"guest content").await.unwrap();
+    upload.shutdown().await.unwrap();
+    assert!(sftp.open("/Shared with me/Client/guest.txt").await.is_ok());
+    sqlx::query("UPDATE grants SET expires_at=? WHERE node_id=? AND principal_type='user' AND principal_id=?")
+        .bind(now() - 1)
+        .bind(&shared)
+        .bind(amy.id)
+        .execute(&env.st.db)
+        .await
+        .unwrap();
+    assert!(sftp.open("/Shared with me/Client/guest.txt").await.is_err());
+    sqlx::query("UPDATE users SET guest=0 WHERE id=?").bind(amy.id).execute(&env.st.db).await.unwrap();
+    let kept = crate::access::item(&env.st, &amy, &["My files".into(), "kept.txt".into()]).await.unwrap();
+    assert_eq!(crate::access::read_at(&env.st, &amy, &kept.id, 0, 64).await.unwrap(), b"original");
+    sftp.close().await.unwrap();
+    ssh.disconnect(russh::Disconnect::ByApplication, "Test complete", "en").await.unwrap();
+    server.finish().await;
+}

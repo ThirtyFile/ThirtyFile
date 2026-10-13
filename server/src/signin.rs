@@ -54,16 +54,17 @@ pub struct Me {
 }
 
 async fn me_of(st: &AppState, user: User, headers: &HeaderMap) -> AppResult<Me> {
-    let used_bytes = tree::used_bytes(&st.db, user.id).await?;
+    let used_bytes = if user.guest { 0 } else { tree::used_bytes(&st.db, user.id).await? };
     let (personal_pending,): (bool,) =
         sqlx::query_as("SELECT personal_pending IS NOT NULL FROM users WHERE id = ?").bind(user.id).fetch_optional(&st.db).await?.unwrap_or((false,));
     let (can_create_drive, public_url, min_password_length, version_keep) = {
         let s = st.system.read();
-        (user.is_admin() || s.allow_user_drives, s.public_url.clone(), s.min_password_length, s.version_keep)
+        (!user.guest && (user.is_admin() || s.allow_user_drives), s.public_url.clone(), s.min_password_length, s.version_keep)
     };
     let share_policy = crate::shares::policy(st);
     let lang = crate::i18n::me_lang(st, user.id, headers).await?;
     let style = crate::style::saved(st, user.id).await?;
+    let personal_pending = !user.guest && personal_pending;
     Ok(Me {
         user,
         used_bytes,

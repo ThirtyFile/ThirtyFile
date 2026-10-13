@@ -254,6 +254,7 @@ fn admin_api() -> Router<AppState> {
     Router::new()
         .route("/admin/users", get(admin::list).post(admin::create))
         .route("/admin/users/{id}", patch(admin::update).delete(admin::delete))
+        .route("/admin/users/{id}/guest-conversion", get(crate::guests::preview))
         .route("/admin/users/{id}/sessions", get(sessions::admin_list).delete(sessions::admin_sign_out_all))
         .route("/admin/users/{id}/sessions/{session}", delete(sessions::admin_sign_out))
         .route("/admin/users/{id}/2fa", delete(twofactor::admin_reset))

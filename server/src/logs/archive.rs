@@ -76,6 +76,7 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
     {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
+        crate::auth::require_admin(&mut tx, &user).await?;
         set_setting(&mut tx, "log_settings", &serde_json::to_string(&s).unwrap()).await?;
         let days = |d: i64| if d == 0 { "never cleaned up".to_string() } else { plural(d, "day", "days") };
         let detail = format!(
@@ -100,6 +101,7 @@ pub async fn archive_now(State(st): State<AppState>, Admin(user): Admin) -> AppR
     {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
+        crate::auth::require_admin(&mut tx, &user).await?;
         record_activity(&mut tx, &user, None, "log_archive", &summary.describe()).await?;
         tx.commit().await?;
     }
@@ -137,6 +139,7 @@ pub async fn download_archive(State(st): State<AppState>, _: Admin, Path(id): Pa
 pub async fn delete_archive(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<i64>) -> AppResult<Json<Value>> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
+    crate::auth::require_admin(&mut tx, &user).await?;
     let (file, rows): (String, i64) = sqlx::query_as("SELECT file, rows FROM log_archives WHERE id = ?")
         .bind(id)
         .fetch_optional(&mut *tx)
