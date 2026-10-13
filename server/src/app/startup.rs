@@ -253,7 +253,7 @@ impl Server {
         let listener = tokio::net::TcpListener::bind(&self.addr).await?;
         tracing::info!("ThirtyFile started: http://{}", self.addr);
         serve(listener, app).await?;
-        self.sftp.stop();
+        self.sftp.finish().await;
         // Background loops end, giving back the connections they hold
         crate::util::stop_background();
         // Sign-in and share access events still queued are written before exiting

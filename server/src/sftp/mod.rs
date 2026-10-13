@@ -51,7 +51,7 @@ impl Drop for Permit {
 #[derive(Clone)]
 enum Login {
     Password { username: String, token: String },
-    Key { username: String, fingerprint: String },
+    Key { username: String, key_id: String },
 }
 
 impl Login {
@@ -64,17 +64,30 @@ impl Login {
                 let mut req = Request::builder().method(if write { Method::PUT } else { Method::GET }).body(()).map_err(AppError::internal)?;
                 req.extensions_mut().insert(ConnectInfo(peer));
                 let (parts, _) = req.into_parts();
-                app_passwords::authenticate(&parts, st, Credential::Basic { username: username.clone(), token: token.clone() }).await?
+                let mut user = app_passwords::authenticate(&parts, st, Credential::Basic { username: username.clone(), token: token.clone() }).await?;
+                let id = token
+                    .strip_prefix(app_passwords::PREFIX)
+                    .and_then(|value| value.split_once('_'))
+                    .map(|(id, _)| id.to_string())
+                    .ok_or_else(AppError::unauthorized)?;
+                user.sftp_credential = Some(auth::sftp::SftpCredential::AppPassword(id));
+                user
             }
-            Self::Key { username, fingerprint } => {
+            Self::Key { username, key_id } => {
                 if !settings::flag(st, "sftp_keys_enabled").await? {
                     return Err(AppError::unauthorized());
                 }
-                let row: Option<(i64, String)> = sqlx::query_as("SELECT u.id, k.id FROM sftp_keys k JOIN users u ON u.id = k.user_id WHERE u.username = ? COLLATE NOCASE AND k.fingerprint = ? AND u.disabled = 0")
-                    .bind(username).bind(fingerprint).fetch_optional(&st.db).await?;
+                let row: Option<(i64, String)> = sqlx::query_as(
+                    "SELECT u.id, k.id FROM sftp_keys k JOIN users u ON u.id = k.user_id WHERE u.username = ? COLLATE NOCASE AND k.id = ? AND u.disabled = 0",
+                )
+                .bind(username)
+                .bind(key_id)
+                .fetch_optional(&st.db)
+                .await?;
                 let (user_id, id) = row.ok_or_else(AppError::unauthorized)?;
                 let mut c = st.db.acquire().await?;
-                let user = auth::user_by_id(st, &mut c, user_id).await?.ok_or_else(AppError::unauthorized)?;
+                let mut user = auth::user_by_id(st, &mut c, user_id).await?.ok_or_else(AppError::unauthorized)?;
+                user.sftp_credential = Some(auth::sftp::SftpCredential::Key(id.clone()));
                 drop(c);
                 sqlx::query("UPDATE sftp_keys SET last_used_at = ? WHERE id = ? AND (last_used_at IS NULL OR last_used_at < ?)")
                     .bind(crate::util::now())
@@ -92,11 +105,19 @@ impl Login {
 
 pub struct Listener {
     stop: tokio::sync::watch::Sender<bool>,
-    _task: tokio::task::JoinHandle<()>,
+    task: Option<tokio::task::JoinHandle<()>>,
 }
 impl Listener {
     pub fn stop(&self) {
         let _ = self.stop.send(true);
+    }
+    pub async fn finish(mut self) {
+        self.stop();
+        if let Some(mut task) = self.task.take()
+            && tokio::time::timeout(Duration::from_secs(3), &mut task).await.is_err()
+        {
+            task.abort();
+        }
     }
 }
 impl Drop for Listener {
@@ -155,7 +176,7 @@ pub async fn start(st: AppState, address: &str) -> Result<Listener, Box<dyn std:
         // Signal every connection, then give it time to send SSH disconnect and release staged files.
         while tokio::time::timeout(Duration::from_secs(2), tasks.join_next()).await.is_ok_and(|r| r.is_some()) {}
     });
-    Ok(Listener { stop, _task })
+    Ok(Listener { stop, task: Some(_task) })
 }
 
 async fn serve_connection(
@@ -221,11 +242,23 @@ impl russh::server::Handler for Connection {
     }
     async fn auth_publickey(&mut self, username: &str, public: &PublicKey) -> Result<Auth, Self::Error> {
         let ip = self.peer.ip().to_string();
-        let key = format!("app:{}", auth::limit_key_ip(&ip));
+        let key = format!("ip:{}", auth::limit_key_ip(&ip));
         if auth::attempts_exhausted(&self.st, &key, auth::IP_FAIL_LIMIT) {
             return Ok(Auth::Reject { proceed_with_methods: None, partial_success: false });
         }
-        let answer = self.accept(Login::Key { username: username.to_string(), fingerprint: public.fingerprint(HashAlg::Sha256).to_string() }).await;
+        let key_id: Option<(String,)> = sqlx::query_as(
+            "SELECT k.id FROM sftp_keys k JOIN users u ON u.id = k.user_id WHERE u.username = ? COLLATE NOCASE AND k.fingerprint = ? AND u.disabled = 0",
+        )
+        .bind(username)
+        .bind(public.fingerprint(HashAlg::Sha256).to_string())
+        .fetch_optional(&self.st.db)
+        .await
+        .unwrap_or(None);
+        let answer = if let Some((key_id,)) = key_id {
+            self.accept(Login::Key { username: username.to_string(), key_id }).await
+        } else {
+            Auth::Reject { proceed_with_methods: None, partial_success: false }
+        };
         if !matches!(answer, Auth::Accept) {
             auth::begin_attempt(&self.st, &key, auth::IP_FAIL_LIMIT);
         }

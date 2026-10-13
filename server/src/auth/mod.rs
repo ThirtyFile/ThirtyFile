@@ -12,6 +12,7 @@ use crate::{
 };
 
 pub mod app_passwords;
+pub mod sftp;
 
 pub const SESSION_COOKIE: &str = "tf_session";
 pub(crate) const SESSION_TTL: i64 = 30 * 24 * 3600;
@@ -164,6 +165,9 @@ pub struct User {
     #[sqlx(skip)]
     #[serde(skip)]
     pub protocol_key: Option<String>,
+    #[sqlx(skip)]
+    #[serde(skip)]
+    pub sftp_credential: Option<sftp::SftpCredential>,
 }
 
 impl User {

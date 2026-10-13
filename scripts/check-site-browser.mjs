@@ -71,7 +71,7 @@ try {
       assert.ok(await page.locator("main h1").isVisible());
       assert.equal(await page.locator("vite-error-overlay, nextjs-portal").count(), 0);
       if (inner.startsWith("docs/")) {
-        assert.equal(await page.locator(".docs-nav a").count(), 16);
+        assert.equal(await page.locator(".docs-nav a").count(), pages.filter((path) => path.startsWith("docs/")).length);
         const sections = await page.locator("main h2[id]").count();
         assert.equal(await page.locator(".guide-toc").count(), sections >= 4 ? 1 : 0, `${language}/${inner}: section navigation`);
         assert.equal(await page.locator("nav.next").count(), 1);

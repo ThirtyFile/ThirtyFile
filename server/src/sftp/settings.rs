@@ -48,7 +48,7 @@ pub async fn update(State(st): State<AppState>, Admin(user): Admin, Json(req): J
             .execute(&mut *tx)
             .await?;
     }
-    crate::logs::record_activity(&mut tx, &user, None, "settings", &format!("SFTP: {}; SSH keys: {}", req.enabled, req.keys_enabled)).await?;
+    crate::logs::record_activity(&mut tx, &user, None, "settings", "Updated SFTP settings").await?;
     tx.commit().await?;
     drop(_w);
     get(State(st), Admin(user)).await

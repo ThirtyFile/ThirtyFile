@@ -111,7 +111,7 @@ async fn find(st: &AppState, token: &str) -> AppResult<Option<Found>> {
 pub async fn authenticate(parts: &Parts, st: &AppState, credential: Credential) -> AppResult<User> {
     let ip = parts.extensions.get::<ConnectInfo<SocketAddr>>().map(|c| client_ip(st, c.0, &parts.headers)).unwrap_or_default();
     // Guessing is limited like signing in: failures per address, the same window and limit as wrong passwords
-    let key = format!("app:{}", limit_key_ip(&ip));
+    let key = format!("ip:{}", limit_key_ip(&ip));
     if auth::attempts_exhausted(st, &key, auth::IP_FAIL_LIMIT) {
         return Err(AppError::new(StatusCode::TOO_MANY_REQUESTS, "Too many failed sign-in attempts. Try again in 15 minutes."));
     }

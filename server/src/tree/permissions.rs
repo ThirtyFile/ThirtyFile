@@ -124,6 +124,9 @@ pub fn is_own(user: &User, node: &Node) -> bool {
 /// their account's permissions let them. A folder they made moves or goes to the trash only while everything in it is
 /// theirs too, since that goes with it.
 pub async fn allows_on(conn: &mut SqliteConnection, user: &User, role: Role, need: Need, node: &Node) -> AppResult<()> {
+    let current = crate::auth::sftp::current_user(conn, user, need != Need::Read).await?;
+    let user = current.as_ref().unwrap_or(user);
+    let role = if current.is_some() { live_role_on(conn, user, node).await?.ok_or_else(|| AppError::not_found("Item not found"))? } else { role };
     let refused = match allows(user, role, need) {
         Ok(()) => return Ok(()),
         Err(e) => e,

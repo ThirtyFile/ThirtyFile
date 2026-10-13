@@ -1,5 +1,7 @@
 /** SFTP settings, keys and verified protocol activity. */
 export default {
+  "The folder isn't empty": "文件夹不是空的",
+  "Updated SFTP settings": "已更新 SFTP 设置",
   "SFTP keys": "SFTP 密钥",
   "SSH key added": "已添加 SSH 密钥",
   "SSH key removed": "已移除 SSH 密钥",

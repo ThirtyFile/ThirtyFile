@@ -1,5 +1,7 @@
 /** SFTP settings, keys and verified protocol activity. */
 export default {
+  "The folder isn't empty": "フォルダーは空ではありません",
+  "Updated SFTP settings": "SFTP 設定を更新しました",
   "SFTP keys": "SFTP キー",
   "SSH key added": "SSH キーを追加しました",
   "SSH key removed": "SSH キーを削除しました",
