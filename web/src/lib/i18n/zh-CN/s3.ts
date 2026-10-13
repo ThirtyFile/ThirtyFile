@@ -4,7 +4,6 @@ export default {
   "Save the Secret Key now. It is shown only once.": "请立即保存 Secret Key，它只会显示一次。",
   "Copy credentials": "复制凭据",
   "Key description": "密钥说明",
-  "Read and write": "读取和写入",
   "Leave unchecked for read-only access. Read-only spaces accept read-only keys only.": "不勾选即为只读。只读空间只能使用只读密钥。",
   "End date (optional)": "到期日（可选）",
   "Create key": "创建密钥",

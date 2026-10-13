@@ -74,7 +74,8 @@ async fn two_browser_requests_for_the_last_key_slot_create_exactly_one_key() {
             .header("origin", "http://app.example.com")
             .header("user-agent", "S3 key limit regression")
             .header("cookie", &cookie)
-            .json(&serde_json::json!({ "description": format!("Existing key {index}"), "writable": true, "expires_at": null }))
+            .header("content-type", "application/json")
+            .body(serde_json::json!({ "description": format!("Existing key {index}"), "writable": true, "expires_at": null }).to_string())
             .send()
             .await
             .unwrap();
@@ -95,12 +96,13 @@ async fn two_browser_requests_for_the_last_key_slot_create_exactly_one_key() {
                 .header("origin", "http://app.example.com")
                 .header("user-agent", "S3 key limit regression")
                 .header("cookie", cookie)
-                .json(&serde_json::json!({ "description": description, "writable": true, "expires_at": null }))
+                .header("content-type", "application/json")
+                .body(serde_json::json!({ "description": description, "writable": true, "expires_at": null }).to_string())
                 .send()
                 .await
                 .unwrap();
             let status = response.status();
-            let body: serde_json::Value = response.json().await.unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&response.bytes().await.unwrap()).unwrap();
             (status, body)
         })
     };

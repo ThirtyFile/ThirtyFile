@@ -4,7 +4,6 @@ export default {
   "Save the Secret Key now. It is shown only once.": "Secret Key を今保存してください。表示されるのは一度だけです。",
   "Copy credentials": "認証情報をコピー",
   "Key description": "キーの説明",
-  "Read and write": "読み書き",
   "Leave unchecked for read-only access. Read-only spaces accept read-only keys only.": "チェックしない場合は読み取り専用です。読み取り専用のスペースでは読み取り専用キーだけを作成できます。",
   "End date (optional)": "有効期限（任意）",
   "Create key": "キーを作成",

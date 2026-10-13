@@ -408,6 +408,43 @@ async fn cancelling_a_partial_body_removes_its_owned_temporary_file() {
 }
 
 #[tokio::test]
+async fn verified_slow_uploads_release_only_their_own_sign_in_budget_reservation() {
+    use tokio::io::AsyncWriteExt;
+    let s = server(false).await;
+    let rate = format!("ip:{}", crate::auth::limit_key_ip("127.0.0.1"));
+    for _ in 0..29 {
+        assert!(crate::auth::begin_attempt(&s.env.st, &rate, crate::auth::IP_FAIL_LIMIT));
+    }
+    let signed =
+        s.client.put_object().bucket("backups").key("slow.bin").presigned(PresigningConfig::expires_in(std::time::Duration::from_secs(300)).unwrap()).await.unwrap();
+    let uri: axum::http::Uri = signed.uri().parse().unwrap();
+    let mut stream = tokio::net::TcpStream::connect(uri.authority().unwrap().as_str()).await.unwrap();
+    stream
+        .write_all(format!("PUT {} HTTP/1.1\r\nHost: {}\r\nContent-Length: 1024\r\n\r\nx", uri.path_and_query().unwrap(), uri.authority().unwrap()).as_bytes())
+        .await
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            if std::fs::read_dir(s.env.st.tmp_dir()).unwrap().flatten().any(|f| f.file_name().to_string_lossy().starts_with("s3-receive-")) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    for _ in 0..30 {
+        s.client.head_bucket().bucket("backups").send().await.unwrap();
+    }
+    assert!(!crate::auth::attempts_exhausted(&s.env.st, &rate, 30));
+    assert!(crate::auth::attempts_exhausted(&s.env.st, &rate, 29), "valid requests must preserve earlier failures");
+    let bad = client(&s.endpoint, &s.key.key.access_key, "incorrect-secret");
+    assert!(bad.head_bucket().bucket("backups").send().await.is_err());
+    assert!(crate::auth::attempts_exhausted(&s.env.st, &rate, 30));
+    drop(stream);
+}
+
+#[tokio::test]
 async fn revoked_credentials_and_case_only_creation_are_rechecked_at_file_commit() {
     let s = server(true).await;
     let identity = super::credentials::identity(&s.env.st, &s.key.key.access_key, true).await.unwrap();

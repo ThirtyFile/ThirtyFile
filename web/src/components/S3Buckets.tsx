@@ -78,7 +78,7 @@ function KeyForm({ bucket, close }: { bucket: S3Bucket; close(): void }) {
             </Label>
             <Label className="flex items-center gap-2">
               <input type="checkbox" checked={writable} onChange={(e) => setWritable(e.target.checked)} />
-              {t("Read and write")}
+              {t("Read and change files")}
             </Label>
             <p className="text-xs text-muted-foreground">{t("Leave unchecked for read-only access. Read-only spaces accept read-only keys only.")}</p>
             <Label>
@@ -129,7 +129,7 @@ export function BucketCard({ bucket }: { bucket: S3Bucket }) {
             <strong className="[overflow-wrap:anywhere]">{key.description}</strong>
             <code className="[overflow-wrap:anywhere]">{key.access_key}</code>
             <span>
-              {key.writable ? t("Read and write") : t("Read-only")} · {key.enabled ? t("Enabled") : t("Stopped")}
+              {key.writable ? t("Read and change files") : t("Read files only")} · {key.enabled ? t("Enabled") : t("Stopped")}
             </span>
             <span>
               {t("End date")}: {key.expires_at ? formatDateTime(key.expires_at) : t("No end date")}
