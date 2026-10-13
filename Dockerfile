@@ -21,7 +21,7 @@
 
 # ───────────── 1) Frontend ─────────────
 # The output is platform-independent, so multi-platform builds only build it once on the build machine's platform
-FROM --platform=$BUILDPLATFORM node:26.10.0-alpine3.24@sha256:0b36e8c136b94cd4fcf02188228e76c31ad5872eef3fec8cbd2eee500cfd9e80 AS web
+FROM --platform=$BUILDPLATFORM node:26.11.1-alpine3.24@sha256:143494b1da2945f061539253adc65e4f1569ddf07da2d384c022c791a9d90a4a AS web
 ARG BUILDKIT_SBOM_SCAN_STAGE=true
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 # Node no longer includes corepack (since version 25), which installs the pnpm version named in package.json and checks
