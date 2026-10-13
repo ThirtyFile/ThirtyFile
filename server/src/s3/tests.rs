@@ -665,3 +665,37 @@ async fn defaults_publish_personal_manager_links_trash_and_credential_rotation_a
     crate::access::restore(&s.env.st, &s.admin, &identity.root.id).await.unwrap();
     assert!(s.client.list_buckets().send().await.is_ok());
 }
+
+#[tokio::test]
+async fn key_expiry_uses_the_existing_access_notice_once_and_skips_disabled_or_distant_keys() {
+    let s = server(false).await;
+    for (description, expiry, enabled) in [("Distant key", now() + 4 * 86400, true), ("Disabled key", now() + 86400, false)] {
+        let Json(key) = super::manage::new_key(
+            State(s.env.st.clone()),
+            s.admin.clone(),
+            Path(s.bucket.clone()),
+            Json(super::manage::NewKey { description: description.into(), writable: false, expires_at: Some(expiry) }),
+        )
+        .await
+        .unwrap();
+        sqlx::query("UPDATE s3_keys SET enabled=? WHERE id=?").bind(enabled).bind(key.key.id).execute(&s.env.st.db).await.unwrap();
+    }
+    super::expiry_notices(&s.env.st).await.unwrap();
+    let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM notifications WHERE kind='access_expiring'").fetch_one(&s.env.st.db).await.unwrap();
+    assert_eq!(count, 0);
+    let expiry = now() + 86400;
+    sqlx::query("UPDATE s3_keys SET expires_at=? WHERE id=?").bind(expiry).bind(&s.key.key.id).execute(&s.env.st.db).await.unwrap();
+    super::expiry_notices(&s.env.st).await.unwrap();
+    super::expiry_notices(&s.env.st).await.unwrap();
+    let notices: Vec<(i64, String, String)> =
+        sqlx::query_as("SELECT user_id,node_id,data FROM notifications WHERE kind='access_expiring'").fetch_all(&s.env.st.db).await.unwrap();
+    assert_eq!(notices.len(), 1);
+    assert_eq!(notices[0].0, s.admin.id);
+    let identity = super::credentials::identity(&s.env.st, &s.key.key.access_key, false).await.unwrap();
+    assert_eq!(notices[0].1, identity.root.id);
+    let data: serde_json::Value = serde_json::from_str(&notices[0].2).unwrap();
+    assert_eq!(data["name"], "S3: backups (Contract client)");
+    assert_eq!(data["expires_at"], expiry);
+    assert!(!notices[0].2.contains(&s.key.secret_key));
+    assert!(!notices[0].2.contains(&s.key.key.access_key));
+}
