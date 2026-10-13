@@ -85,6 +85,7 @@
             <li><a href="#compose-caddy">在同一 Docker Compose 檔案中執行 Caddy</a></li>
             <li><a href="#traefik">Traefik</a></li>
             <li><a href="#checklist">公開存取前</a></li>
+            <li><a href="#sftp-port">SFTP 使用独立 TCP 連接埠</a></li>
           </ol>
         </details>
 
@@ -201,12 +202,14 @@ networks:
           <li>設定<a href="backup.html">備份</a>。</li>
           <li>決定誰可以登入，參閱<a href="sign-in.html#who">單一登入</a>。</li>
         </ul>
+
+      <h2 id="sftp-port">SFTP 使用独立 TCP 連接埠</h2>
+<p>SFTP 不經 HTTP 反向代理。請在 Docker 公開連接埠（預設 2022），並在防火牆允許此連接埠。使用伺服器主機名稱連線，而非 HTTPS 路徑。第一次信任連線前，核對控制台的主機金鑰指紋。請參閱 <a href="protocols.html#sftp">SFTP 設定</a>。</p>
         <nav class="next" aria-label="更多指南">
           <a href="settings.html"><span>上一篇</span>設定</a>
           <a class="forward" href="backup.html"><span>下一篇</span>升級與備份</a>
         </nav>
-
-      </main>
+</main>
     </div>
     <footer class="site-footer">
       <div class="wrap">

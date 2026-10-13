@@ -87,6 +87,7 @@
             <li><a href="#style">インターフェーススタイル</a></li>
             <li><a href="#history">サインイン履歴</a></li>
             <li><a href="#notifications">通知</a></li>
+            <li><a href="#sftp-keys">SFTP の SSH キー</a></li>
           </ol>
         </details>
         <h2 id="password">パスワード</h2>
@@ -160,11 +161,13 @@ curl -u "amy:tfa_…" -o report.pdf "https://drive.example.com/api/files/&lt;fil
         <p>ベルの数字は未読件数です。通知をクリックすると対象を開きます。一覧の下に <strong>すべて既読にする</strong> と <strong>すべて消去</strong> があります。通知は 90 日保存します。</p>
         <p>ベルの一覧下部かアカウントメニューの <strong>通知設定</strong> で、種類ごとにアプリ内通知とメールを別々に有効、無効にできます。メールはそこで入力する <strong>メールアドレス</strong> に送ります。シングルサインオンでは初回に連携先のアドレスを入れ、後から変更できます。空欄ならメールは送りません。パスワード再設定もこのアドレスに送るため、変更には現在のパスワード（2 段階認証ではコードも）が必要です。パスワードのないアカウントはサインイン後 10 分以内に変更します。旧アドレスにも変更を通知します。15 分以内に同じ種類のメールを 1 アドレスへ送るのは最大 5 通ですが、アプリ内通知はすべて保存します。</p>
         <div class="note">管理者が <a href="users.html#email">メールサーバー</a> を設定して初めて送信できます。メールは <a href="#language">選択した言語</a>、未選択なら管理者の既定の言語、さらに未設定なら最後に ThirtyFile で使った言語で書きます。時刻は利用者のタイムゾーンです。</div>
+      <h2 id="sftp-keys">SFTP の SSH キー</h2>
+<p>管理者が SFTP と SSH キーを有効にしたら、<strong>アカウントメニュー › SFTP キー</strong>で公開キーに名前を付け、現在のパスワードと二要素認証コードを確認します。秘密キーは端末に保管してください。不要なキーを削除すると既存の接続もアクセスできなくなります。<a href="protocols.html#sftp">SFTP アクセス</a>を参照してください。</p>
         <nav class="next" aria-label="その他のガイド">
           <a href="sharing.html"><span>前へ</span>共有</a>
           <a class="forward" href="webdav.html"><span>次へ</span>ネットワークドライブとして割り当て</a>
         </nav>
-      </main>
+</main>
     </div>
     <footer class="site-footer">
       <div class="wrap">

@@ -48,6 +48,7 @@ mod secrets;
 mod s3;
 mod sessions;
 mod settings;
+mod sftp;
 mod shares;
 mod signin;
 mod space_folders;

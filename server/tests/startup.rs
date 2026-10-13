@@ -13,7 +13,7 @@ use tower::ServiceExt;
 async fn a_new_server_starts_lets_the_administrator_sign_in_and_keeps_its_data_folder_to_itself() {
     let dir = std::env::temp_dir().join(format!("thirtyfile-startup-{}", uuid::Uuid::new_v4()));
     let password = format!("pw-{}", uuid::Uuid::new_v4());
-    let config = || Config::try_parse_from(["thirtyfile", "--data", dir.to_str().unwrap(), "--admin-password", &password]).unwrap();
+    let config = || Config::try_parse_from(["thirtyfile", "--data", dir.to_str().unwrap(), "--admin-password", &password, "--sftp-addr", "127.0.0.1:0"]).unwrap();
     let start = || async {
         let cfg = config();
         let (db, _) = startup::open(&cfg.server).await?;

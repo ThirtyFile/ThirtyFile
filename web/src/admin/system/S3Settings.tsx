@@ -3,7 +3,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "@/api";
 import type { S3Config } from "@/api/s3";
-import { Section } from "@/admin/SettingsFrame";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,5 +18,5 @@ function S3Form({ value }: { value: S3Config }) {
 
 export function S3Settings() {
   const q = useQuery({ queryKey: ["s3-config"], queryFn: ({ signal }) => api.s3Config(signal) });
-  return <Section title={t("Apps and protocols")}>{q.error ? <ErrorState message={q.error.message} onRetry={() => q.refetch()} /> : q.data ? <S3Form key={JSON.stringify(q.data)} value={q.data} /> : <p className="p-4" role="status">{t("Loading…")}</p>}</Section>;
+  return <div className="border-t">{q.error ? <ErrorState message={q.error.message} onRetry={() => q.refetch()} /> : q.data ? <S3Form key={JSON.stringify(q.data)} value={q.data} /> : <p className="p-4" role="status">{t("Loading…")}</p>}</div>;
 }

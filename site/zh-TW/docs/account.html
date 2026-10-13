@@ -88,6 +88,7 @@
             <li><a href="#style">介面風格</a></li>
             <li><a href="#history">登入紀錄</a></li>
             <li><a href="#notifications">通知</a></li>
+            <li><a href="#sftp-keys">SFTP 的 SSH 金鑰</a></li>
           </ol>
         </details>
 
@@ -162,12 +163,14 @@ curl -u "amy:tfa_…" -o report.pdf "https://drive.example.com/api/files/&lt;fil
         <p>鈴鐺上的數字表示未讀通知數。按一下通知可開啟對應項目。清單底部提供<strong>全部標示為已讀</strong>和<strong>清除全部</strong>。通知保留 90 天。</p>
         <p>鈴鐺清單底部或帳號選單中的<strong>通知設定</strong>可以分別開啟或關閉每類應用程式內通知和電子郵件通知。郵件傳送到這裡填寫的<strong>電子郵件位址</strong>。使用單一登入時，首次會填入外部帳號提供的位址，之後可以修改。留空則不收郵件。密碼重設連結也寄到這個位址，因此修改位址需要目前密碼（兩步驟驗證帳號還需驗證碼；無密碼帳號需在登入後 10 分鐘內修改），原電子郵件信箱也會收到變更通知。同一位址每 15 分鐘最多收到五封同類郵件；應用程式內通知全部保留。</p>
         <div class="note">只有管理員設定電子郵件伺服器後才會傳送郵件（參閱<a href="users.html#email">通知電子郵件</a>）。郵件採用<a href="#language">你選擇的語言</a>；沒有選擇時使用管理員設定的預設語言，否則使用你最後使用 ThirtyFile 時的語言。時間按你的時區顯示。</div>
+
+      <h2 id="sftp-keys">SFTP 的 SSH 金鑰</h2>
+<p>管理員啟用 SFTP 與 SSH 金鑰後，在<strong>帳號選單 › SFTP 金鑰</strong>替公開金鑰命名，並確認目前密碼與雙因素驗證碼。私密金鑰保留在自己的裝置。移除不再使用的金鑰後，其現有連線也會失去存取權。請參閱 <a href="protocols.html#sftp">SFTP 存取</a>。</p>
         <nav class="next" aria-label="更多指南">
           <a href="sharing.html"><span>上一篇</span>分享</a>
           <a class="forward" href="webdav.html"><span>下一篇</span>連線為網路磁碟機</a>
         </nav>
-
-      </main>
+</main>
     </div>
     <footer class="site-footer">
       <div class="wrap">

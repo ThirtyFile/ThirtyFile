@@ -29,6 +29,7 @@ import { cn, formatBytes } from "@/lib/utils";
 import { LANGUAGES, t } from "@/lib/i18n";
 import { invalidateFiles } from "@/lib/queries";
 import { Toggle, Section, SettingsFrame } from "@/admin/SettingsFrame";
+import { SftpSettings } from "@/admin/system/SftpSettings";
 
 import { S3Settings } from "@/admin/system/S3Settings";
 
@@ -153,7 +154,7 @@ export function GeneralSettingsPage() {
         <Pending query={q} loading={<Skeleton className="h-40" />} />
       ) : (
         <>
-          <S3Settings />
+          <Section title={t("Apps and protocols")}><SftpSettings /><S3Settings /></Section>
           <Section title={t("Website")}>
             <div className="flex items-start gap-4 p-4">
               <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-300">

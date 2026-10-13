@@ -13,11 +13,13 @@
 
 mod changes;
 mod paths;
+mod read;
 mod write;
 mod scope;
 
 pub use changes::*;
 pub use paths::*;
+pub use read::*;
 pub use write::*;
 pub use scope::*;
 
