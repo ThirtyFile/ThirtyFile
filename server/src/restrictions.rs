@@ -22,7 +22,16 @@ async fn controlled(conn: &mut sqlx::SqliteConnection, user: &User, id: &str) ->
     if !node.is_folder() || node.parent_id.is_none() || node.trashed_at.is_some() {
         return Err(AppError::bad_request("Only folders outside the trash can be restricted. Space roots cannot be restricted."));
     }
-    if tree::live_role_on(conn, user, &node).await?.is_none() {
+    let (in_trash,): (bool,) = sqlx::query_as(
+        "WITH RECURSIVE up(id,parent_id,trash) AS (
+      SELECT id,parent_id,trashed_at IS NOT NULL FROM nodes WHERE id = ?1 UNION ALL
+      SELECT n.id,n.parent_id,n.trashed_at IS NOT NULL FROM nodes n JOIN up ON n.id = up.parent_id)
+      SELECT EXISTS(SELECT 1 FROM up WHERE trash)",
+    )
+    .bind(&node.id)
+    .fetch_one(&mut *conn)
+    .await?;
+    if in_trash || tree::get_drive(conn, node.drive()).await?.is_none_or(|d| d.disabled) {
         return Err(AppError::not_found("Item not found"));
     }
     Ok(node)

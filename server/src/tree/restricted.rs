@@ -11,6 +11,8 @@ use crate::{
 
 /// Whether a user is an owner of the space, rather than the uploader of an item.
 pub async fn space_owner(conn: &mut SqliteConnection, user: &User, node: &Node) -> AppResult<bool> {
+    let current = crate::auth::current_user(conn, user).await?;
+    let user = &current;
     let Some(drive) = get_drive(conn, node.drive()).await? else { return Ok(false) };
     if user.is_admin() && drive.kind != super::SpaceKind::Personal {
         return Ok(true);

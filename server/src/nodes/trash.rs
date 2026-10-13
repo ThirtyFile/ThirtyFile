@@ -433,10 +433,12 @@ pub async fn empty_trash_preview(State(st): State<AppState>, user: User) -> AppR
 /// the page follows; its result is how many items were in the trash (`deleted`)
 pub async fn empty_trash(State(st): State<AppState>, user: User) -> AppResult<Json<Job>> {
     let pending = jobs::reserve(&st, user.id, "empty_trash", Limit::Changes)?;
-    let drive_ids = empty_trash_drives(&mut *st.db.acquire().await?, &user).await?;
     let rows = {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
+        let current = crate::auth::current_user(&mut tx, &user).await?;
+        let user = current;
+        let drive_ids = empty_trash_drives(&mut tx, &user).await?;
         let select = format!(
             "SELECT id FROM nodes n WHERE n.trash_root = 1 AND n.drive_id IN (SELECT value FROM json_each(?1)) AND {NOT_PURGING} AND {}",
             trash_visible(&user)

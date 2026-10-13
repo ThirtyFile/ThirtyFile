@@ -87,10 +87,7 @@ pub struct ZipAccess {
 impl ZipAccess {
     async fn check(&self, st: &AppState, id: &str) -> AppResult<()> {
         let mut c = st.db.acquire().await?;
-        let mut user = crate::auth::user_by_id(st, &mut c, self.user.id).await?.ok_or_else(|| AppError::forbidden("Your access has ended"))?;
-        user.protocol_root = self.user.protocol_root.clone();
-        user.protocol_key = self.user.protocol_key.clone();
-        user.sftp_credential = self.user.sftp_credential.clone();
+        let user = crate::auth::current_user(&mut c, &self.user).await?;
         tree::node_for(&mut c, &user, id, tree::Need::Read).await?;
         if let Some(root) = &self.publication
             && !tree::within_publication(&mut c, root, id).await?
