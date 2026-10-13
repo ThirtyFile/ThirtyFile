@@ -1,6 +1,7 @@
 {
   "AccessInfo": {
     "can_manage": false,
+    "can_restrict": false,
     "direct": [
       {
         "created_at": 0,
@@ -48,6 +49,7 @@
       "name": "",
       "owner_name": "",
       "parent_id": "",
+      "restricted": false,
       "size": 0,
       "trashed_at": null,
       "updated_at": 0
@@ -86,6 +88,7 @@
     "name": "",
     "offline": null,
     "owner_name": "",
+    "partial_usage": false,
     "quota_bytes": 0,
     "read_only": false,
     "role": "",
@@ -161,6 +164,7 @@
     "name": "",
     "owner_name": "",
     "parent_id": "",
+    "restricted": false,
     "size": 0,
     "trashed_at": null,
     "updated_at": 0
@@ -200,6 +204,7 @@
     "can_share": false,
     "can_write": false,
     "display_name": "",
+    "guest": false,
     "id": 0,
     "lang": "",
     "max_edit_bytes": 0,
@@ -234,6 +239,7 @@
     "name": "",
     "owner_name": "",
     "parent_id": "",
+    "restricted": false,
     "size": 0,
     "trashed_at": null,
     "updated_at": 0
@@ -261,6 +267,7 @@
       "name": "",
       "owner_name": "",
       "parent_id": "",
+      "restricted": false,
       "size": 0,
       "trashed_at": null,
       "updated_at": 0
@@ -355,7 +362,8 @@
     "mime": "",
     "name": "",
     "owner_name": "",
-    "parent_id": "",
+    "parent_id": null,
+    "restricted": false,
     "role": "",
     "sharer": "",
     "size": 0,

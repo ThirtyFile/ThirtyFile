@@ -17,6 +17,7 @@ pub const ACTIONS: &[&str] = &[
     "edit",
     "grant",
     "revoke",
+    "restriction",
     "share_create",
     "share_update",
     "share_delete",

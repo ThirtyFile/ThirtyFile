@@ -42,6 +42,7 @@ pub struct ZipItem {
 /// million files doesn't hold a million rows (nor a million open folders).
 pub struct ZipPlan {
     items: std::sync::Arc<Recorded>,
+    access: Option<ZipAccess>,
     /// The name each selected item has in the ZIP
     pub root_names: Vec<String>,
     /// The folder the items are in, when they are all in the same one
@@ -63,17 +64,41 @@ impl ZipPlan {
 
     /// What goes into the ZIP, one item at a time: what the plan measured
     pub fn walk(&self) -> ZipWalk {
-        ZipWalk { items: self.items.clone(), next: 0, lines: None }
+        ZipWalk { items: self.items.clone(), access: self.access.clone(), next: 0, lines: None }
     }
 }
 
 /// An item of a ZIP as it was measured
 #[derive(Clone, serde::Serialize, Deserialize)]
 struct Planned {
+    id: String,
     path: String,
     size: u64,
     mtime: i64,
     what: What,
+}
+
+#[derive(Clone)]
+pub struct ZipAccess {
+    pub user: User,
+    pub publication: Option<String>,
+}
+
+impl ZipAccess {
+    async fn check(&self, st: &AppState, id: &str) -> AppResult<()> {
+        let mut c = st.db.acquire().await?;
+        let mut user = crate::auth::user_by_id(st, &mut c, self.user.id).await?.ok_or_else(|| AppError::forbidden("Your access has ended"))?;
+        user.protocol_root = self.user.protocol_root.clone();
+        user.protocol_key = self.user.protocol_key.clone();
+        user.sftp_credential = self.user.sftp_credential.clone();
+        tree::node_for(&mut c, &user, id, tree::Need::Read).await?;
+        if let Some(root) = &self.publication
+            && !tree::within_publication(&mut c, root, id).await?
+        {
+            return Err(AppError::not_found("Item not found"));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, serde::Serialize, Deserialize)]
@@ -170,6 +195,7 @@ impl Drop for Recorder {
 /// Goes through what a plan measured, in order
 pub struct ZipWalk {
     items: std::sync::Arc<Recorded>,
+    access: Option<ZipAccess>,
     next: usize,
     lines: Option<tokio::io::Lines<tokio::io::BufReader<tokio::fs::File>>>,
 }
@@ -177,7 +203,7 @@ pub struct ZipWalk {
 impl ZipWalk {
     /// The next item, None at the end. A folder space's file must still have the size it was measured at: one that
     /// changed since fails the ZIP, which can't hold anything but what its length was worked out for.
-    pub async fn next(&mut self, _st: &AppState) -> AppResult<Option<ZipItem>> {
+    pub async fn next(&mut self, st: &AppState) -> AppResult<Option<ZipItem>> {
         use tokio::io::AsyncBufReadExt;
         let planned = match &*self.items {
             Recorded::Memory(items) => {
@@ -195,6 +221,9 @@ impl ZipWalk {
             }
         };
         let Some(p) = planned else { return Ok(None) };
+        if let Some(access) = &self.access {
+            access.check(st, &p.id).await?;
+        }
         let blob = match p.what {
             What::Folder => None,
             What::Stored { hash, location } => Some(Source::Stored { hash, location }),
@@ -226,6 +255,7 @@ enum Todo {
 struct Lister {
     offset: i64,
     todo: Vec<Todo>,
+    access: Option<ZipAccess>,
 }
 
 impl Lister {
@@ -234,7 +264,7 @@ impl Lister {
         while let Some(todo) = self.todo.pop() {
             match todo {
                 Todo::Folder(folder, path, after) => {
-                    let page = children_page(st, &folder, after.as_deref()).await?;
+                    let page = children_page(st, &folder, after.as_deref(), self.access.as_ref()).await?;
                     if page.len() as i64 == ZIP_PAGE {
                         self.todo.push(Todo::Folder(folder, path.clone(), page.last().map(|n| n.id.clone())));
                     }
@@ -243,10 +273,14 @@ impl Lister {
                     }
                 }
                 Todo::Item(path, n) => {
+                    if let Some(access) = &self.access {
+                        access.check(st, &n.id).await?;
+                    }
                     let mtime = n.updated_at + self.offset;
                     if n.is_folder() {
+                        let id = n.id.clone();
                         self.todo.push(Todo::Folder(n, path.clone(), None));
-                        return Ok(Some(Planned { path, size: 0, mtime, what: What::Folder }));
+                        return Ok(Some(Planned { id, path, size: 0, mtime, what: What::Folder }));
                     }
                     let Ok(blob) = Source::resolve(st, &n).await else { continue };
                     // The length of the ZIP is announced up front: a folder space's file is measured as it is now
@@ -263,7 +297,7 @@ impl Lister {
                         }
                         Source::Stored { hash, location } => (n.size as u64, What::Stored { hash, location }),
                     };
-                    return Ok(Some(Planned { path, size, mtime, what }));
+                    return Ok(Some(Planned { id: n.id.clone(), path, size, mtime, what }));
                 }
             }
         }
@@ -273,7 +307,7 @@ impl Lister {
 
 /// A page of the items of `folder` (not in the trash), by id: as `Node`s of the folder's space, with only what a ZIP
 /// needs read from the index
-async fn children_page(st: &AppState, folder: &Node, after: Option<&str>) -> AppResult<Vec<Node>> {
+async fn children_page(st: &AppState, folder: &Node, after: Option<&str>, access: Option<&ZipAccess>) -> AppResult<Vec<Node>> {
     #[derive(sqlx::FromRow)]
     struct Row {
         id: String,
@@ -285,11 +319,17 @@ async fn children_page(st: &AppState, folder: &Node, after: Option<&str>) -> App
         fs_path: Option<String>,
         updated_at: i64,
     }
-    let rows: Vec<Row> = sqlx::query_as(
+    if let Some(access) = access {
+        access.check(st, &folder.id).await?;
+    }
+    let visible = access
+        .map(|a| format!("AND {} {}", tree::visible_sql(&a.user, "n.id"), if a.publication.is_some() { "AND NOT n.restricted" } else { "" }))
+        .unwrap_or_default();
+    let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT n.id, n.kind, n.name, n.size, n.blob_hash, (SELECT location_id FROM blobs WHERE hash = n.blob_hash) AS blob_location,
                 n.fs_path, n.updated_at
-         FROM nodes n WHERE n.parent_id = ?1 AND n.trashed_at IS NULL AND n.id > COALESCE(?2, '') ORDER BY n.id LIMIT ?3",
-    )
+         FROM nodes n WHERE n.parent_id = ?1 AND n.trashed_at IS NULL AND n.id > COALESCE(?2, '') {visible} ORDER BY n.id LIMIT ?3"
+    )))
     .bind(&folder.id)
     .bind(after)
     .bind(ZIP_PAGE)
@@ -315,7 +355,12 @@ async fn children_page(st: &AppState, folder: &Node, after: Option<&str>) -> App
 
 /// The contents of a ZIP of `roots` (including folder contents), with times shifted by `offset` seconds (ZIP times are
 /// local times)
+#[cfg(test)]
 pub async fn zip_plan(st: &AppState, roots: Vec<Node>, offset: i64) -> AppResult<ZipPlan> {
+    zip_plan_checked(st, roots, offset, None).await
+}
+
+pub async fn zip_plan_checked(st: &AppState, roots: Vec<Node>, offset: i64, access: Option<ZipAccess>) -> AppResult<ZipPlan> {
     // Items inside other selected items come with them; selected twice counts once
     let roots = {
         let ids: Vec<String> = roots.iter().map(|n| n.id.clone()).collect();
@@ -333,8 +378,17 @@ pub async fn zip_plan(st: &AppState, roots: Vec<Node>, offset: i64) -> AppResult
             && roots.iter().all(|r| r.parent_id.as_deref() == Some(parent.as_str()))
             && let Some(p) = tree::get_node(&mut c, &parent).await?
         {
-            parent_name = Some(if p.name.is_empty() { tree::get_drive(&mut c, p.drive()).await?.map(|d| d.name).unwrap_or_default() } else { p.name })
-                .filter(|n| !n.is_empty());
+            let allowed = match &access {
+                Some(a) => {
+                    tree::role_on(&mut c, &a.user, &p).await?.is_some()
+                        && (a.publication.is_none() || tree::within_publication(&mut c, a.publication.as_deref().unwrap(), &p.id).await?)
+                }
+                None => true,
+            };
+            if allowed {
+                parent_name = Some(if p.name.is_empty() { tree::get_drive(&mut c, p.drive()).await?.map(|d| d.name).unwrap_or_default() } else { p.name })
+                    .filter(|n| !n.is_empty());
+            }
         }
         for root in roots {
             if root.trashed_at.is_some() {
@@ -360,7 +414,7 @@ pub async fn zip_plan(st: &AppState, roots: Vec<Node>, offset: i64) -> AppResult
     // What goes in and its length, going through it once
     let mut len = crate::zip::Length::default();
     let mut bytes = 0;
-    let mut lister = Lister { offset, todo: named.into_iter().rev().map(|(n, name)| Todo::Item(name, Box::new(n))).collect() };
+    let mut lister = Lister { offset, access: access.clone(), todo: named.into_iter().rev().map(|(n, name)| Todo::Item(name, Box::new(n))).collect() };
     let mut recorder = Recorder { tmp: st.tmp_dir().join(format!("zip-plan-{}", crate::util::new_id())), memory: Vec::new(), file: None };
     while let Some(item) = lister.next(st).await? {
         if item.path.len() + 1 > u16::MAX as usize {
@@ -371,14 +425,19 @@ pub async fn zip_plan(st: &AppState, roots: Vec<Node>, offset: i64) -> AppResult
         recorder.add(item).await?;
     }
     let items = std::sync::Arc::new(recorder.finish().await?);
-    Ok(ZipPlan { items, root_names, parent_name, len: len.total(), bytes })
+    Ok(ZipPlan { items, access, root_names, parent_name, len: len.total(), bytes })
 }
 
 /// Packs multiple nodes (including folder contents) into a streamed ZIP. `tz` is the browser's time zone as JavaScript
 /// reports it (minutes behind UTC): ZIP times are local times, and Windows shows them as such.
+#[cfg(test)]
 pub async fn zip_response(st: &AppState, roots: Vec<Node>, tz: i64) -> AppResult<Response> {
+    zip_response_checked(st, roots, tz, None).await
+}
+
+pub async fn zip_response_checked(st: &AppState, roots: Vec<Node>, tz: i64, access: Option<ZipAccess>) -> AppResult<Response> {
     let offset = -tz.clamp(-14 * 60, 14 * 60) * 60;
-    let plan = zip_plan(st, roots, offset).await?;
+    let plan = zip_plan_checked(st, roots, offset, access).await?;
     let filename = plan.file_name("download");
     let total_len = plan.len;
     // Open the first file before starting the response: if the storage service (e.g. S3) can't be reached, report the
@@ -581,20 +640,20 @@ async fn owned_nodes(st: &AppState, user: &User, ids: &[String]) -> AppResult<Ve
 }
 
 /// A single file is downloaded directly, anything else is packed into a ZIP
-async fn serve_download(st: &AppState, headers: &HeaderMap, roots: Vec<Node>, tz: i64) -> AppResult<Response> {
+async fn serve_download(st: &AppState, user: &User, headers: &HeaderMap, roots: Vec<Node>, tz: i64) -> AppResult<Response> {
     if let [one] = roots.as_slice()
         && !one.is_folder()
     {
         return serve_blob(st, headers, node_blob(st, one).await?, true).await;
     }
-    zip_response(st, roots, tz).await
+    zip_response_checked(st, roots, tz, Some(ZipAccess { user: user.clone(), publication: None })).await
 }
 
 /// Multi-select download with the ids in the URL, for a few items (any number goes through `create_download_link`)
 pub async fn download(State(st): State<AppState>, user: User, Query(q): Query<DownloadQuery>, headers: HeaderMap) -> AppResult<Response> {
     let ids = download_ids(q.ids.split(','))?;
     let roots = owned_nodes(&st, &user, &ids).await?;
-    serve_download(&st, &headers, roots, q.tz.unwrap_or(0)).await
+    serve_download(&st, &user, &headers, roots, q.tz.unwrap_or(0)).await
 }
 
 /// Multi-select download of any size: the ids come in the body, and the answer is a short-lived link for this user that
@@ -610,7 +669,7 @@ pub async fn create_download_link(State(st): State<AppState>, user: User, Json(r
 pub async fn download_by_link(State(st): State<AppState>, user: User, Path(token): Path<String>, headers: HeaderMap) -> AppResult<Response> {
     let (ids, tz) = download_link(&st, &format!("user:{}", user.id), &token)?;
     let roots = owned_nodes(&st, &user, &ids).await?;
-    serve_download(&st, &headers, roots, tz).await
+    serve_download(&st, &user, &headers, roots, tz).await
 }
 
 #[cfg(test)]

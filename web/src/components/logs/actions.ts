@@ -18,6 +18,7 @@ const ACTION_LABEL: Record<string, string> = {
   edit: t("Edit"),
   grant: t("Grant access"),
   revoke: t("Remove access"),
+  restriction: t("Change folder restrictions"),
   drive_create: t("Create space"),
   scan: t("Checked the folder"),
   drive_update: t("Update space"),
@@ -70,7 +71,7 @@ const ACTION_LABEL: Record<string, string> = {
 /** Action categories for the activity log filter */
 export const ACTION_GROUPS: { label: string; actions: string[] }[] = [
   { label: t("Files"), actions: ["upload", "create_folder", "edit", "rename", "move", "copy", "compress", "extract", "trash", "restore", "delete", "empty_trash"] },
-  { label: t("Sharing and permissions"), actions: ["share_create", "share_update", "share_delete", "grant", "revoke"] },
+  { label: t("Sharing and permissions"), actions: ["share_create", "share_update", "share_delete", "grant", "revoke", "restriction"] },
   { label: t("Spaces"), actions: ["drive_create", "drive_update", "drive_delete", "scan", "move_start", "move_done", "move_failed", "move_cancel"] },
   { label: t("Users and groups"), actions: ["user_create", "user_update", "user_delete", "group_create", "group_update", "group_delete"] },
   {

@@ -1,3 +1,4 @@
+import restrictedFolders from "./restrictedFolders";
 import sftp from "./sftp";
 /** Simplified Chinese dictionary, split by feature and merged here (the same files as zh-TW). Keys are the English source text (plurals as "single|plural"); tc() keys are "context::English". */
 import s3 from "./s3";
@@ -32,4 +33,4 @@ import replicas from "./replicas";
 
 export const LANG = "zh-CN";
 
-export const DICT: Record<string, string> = { ...s3, ...sftp, ...server, ...settings, ...spaces, ...users, ...explorer, ...sharing, ...viewer, ...login, ...notices, ...core, ...sso, ...wording, ...accessibility, ...undo, ...largeFolders, ...accountSecurity, ...shareLinks, ...conflicts, ...details, ...dragAndDrop, ...webdav, ...search, ...archives, ...addressBar, ...notifications, ...folderSpaces, ...backups, ...replicas };
+export const DICT: Record<string, string> = { ...restrictedFolders, ...s3, ...sftp, ...server, ...settings, ...spaces, ...users, ...explorer, ...sharing, ...viewer, ...login, ...notices, ...core, ...sso, ...wording, ...accessibility, ...undo, ...largeFolders, ...accountSecurity, ...shareLinks, ...conflicts, ...details, ...dragAndDrop, ...webdav, ...search, ...archives, ...addressBar, ...notifications, ...folderSpaces, ...backups, ...replicas };

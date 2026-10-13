@@ -112,6 +112,9 @@ async fn resolve_in(conn: &mut SqliteConnection, user: &User, tops: &Tops, segs:
     let mut current = start;
     for (i, seg) in rest.iter().enumerate() {
         let Some(child) = child_named(conn, &current, seg).await? else { return Ok(None) };
+        if tree::role_on(conn, user, &child).await?.is_none() {
+            return Ok(None);
+        }
         if i + 1 < rest.len() && !child.is_folder() {
             return Ok(None);
         }
@@ -130,6 +133,7 @@ async fn resolve_in(conn: &mut SqliteConnection, user: &User, tops: &Tops, segs:
 pub async fn location_of(conn: &mut SqliteConnection, user: &User, node: &Node) -> AppResult<Option<Vec<String>>> {
     let tops = tops(conn, user).await?;
     let path = tree::path_of(conn, &node.id).await?;
+    let hidden_start = tree::visible_path_start(conn, user, &path).await?;
     let root = match &node.parent_id {
         None => node.id.clone(),
         Some(_) => match tree::get_drive(conn, node.drive()).await? {
@@ -137,11 +141,16 @@ pub async fn location_of(conn: &mut SqliteConnection, user: &User, node: &Node) 
             None => return Ok(None),
         },
     };
-    if let Some((name, _)) = tops.spaces.iter().find(|(_, r)| *r == root) {
+    if hidden_start == 0
+        && let Some((name, _)) = tops.spaces.iter().find(|(_, r)| *r == root)
+    {
         return Ok(Some(std::iter::once(name.clone()).chain(path.into_iter().map(|c| c.name)).collect()));
     }
     // Through a folder share: from the shared item down
     for (i, crumb) in path.iter().enumerate() {
+        if i < hidden_start {
+            continue;
+        }
         if let Some((name, _)) = tops.shared.iter().find(|(_, n)| n.id == crumb.id) {
             let below = path[i + 1..].iter().map(|c| c.name.clone());
             return Ok(Some([SHARED.to_string(), name.clone()].into_iter().chain(below).collect()));
