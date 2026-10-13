@@ -70,9 +70,9 @@ test("personal folders never offer publishing and localized S3 settings fit a ph
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await signIn(page);
-  const personal = await makeFolder(page, "Personal S3");
-  const me = await (await page.request.get("/api/auth/me")).json();
-  await page.goto(`/files/${me.root_id}`);
+  const parent = await makeFolder(page, "Private S3 parent");
+  const personal = await makeFolder(page, "Personal S3", parent);
+  await page.goto(`/files/${parent}`);
   const info = await (await page.request.get(`/api/s3/buckets?node_id=${personal}`)).json();
   expect(info.can_publish).toBe(false);
   const row = page.getByRole("row").filter({ hasText: "Personal S3" });
