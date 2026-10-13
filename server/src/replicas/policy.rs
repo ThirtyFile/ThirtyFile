@@ -158,7 +158,7 @@ async fn look_at(st: &AppState, p: &Policy, t: i64) -> AppResult<()> {
                 }
             }
             if p.verify_days > 0 && target.state == "active" && target.synced_at.is_some() && target.last_verify_at.is_none_or(|v| t - v >= p.verify_days * 86400) {
-                queue_verify(st, p, l, t).await?;
+                queue_verify(st, p, l, t, None).await?;
             }
         }
     }
@@ -206,6 +206,10 @@ async fn set_next(st: &AppState, policy: &str, location: &str, next: Option<i64>
 pub async fn trigger(st: &AppState, policy: &str, location: &str, why: &str, by: Option<(i64, String)>) -> AppResult<Option<String>> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
+    if let Some((id, _)) = &by {
+        let actor = crate::auth::user_by_id(st, &mut tx, *id).await?.ok_or_else(|| crate::error::AppError::forbidden("Administrator permission required"))?;
+        crate::auth::require_admin(&mut tx, &actor).await?;
+    }
     let res = async {
         let Some(p) = super::load(&mut tx, policy).await? else { return Ok(None) };
         let active: Option<(String, JobState)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
@@ -269,9 +273,12 @@ pub async fn trigger(st: &AppState, policy: &str, location: &str, why: &str, by:
 }
 
 /// A check of a target, when nothing else of it is under way
-pub async fn queue_verify(st: &AppState, p: &Policy, location: &str, t: i64) -> AppResult<Option<String>> {
+pub async fn queue_verify(st: &AppState, p: &Policy, location: &str, t: i64, actor: Option<&crate::auth::User>) -> AppResult<Option<String>> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
+    if let Some(actor) = actor {
+        crate::auth::require_admin(&mut tx, actor).await?;
+    }
     let res = async {
         let busy: Option<(i64,)> =
             sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT 1 FROM replica_jobs WHERE policy_id = ? AND location_id = ? AND state IN {ACTIVE} LIMIT 1")))

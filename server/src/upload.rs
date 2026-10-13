@@ -204,6 +204,9 @@ pub async fn create_as(st: &AppState, up: &Uploader, headers: &HeaderMap) -> App
     {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
+        if let Some(s) = &up.share {
+            check_in_share(&mut tx, s, &parent_id).await?;
+        }
         let parent = tree::folder_for(&mut tx, user, &parent_id, tree::Need::Add).await?;
         // Refused before anything is sent, rather than when the upload is put in place
         if parent.in_folder_space() {
@@ -273,7 +276,7 @@ pub async fn create_as(st: &AppState, up: &Uploader, headers: &HeaderMap) -> App
 
 /// The folder is inside the shared folder (and, for a link that only accepts files, is the shared folder itself)
 async fn check_in_share(conn: &mut sqlx::SqliteConnection, share: &ShareUpload, folder: &str) -> AppResult<()> {
-    let inside = if share.drop_only { folder == share.root } else { tree::is_within(conn, folder, &share.root).await? };
+    let inside = if share.drop_only { folder == share.root } else { tree::within_publication(conn, &share.root, folder).await? };
     if !inside {
         return Err(AppError::not_found("Item not found"));
     }
@@ -493,7 +496,7 @@ async fn finish(st: &AppState, up: &Uploader, upload: Upload, guard: ActiveGuard
                 Ok(mut c) => tree::get_node(&mut c, id).await.ok().flatten(),
                 Err(_) => None,
             };
-            crate::logs::record_share_access(&st, &share.id, up.user.id, node.as_ref().map(|n| n as _), "upload", &share.visitor);
+            crate::logs::record_share_access(&st, &share.id, up.user.id, node.as_ref().map(|n| n as _), "upload", &share.visitor).await;
             // The link's creator is told the file arrived
             if let Some(node) = &node
                 && let Err(e) = crate::notify::link_upload(&st, up.user.id, &share.id, node).await
@@ -651,8 +654,9 @@ async fn replaced_file(conn: &mut sqlx::SqliteConnection, user: &User, upload: &
 /// Creates the file (or gives the file it replaces the new content) while holding the write lock; returns the file's
 /// id and what to finish after the commit
 async fn commit_upload(st: &AppState, up: &Uploader, upload: &Upload, staged: &content::Staged, size: i64) -> AppResult<(String, content::Written)> {
-    let user = &up.user;
     let mut tx = crate::db::begin_write(&st.db).await?;
+    let current = crate::auth::current_user(&mut tx, &up.user).await?;
+    let user = &current;
     // The account's upload permission may have been removed while the upload was running
     if !user.can_write && !user.is_admin() {
         return Err(AppError::forbidden("You no longer have permission to upload files"));
@@ -660,6 +664,7 @@ async fn commit_upload(st: &AppState, up: &Uploader, upload: &Upload, staged: &c
     // Through a share link, the file goes into the folder as it is now: still inside the shared folder, and still
     // writable by the link's creator; it never falls back to the creator's own files
     if let Some(s) = &up.share {
+        check_in_share(&mut tx, s, &upload.parent_id).await?;
         let target = tree::folder_for(&mut tx, user, &upload.parent_id, tree::Need::Add).await?;
         check_in_share(&mut tx, s, &target.id).await?;
     }
@@ -679,8 +684,15 @@ async fn commit_upload(st: &AppState, up: &Uploader, upload: &Upload, staged: &c
     if parent.in_folder_space() && !crate::content::path_folders_exist(&mut tx, &parent.id, &upload.rel_path).await? {
         tree::check_quota_except(&mut tx, parent.drive(), size, Some(&upload.id)).await?;
     }
+    // An uploaded folder may reuse existing subfolders. Every existing step must still be writable before disk
+    // folders are made, and the final target is checked again, including share-link inheritance boundaries.
+    let mut checked = parent.clone();
+    for part in upload.rel_path.split('/').filter(|p| !p.is_empty()) {
+        let Some(next) = tree::find_child(&mut tx, &checked.id, part).await? else { break };
+        checked = tree::folder_for(&mut tx, user, &next.id, tree::Need::Add).await?;
+    }
     let folder_id = crate::content::ensure_folders(&mut tx, upload.owner_id, &parent.id, &upload.rel_path, &upload.batch).await?;
-    let folder = tree::get_node(&mut tx, &folder_id).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
+    let folder = tree::folder_for(&mut tx, user, &folder_id, tree::Need::Add).await?;
     let replaced = replaced_file(&mut tx, user, upload, &folder.id).await?;
     // Checked again now: an upload idle for a day stopped holding its space (it may be taken by now), and a folder
     // moved to another space meanwhile must have room there. Its own reservation isn't counted twice.
@@ -1166,5 +1178,44 @@ mod tests {
         let id = begin_with(&env, &ben, &library, "report (1).txt", 4, "replace").await;
         let replaced = send(&env, &ben, &id, 0, b"ben2").await.unwrap();
         assert_eq!(replaced.headers()["x-node-id"], kept.headers()["x-node-id"]);
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_staged_browser_upload_cannot_commit_a_stale_personal_permission_after_guest_conversion() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let kept = env.stored_file(&amy, amy.root(), "kept.txt", b"kept").await;
+        let id = begin(&env, &amy, "blocked.txt", 5).await;
+        send(&env, &amy, &id, 0, b"he").await.unwrap();
+        let lock = env.st.write_lock.lock().await;
+        let st = env.st.clone();
+        let actor = amy.clone();
+        let upload_id = id.clone();
+        let waiting = tokio::spawn(async move {
+            let mut h = HeaderMap::new();
+            h.insert(header::CONTENT_TYPE, "application/offset+octet-stream".parse().unwrap());
+            h.insert("upload-offset", "2".parse().unwrap());
+            patch(State(st), actor, Path(upload_id), h, Body::from("llo")).await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while tokio::fs::metadata(upload_path(&env.st, &id)).await.unwrap().len() != 5 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(!waiting.is_finished());
+        let mut tx = crate::db::begin_write(&env.st.db).await.unwrap();
+        let preview = crate::guests::preview_in(&mut tx, amy.id).await.unwrap();
+        crate::guests::convert(&mut tx, amy.id, Some(&preview.revision)).await.unwrap();
+        sqlx::query("UPDATE users SET guest=1 WHERE id=?").bind(amy.id).execute(&mut *tx).await.unwrap();
+        tx.commit().await.unwrap();
+        drop(lock);
+        let error = waiting.await.unwrap().unwrap_err();
+        assert_eq!(error.code, Some("upload_discarded"));
+        assert_eq!(files_named(&env, "blocked").await, 0);
+        assert!(!upload_path(&env.st, &id).exists());
+        assert!(load(&env.st, &Uploader::signed_in(amy.clone()), &id).await.is_err());
+        sqlx::query("UPDATE users SET guest=0 WHERE id=?").bind(amy.id).execute(&env.st.db).await.unwrap();
+        assert_eq!(read(&env, &amy, &kept).await, b"kept");
     }
 }

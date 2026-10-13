@@ -16,11 +16,16 @@ services:
       - "8080:8080"
       # SFTP (also enable access in Control panel > General > Apps and protocols):
       # - "2022:2022"
+      # FTP receive folders (explicit FTPS; also enable in Control panel > General):
+      # - "2121:2121"
+      # - "30000-30009:30000-30009"
     volumes:
       # Database, settings, thumbnails and uploads in progress
       - ./data:/data
       # Your files (the built-in storage location). Can be a folder on another disk or a NAS mount
       - ./storage:/storage
+      # FTP certificate chain and private key; user 1000 must be able to read them:
+      # - ./ftp-tls:/ftp-tls:ro
     environment:
       # Password of the admin account, used on the first start only (or put it in a .env file in this folder)
       THIRTYFILE_ADMIN_PASSWORD: ${THIRTYFILE_ADMIN_PASSWORD:-}
@@ -31,6 +36,11 @@ services:
       # THIRTYFILE_TRUST_PROXY: "true"
       # THIRTYFILE_MAX_UPLOAD_MB: "0"
       # THIRTYFILE_SFTP_ADDR: "0.0.0.0:2022"
+      # THIRTYFILE_FTP_ADDR: "0.0.0.0:2121"
+      # THIRTYFILE_FTP_PASSIVE: "30000-30009"
+      # THIRTYFILE_FTP_PASSIVE_HOST: "ftp.files.example.com"
+      # THIRTYFILE_FTP_CERT: "/ftp-tls/fullchain.pem"
+      # THIRTYFILE_FTP_KEY: "/ftp-tls/privkey.pem"
       # THIRTYFILE_TRASH_DAYS: "30"
     # Memory: about 100–300 MB in use; on a small NAS you can cap it (ThirtyFile adjusts to the limit on start)
     # mem_limit: 512m

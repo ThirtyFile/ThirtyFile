@@ -1,0 +1,124 @@
+//! Authentication uses the actual TCP peer and the common sign-in address budget.
+
+use super::credentials::{Credential, Folder};
+use crate::{auth, state::AppState};
+use std::{
+    fmt,
+    net::IpAddr,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
+use unftp_core::auth::{AuthenticationError, Authenticator, ChannelEncryptionState, Credentials, Principal, UserDetail, UserDetailError, UserDetailProvider};
+
+pub struct Login {
+    pub state: AppState,
+    pub peer: IpAddr,
+    pub alive: Arc<AtomicBool>,
+    pub plain: bool,
+    pub authenticated: Arc<AtomicBool>,
+    pub user: crate::sync::Mutex<Option<Device>>,
+}
+impl fmt::Debug for Login {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FtpLogin").field("peer", &self.peer).finish_non_exhaustive()
+    }
+}
+
+#[derive(Clone)]
+pub struct Device {
+    pub actor: auth::User,
+    pub username: String,
+    pub _permit: Arc<tokio::sync::OwnedSemaphorePermit>,
+}
+impl fmt::Display for Device {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.username)
+    }
+}
+impl fmt::Debug for Device {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FtpDevice").field("username", &self.username).finish_non_exhaustive()
+    }
+}
+impl UserDetail for Device {
+    fn account_enabled(&self) -> bool {
+        self.actor.ftp_credential.as_ref().is_some_and(|c| c.alive.load(Ordering::Acquire))
+    }
+}
+
+pub fn private_peer(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => ip.is_loopback() || ip.is_private(),
+        IpAddr::V6(ip) => ip.to_ipv4_mapped().map(|v| private_peer(IpAddr::V4(v))).unwrap_or_else(|| ip.is_loopback() || (ip.segments()[0] & 0xfe00) == 0xfc00),
+    }
+}
+
+#[async_trait::async_trait]
+impl Authenticator for Login {
+    async fn authenticate(&self, username: &str, creds: &Credentials) -> Result<Principal, AuthenticationError> {
+        let denied = || AuthenticationError::BadPassword;
+        if !self.alive.load(Ordering::Acquire) || creds.source_ip != self.peer || (creds.command_channel_security != ChannelEncryptionState::Tls && !self.plain) {
+            return Err(denied());
+        }
+        let key = format!("ip:{}", auth::limit_key_ip(&self.peer.to_string()));
+        // Reserve the attempt before Argon2, as browser sign-in does for concurrent requests.
+        if !auth::begin_attempt(&self.state, &key, auth::IP_FAIL_LIMIT) {
+            return Err(denied());
+        }
+        if username.len() > 100 || creds.password.as_ref().is_none_or(|p| p.len() > 256) {
+            return Err(denied());
+        }
+        let row: Option<Folder> =
+            sqlx::query_as("SELECT * FROM ftp_receive_folders WHERE username=?").bind(username).fetch_optional(&self.state.db).await.map_err(|_| denied())?;
+        let hash = row.as_ref().map(|r| r.password_hash.clone()).unwrap_or_else(|| auth::DUMMY_HASH.to_string());
+        let valid = auth::verify_password(creds.password.clone().unwrap_or_default(), hash).await.map_err(|_| denied())?;
+        let Some(row) = row.filter(|r| valid && r.enabled && r.expires_at.is_none_or(|t| t > crate::util::now())) else {
+            crate::logs::record_login_via(&self.state, None, username, "ftp_failed", "ftp", &self.peer.to_string(), &axum::http::HeaderMap::new());
+            return Err(denied());
+        };
+        let mut conn = self.state.db.acquire().await.map_err(|_| denied())?;
+        let mut actor = auth::user_by_id(&self.state, &mut conn, row.creator_id).await.map_err(|_| denied())?.ok_or_else(denied)?;
+        actor.protocol_root = Some(row.node_id.clone());
+        actor.ftp_credential = Some(Credential { id: row.id.clone(), generation: row.generation, alive: self.alive.clone(), transfer: None });
+        actor = super::credentials::actor_in_transaction(&mut conn, &actor, crate::tree::Need::Add).await.map_err(|_| denied())?;
+        drop(conn);
+        let semaphore = {
+            let mut sessions = self.state.part::<super::Memory>().sessions.lock();
+            sessions.retain(|_, s| s.strong_count() > 0);
+            sessions.get(&row.id).and_then(std::sync::Weak::upgrade).unwrap_or_else(|| {
+                let s = Arc::new(tokio::sync::Semaphore::new(5));
+                sessions.insert(row.id.clone(), Arc::downgrade(&s));
+                s
+            })
+        };
+        let permit = semaphore.try_acquire_owned().map_err(|_| AuthenticationError::new("This receive folder already has 5 sessions"))?;
+        let principal = Principal { username: format!("{}:{}", row.id, row.generation) };
+        *self.user.lock() = Some(Device { actor, username: row.username, _permit: Arc::new(permit) });
+        self.authenticated.store(true, Ordering::Release);
+        sqlx::query("UPDATE ftp_receive_folders SET last_used_at=? WHERE id=? AND generation=?")
+            .bind(crate::util::now())
+            .bind(row.id)
+            .bind(row.generation)
+            .execute(&self.state.db)
+            .await
+            .map_err(|_| denied())?;
+        auth::attempt_succeeded(&self.state, &key);
+        Ok(principal)
+    }
+}
+#[async_trait::async_trait]
+impl UserDetailProvider for Login {
+    type User = Device;
+    async fn provide_user_detail(&self, principal: &Principal) -> Result<Device, UserDetailError> {
+        let denied = || UserDetailError::new("Receive folder unavailable");
+        let user = self.user.lock().clone().ok_or_else(denied)?;
+        let marker = user.actor.ftp_credential.as_ref().ok_or_else(denied)?;
+        if principal.username != format!("{}:{}", marker.id, marker.generation) {
+            return Err(denied());
+        }
+        super::credentials::access(&self.state, &user.actor, false, false).await.map_err(|_| denied())?;
+        Ok(user)
+    }
+}

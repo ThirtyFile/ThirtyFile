@@ -50,13 +50,14 @@ async fn thresholds(st: &AppState) -> AppResult<Thresholds> {
     Ok(saved.and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default())
 }
 
-pub async fn set_thresholds(State(st): State<AppState>, _: Admin, Json(t): Json<Thresholds>) -> AppResult<Json<Thresholds>> {
+pub async fn set_thresholds(State(st): State<AppState>, Admin(user): Admin, Json(t): Json<Thresholds>) -> AppResult<Json<Thresholds>> {
     let valid = |v: f64| v.is_finite() && (0.0..=100.0).contains(&v);
     if !valid(t.disk_percent) || !valid(t.error_percent) {
         return Err(AppError::bad_request("Enter a percentage from 0 to 100"));
     }
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
+    crate::auth::require_admin(&mut tx, &user).await?;
     let res = crate::db::set_setting(&mut tx, THRESHOLDS_KEY, &serde_json::to_string(&t).unwrap()).await.map_err(AppError::from);
     crate::db::settle(tx, res).await?;
     Ok(Json(t))

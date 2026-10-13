@@ -83,6 +83,7 @@
             <li><a href="#rules">Different settings for different domains</a></li>
             <li><a href="#link">Linking an account yourself</a></li>
             <li><a href="#guests">Microsoft tenants with guests</a></li>
+            <li><a href="#guest-provisioning">Create guests with single sign-on</a></li>
           </ol>
         </details>
         <h2 id="setup">Setting up a provider</h2>
@@ -132,6 +133,8 @@
         <h2 id="guests">Microsoft tenants with guests</h2>
         <p>With a tenant ID set, the members of your tenant are matched by email. Guests from other organisations sign in through your tenant too, but their email address comes from their own organisation, which can enter any address. So a guest's email doesn't match or create an account: guests sign in with a password and link their Microsoft account themselves.</p>
         <p>To match guests by email as well, add the optional claim <code>xms_edov</code> to the ID token: in the app registration, <strong>Token configuration › Add optional claim › ID › xms_edov</strong>. Microsoft then says when the domain of a guest's email address belongs to their organisation, and only those guests are matched.</p>
+        <h2 id="guest-provisioning">Create guests with single sign-on</h2>
+        <p>Choose <strong>Create guest accounts</strong> in a provider’s new-account defaults, or enable <strong>Guest account</strong> in an email-domain rule. The matching domain rule takes precedence over the provider defaults. Guests are created without My files, regardless of the normal personal-space setting. Configured groups must have guest-compatible roles and end dates; unsafe membership is rejected without creating a partial account. These defaults apply to newly created accounts, and do not convert accounts already linked to the provider. Convert an existing account from the Users page after reviewing its access.</p>
         <nav class="next" aria-label="More guides">
           <a href="users.html"><span>Previous</span>Users and spaces</a>
           <a class="forward" href="storage.html"><span>Next</span>Storage locations</a>

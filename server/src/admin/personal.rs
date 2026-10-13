@@ -45,6 +45,10 @@ pub async fn add(State(st): State<AppState>, Admin(me): Admin, Path(id): Path<i6
 }
 
 async fn add_in(st: &AppState, tx: &mut SqliteConnection, me: &crate::auth::User, id: i64, req: &AddReq) -> AppResult<()> {
+    crate::auth::require_admin(tx, me).await?;
+    if crate::guests::target_has_guests(tx, crate::tree::PrincipalType::User, id).await? {
+        return Err(AppError::bad_request("Guests can't have My files"));
+    }
     let row: Option<(String, Option<String>)> = sqlx::query_as("SELECT username, root_id FROM users WHERE id = ?").bind(id).fetch_optional(&mut *tx).await?;
     let (username, root) = row.ok_or_else(|| AppError::not_found("User not found"))?;
     if root.is_some() {
@@ -98,6 +102,7 @@ async fn remove_in(
     q: &DeleteQuery,
     moved: Option<&crate::personal::Moved>,
 ) -> AppResult<Option<crate::personal::Removed>> {
+    crate::auth::require_admin(tx, me).await?;
     let (pending,): (Option<String>,) = sqlx::query_as("SELECT personal_pending FROM users WHERE id = ?").bind(id).fetch_one(&mut *tx).await?;
     let removed = crate::personal::remove_personal_in(tx, me, id, username, q, moved).await?;
     let detail = match &removed {

@@ -31,7 +31,7 @@ pub async fn get(State(st): State<AppState>, _admin: Admin) -> AppResult<Json<Co
     Ok(Json(load(&st).await?))
 }
 
-pub async fn save(State(st): State<AppState>, _admin: Admin, Json(mut config): Json<Config>) -> AppResult<Json<Config>> {
+pub async fn save(State(st): State<AppState>, Admin(user): Admin, Json(mut config): Json<Config>) -> AppResult<Json<Config>> {
     config.hostname = config.hostname.trim().to_ascii_lowercase();
     config.region = config.region.trim().to_string();
     if config.region.is_empty() {
@@ -52,6 +52,7 @@ pub async fn save(State(st): State<AppState>, _admin: Admin, Json(mut config): J
         return Err(AppError::bad_request("Invalid S3 Region"));
     }
     let mut tx = db::begin_write(&st.db).await?;
+    crate::auth::require_admin(&mut tx, &user).await?;
     db::set_setting(&mut tx, "s3", &serde_json::to_string(&config).map_err(AppError::internal)?).await?;
     tx.commit().await?;
     *st.part::<Memory>().config.write() = Some(config.clone());

@@ -86,6 +86,7 @@
             <li><a href="#email">通知邮件</a></li>
             <li><a href="#privacy">管理员能看到什么</a></li>
             <li><a href="#password">忘记密码</a></li>
+            <li><a href="#guests">访客账号</a></li>
           </ol>
         </details>
         <h2 id="users">用户</h2>
@@ -156,10 +157,15 @@
         <p>其他情况下，或账号没有邮箱时，由管理员从<strong>控制面板 › 用户</strong>设置新密码。管理员自己丢失密码时，参阅<a href="help.html#password">故障排除</a>。</p>
 
       <p><strong>控制面板 › S3 存储桶</strong> 列出已发布的文件夹、创建者、Access Keys、到期日和上次使用时间。可筛选列表、停用或删除存储桶，以及单独停用密钥。文件仍保留在原文件夹。请参阅 <a href="protocols.html#s3">S3 设置</a>。</p>
+        <p><strong>控制台 › FTP 接收文件夹</strong>可管理设备凭据、发布的文件夹、列出／下载权限和到期日。轮换密码也会终止现有连接。访客账号不能创建发布，设备凭据不能登录网站。请参阅<a href="protocols.html#ftp">FTP 接收文件夹</a>。</p>
+        <h2 id="guests">访客账号</h2>
+        <p>在<strong>控制面板 › 用户</strong>将账号类型设为<strong>访客</strong>，供外部协作者使用。访客只能使用直接或通过群组明确共享的文件夹与空间；<strong>所有人</strong>的权限不适用于访客。访客没有<strong>我的文件</strong>，不能创建空间、共享链接或授予他人权限，也不能成为管理员、管理者或所有者。WebDAV 与 SFTP 应用密码仍可使用，但只能访问相同的共享文件夹。</p><p>将现有账号改为访客前，请审阅转换预览并确认自己的身份。个人文件会保留，但访客不能访问；现有共享链接与协议发布也会停止工作。预览会列出需要调整角色或到期日的直接授权。请先转移团队空间的所有权；群组若有管理者、所有者、未设置到期日或超出访客期限的授权，必须先修正，才能转换账号或加入访客。其他群组成员的权限不会被悄悄修改。改回普通账号后可再次访问保留的个人文件，但不会还原已调整的直接授权。</p>
+
         <nav class="next" aria-label="更多指南">
           <a href="protocols.html"><span>上一篇</span>SFTP、S3 和 FTP</a>
           <a class="forward" href="sign-in.html"><span>下一篇</span>单点登录</a>
         </nav>
+
 </main>
     </div>
     <footer class="site-footer">

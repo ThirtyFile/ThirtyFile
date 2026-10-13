@@ -574,6 +574,7 @@ pub async fn create(State(st): State<AppState>, Admin(user): Admin, Json(mut req
 
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
+    crate::auth::require_admin(&mut tx, &user).await?;
     let res = async {
         let mut ids = Vec::new();
         for drive_id in &req.drive_ids {
@@ -657,12 +658,13 @@ async fn job_for(st: &AppState, id: &str) -> AppResult<(Job, String)> {
 }
 
 /// Pauses a move: a running one stops after the item it is copying, keeping what it copied
-pub async fn pause(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
+pub async fn pause(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
+    let _actor_lock = st.write_lock.lock().await;
+    crate::auth::require_admin(&mut *st.db.acquire().await?, &user).await?;
     if let Some(ctl) = st.part::<Memory>().queue.running.lock().get(&id) {
         ctl.pause.store(true, Ordering::SeqCst);
         return Ok(Json(json!({ "ok": true })));
     }
-    let _w = st.write_lock.lock().await;
     let changed = sqlx::query("UPDATE space_moves SET state = 'paused' WHERE id = ? AND state = 'queued'").bind(&id).execute(&st.db).await?.rows_affected();
     if changed == 0 {
         return Err(AppError::conflict("This move can't be paused now"));
@@ -671,9 +673,10 @@ pub async fn pause(State(st): State<AppState>, _: Admin, Path(id): Path<String>)
 }
 
 /// Resumes a paused or failed move: it waits for its turn, then continues where it stopped
-pub async fn resume(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
+pub async fn resume(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
+    let _actor_lock = st.write_lock.lock().await;
+    crate::auth::require_admin(&mut *st.db.acquire().await?, &user).await?;
     {
-        let _w = st.write_lock.lock().await;
         let changed = sqlx::query("UPDATE space_moves SET state = 'queued', error = NULL WHERE id = ? AND state IN ('paused', 'failed')")
             .bind(&id)
             .execute(&st.db)
@@ -688,14 +691,15 @@ pub async fn resume(State(st): State<AppState>, _: Admin, Path(id): Path<String>
 }
 
 /// Cancels a move: the space stays where it was, and what was copied is removed
-pub async fn cancel(State(st): State<AppState>, _: Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
+pub async fn cancel(State(st): State<AppState>, Admin(user): Admin, Path(id): Path<String>) -> AppResult<Json<Value>> {
+    let _actor_lock = st.write_lock.lock().await;
+    crate::auth::require_admin(&mut *st.db.acquire().await?, &user).await?;
     if let Some(ctl) = st.part::<Memory>().queue.running.lock().get(&id) {
         ctl.cancel.store(true, Ordering::SeqCst);
         return Ok(Json(json!({ "ok": true })));
     }
     let (job, _) = job_for(&st, &id).await?;
     {
-        let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
         let res = async {
             let (state,): (MoveState,) = sqlx::query_as("SELECT state FROM space_moves WHERE id = ?").bind(&id).fetch_one(&mut *tx).await?;
@@ -707,6 +711,7 @@ pub async fn cancel(State(st): State<AppState>, _: Admin, Path(id): Path<String>
         .await;
         crate::db::settle(tx, res).await?;
     }
+    drop(_actor_lock);
     remove_copies(&st, &job).await?;
     Ok(Json(json!({ "ok": true })))
 }
@@ -724,6 +729,7 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
     {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
+        crate::auth::require_admin(&mut tx, &user).await?;
         let res = async {
             crate::db::set_setting(&mut tx, "move_jobs", &req.concurrency.to_string()).await?;
             crate::logs::record_activity(&mut tx, &user, None, "settings", &format!("Moves at the same time: {}", req.concurrency)).await?;

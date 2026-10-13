@@ -57,6 +57,7 @@ function toReq(s: SsoSettings): SsoSettingsReq {
 
 /** A rule as edited: the domain and the size are typed as text */
 interface RuleDraft {
+  guest: boolean;
   /** Stable key for the card: removing a rule mustn't move focus or IME state into the next card */
   key: string;
   domain: string;
@@ -73,8 +74,9 @@ interface RuleDraft {
 
 const toGb = (bytes: number | null) => (bytes === null ? "" : String(+(bytes / GB).toFixed(2)));
 const ruleKey = () => Math.random().toString(36).slice(2);
-const newRule = (): RuleDraft => ({ key: ruleKey(), domain: "", can_write: true, can_delete: true, can_share: true, quotaGb: "", groups: [], personal: "", location: "" });
+const newRule = (): RuleDraft => ({ guest: false, key: ruleKey(), domain: "", can_write: true, can_delete: true, can_share: true, quotaGb: "", groups: [], personal: "", location: "" });
 const ruleDraft = (r: SsoDomainRule): RuleDraft => ({
+  guest: r.guest,
   key: ruleKey(),
   domain: r.domain,
   can_write: r.can_write,
@@ -90,14 +92,15 @@ const ruleReq = (d: RuleDraft): SsoDomainRule => {
   const bytes = q === "" ? null : Math.max(0, Math.round(Number(q) * GB));
   return {
     domain: d.domain.trim().toLowerCase(),
+    guest: d.guest,
     can_write: d.can_write,
     can_delete: d.can_delete,
     can_share: d.can_share,
     quota_bytes: Number.isFinite(bytes ?? 0) ? bytes : null,
     groups: d.groups,
-    personal_space: d.personal === "" ? null : d.personal === "yes",
+    personal_space: d.guest ? false : d.personal === "" ? null : d.personal === "yes",
     // A location only matters when the accounts get a personal space
-    personal_location: d.personal === "no" ? null : d.location || null,
+    personal_location: d.guest || d.personal === "no" ? null : d.location || null,
   };
 };
 
@@ -268,11 +271,20 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="grid gap-2">
+                  <label className="flex items-center justify-between gap-3 text-sm">
+                    <span>{t("Create guest accounts")}</span>
+                    <Toggle label={t("Create guest accounts")} checked={r.guest} onChange={(guest) => setRule(i, { guest, ...(guest ? { personal: "no" as const } : {}) })} />
+                  </label>
                   <div className="text-[13px] font-medium">{t("New accounts may")}</div>
                   {PERMISSIONS.map((k) => (
                     <label key={k} className="flex items-center justify-between gap-3 text-sm">
                       <span>{PERMISSION_LABEL[k]}</span>
-                      <Toggle label={PERMISSION_LABEL[k]} checked={r[k]} onChange={(v) => setRule(i, { [k]: v })} />
+                      <Toggle
+                        label={PERMISSION_LABEL[k]}
+                        checked={r[k] && !(r.guest && k === "can_share")}
+                        disabled={r.guest && k === "can_share"}
+                        onChange={(v) => setRule(i, { [k]: v })}
+                      />
                     </label>
                   ))}
                   <p className="text-xs text-muted-foreground">{PERMISSIONS_HINT}</p>
@@ -290,12 +302,18 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
                   </div>
                   <div className="grid gap-1.5">
                     <Label htmlFor={`rule-${i}-personal`}>{t('"My files" of new accounts')}</Label>
-                    <NativeSelect id={`rule-${i}-personal`} size="lg" value={r.personal} onChange={(e) => setRule(i, { personal: e.target.value as RuleDraft["personal"] })}>
+                    <NativeSelect
+                      id={`rule-${i}-personal`}
+                      size="lg"
+                      value={r.guest ? "no" : r.personal}
+                      disabled={r.guest}
+                      onChange={(e) => setRule(i, { personal: e.target.value as RuleDraft["personal"] })}
+                    >
                       <option value="">{t("As in the system settings")}</option>
                       <option value="yes">{t("Create")}</option>
                       <option value="no">{t("Don't create")}</option>
                     </NativeSelect>
-                    {r.personal !== "no" && (
+                    {!r.guest && r.personal !== "no" && (
                       <LocationSelect
                         aria-label={t('Storage location of "My files"')}
                         value={r.location}
@@ -457,11 +475,25 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
               {draft[id].provisioning === "create" && (
                 <>
                   <div className="grid gap-2">
+                    <label className="flex items-center justify-between gap-3 text-sm">
+                      <span>{t("Create guest accounts")}</span>
+                      <Toggle label={t("Create guest accounts")} checked={draft[id].defaults.guest} onChange={(guest) => setProvider(id, { defaults: { ...draft[id].defaults, guest } })} />
+                    </label>
+                    {draft[id].defaults.guest && (
+                      <p className="text-xs text-muted-foreground">
+                        {t('Guests use only explicitly shared access, including through WebDAV and SFTP. No "My files", space creation, sharing or Manager/Owner access.')}
+                      </p>
+                    )}
                     <div className="text-[13px] font-medium">{t("New accounts may")}</div>
                     {PERMISSIONS.map((k) => (
                       <label key={k} className="flex items-center justify-between gap-3 text-sm">
                         <span>{PERMISSION_LABEL[k]}</span>
-                        <Toggle label={PERMISSION_LABEL[k]} checked={draft[id].defaults[k]} onChange={(v) => setProvider(id, { defaults: { ...draft[id].defaults, [k]: v } })} />
+                        <Toggle
+                          label={PERMISSION_LABEL[k]}
+                          checked={draft[id].defaults[k] && !(draft[id].defaults.guest && k === "can_share")}
+                          disabled={draft[id].defaults.guest && k === "can_share"}
+                          onChange={(v) => setProvider(id, { defaults: { ...draft[id].defaults, [k]: v } })}
+                        />
                       </label>
                     ))}
                     <p className="text-xs text-muted-foreground">{PERMISSIONS_HINT}</p>

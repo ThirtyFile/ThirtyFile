@@ -1,6 +1,21 @@
 import { request, get, post, enc, qs, toParams } from "@/api/client";
 import { localizeLocated } from "@/api/names";
-import type { Node, Crumb, Role, PrincipalType, AccessInfo, Principal, CursorPage, SharedItem, ShareInfo, ShareFilter, ShareUpdate, ShareAccessOptions, PublicShare } from "@/api/types";
+import type {
+  Node,
+  Crumb,
+  Role,
+  PrincipalType,
+  AccessInfo,
+  RestrictionPreview,
+  Principal,
+  CursorPage,
+  SharedItem,
+  ShareInfo,
+  ShareFilter,
+  ShareUpdate,
+  ShareAccessOptions,
+  PublicShare,
+} from "@/api/types";
 
 /** Share links, access given to people and groups, and the public pages of share links */
 export const sharingApi = {
@@ -10,6 +25,8 @@ export const sharingApi = {
   createShare: (req: { node_id: string; password?: string; expires_at?: number; max_downloads?: number } & Partial<ShareAccessOptions>) => post<ShareInfo>("/shares", req),
   deleteShare: (id: string) => request("DELETE", enc`/shares/${id}`),
   access: (nodeId: string) => get<AccessInfo>(enc`/nodes/${nodeId}/access`),
+  restrictionPreview: (nodeId: string) => get<RestrictionPreview>(enc`/nodes/${nodeId}/restriction`),
+  setRestriction: (nodeId: string, restricted: boolean, expected: boolean) => post(enc`/nodes/${nodeId}/restriction`, { restricted, expected, confirmed: true }),
   grant: (
     nodeId: string,
     req: {

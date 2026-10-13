@@ -27,6 +27,8 @@ pub struct SystemInfo {
     pub(super) share_max_days: i64,
     /// Public share links can be created and opened
     pub(super) public_links: bool,
+    pub(super) share_own_groups: bool,
+    pub(super) guest_max_days: i64,
     /// Earlier versions kept per file (0 = none), and for how many days (0 = no limit)
     pub(super) version_keep: i64,
     pub(super) version_days: i64,
@@ -91,6 +93,8 @@ pub(super) async fn system_info(st: &AppState) -> AppResult<SystemInfo> {
         share_password_required: s.share_password_required,
         share_max_days: s.share_max_days,
         public_links: s.public_links,
+        share_own_groups: s.share_own_groups,
+        guest_max_days: s.guest_max_days,
         version_keep: s.version_keep,
         version_days: s.version_days,
         stats,
@@ -117,6 +121,8 @@ pub struct SettingsReq {
     pub(super) share_password_required: Option<bool>,
     pub(super) share_max_days: Option<i64>,
     pub(super) public_links: Option<bool>,
+    pub(super) share_own_groups: Option<bool>,
+    pub(super) guest_max_days: Option<i64>,
     pub(super) version_keep: Option<i64>,
     pub(super) version_days: Option<i64>,
 }
@@ -149,6 +155,7 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, Jso
     {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
+        let user = crate::auth::require_admin(&mut tx, &user).await?;
         save_spaces(&mut tx, &user, &req).await?;
         let public_url = req.public_url.as_deref().map(normalize_public_url).transpose()?;
         save_site(&mut tx, &user, &req, public_url.as_deref()).await?;
@@ -260,6 +267,18 @@ async fn save_sign_in(st: &AppState, tx: &mut SqliteConnection, user: &User, req
 
 /// Saves the settings of share links that are in `req`
 async fn save_sharing(tx: &mut SqliteConnection, user: &User, req: &SettingsReq) -> AppResult<()> {
+    if let Some(on) = req.share_own_groups {
+        set_setting(tx, "share_own_groups", if on { "1" } else { "0" }).await?;
+        logs::record_activity(tx, user, None, "settings", if on { "People may share only within their groups" } else { "People may share outside their groups" })
+            .await?;
+    }
+    if let Some(days) = req.guest_max_days {
+        if !(1..=crate::guests::MAX_DAYS).contains(&days) {
+            return Err(AppError::bad_request("Guest access must end within 1 to 3650 days"));
+        }
+        set_setting(tx, "guest_max_days", &days.to_string()).await?;
+        logs::record_activity(tx, user, None, "settings", &format!("New access given to guests must end within {days} days")).await?;
+    }
     if let Some(required) = req.share_password_required {
         set_setting(tx, "share_password_required", if required { "1" } else { "0" }).await?;
         let detail = if required { "Share links must have a password" } else { "Share links don't need a password" };
@@ -308,6 +327,12 @@ async fn save_versions(tx: &mut SqliteConnection, user: &User, req: &SettingsReq
 
 /// Once saved: the settings in memory take what `req` changed (and the site URL as `public_url` has it)
 fn apply(s: &mut crate::state::SystemSettings, req: SettingsReq, public_url: Option<String>) {
+    if let Some(on) = req.share_own_groups {
+        s.share_own_groups = on;
+    }
+    if let Some(days) = req.guest_max_days {
+        s.guest_max_days = days;
+    }
     if let Some(n) = req.version_keep {
         s.version_keep = n;
     }

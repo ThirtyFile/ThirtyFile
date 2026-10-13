@@ -188,7 +188,7 @@ pub(super) async fn shared_node(st: &AppState, share: &Share, root: &Node, id: &
     }
     let mut c = st.db.acquire().await?;
     match tree::get_node(&mut c, id).await? {
-        Some(n) if n.trashed_at.is_none() && tree::is_within(&mut c, &n.id, &share.node_id).await? => {
+        Some(n) if n.trashed_at.is_none() && tree::within_publication(&mut c, &share.node_id, &n.id).await? => {
             if let Some(s) = st.part::<crate::shares::Memory>().links.lock().get_mut(&share.id).filter(|s| s.writes == writes && s.within.len() < SEEN_ITEMS) {
                 s.within.insert(n.id.clone(), n.clone());
             }
@@ -259,7 +259,7 @@ pub async fn public_info(
     // The page polls this while open, and a bot can reload it endlessly: log one view per visitor per minute.
     // The address is only kept in memory for this; whether it is written to the log depends on the log settings
     if logs::first_view_in_a_while(&st, &share.id, &auth::client_ip(&st, addr, &headers)) {
-        record_share_access(&st, &share.id, share.owner_id, Some(&node), "view", &visitor);
+        record_share_access(&st, &share.id, share.owner_id, Some(&node), "view", &visitor).await;
         note_access(&st, &share.id, true);
     }
     let unlocked = unlocked(&st, &headers, &token, &share);
@@ -315,12 +315,12 @@ pub async fn unlock(
         return Err(AppError::new(StatusCode::TOO_MANY_REQUESTS, format!("Too many wrong passwords for this link. Try again in {wait} seconds.")));
     }
     if !verify_password(req.password, hash).await? {
-        record_share_access(&st, &share.id, share.owner_id, None, "password_fail", &visitor);
+        record_share_access(&st, &share.id, share.owner_id, None, "password_fail", &visitor).await;
         return Err(AppError::bad_request("Incorrect password"));
     }
     auth::attempt_succeeded(&st, &key);
     auth::attempt_succeeded(&st, &link_key);
-    record_share_access(&st, &share.id, share.owner_id, None, "unlock", &visitor);
+    record_share_access(&st, &share.id, share.owner_id, None, "unlock", &visitor).await;
     let value = unlock_value(&st, &share, now() + UNLOCK_SECS);
     let cookie = cookie_header(&st, &cookie_name(&token), &value, &format!("/api/public/shares/{token}"), UNLOCK_SECS);
     Ok(([(header::SET_COOKIE, cookie)], Json(json!({ "ok": true }))).into_response())
@@ -363,7 +363,7 @@ pub async fn public_children(
     if !node.is_folder() {
         return Err(AppError::bad_request("This isn't a folder"));
     }
-    let children = list_children(&mut *st.db.acquire().await?, &node.id, &q.paged()).await?;
+    let children = list_children(&mut *st.db.acquire().await?, &node.id, &q.paged().published()).await?;
     Ok(Json(children.map(|nodes| nodes.iter().map(public_node_json).collect())))
 }
 
@@ -422,7 +422,7 @@ pub async fn public_content(
         });
     }
     if !continuation {
-        record_share_access(&st, &share.id, share.owner_id, Some(&node), if download { "download" } else { "preview" }, &visitor);
+        record_share_access(&st, &share.id, share.owner_id, Some(&node), if download { "download" } else { "preview" }, &visitor).await;
         note_access(&st, &share.id, false);
     }
     if counted && limited {
@@ -522,17 +522,35 @@ pub(super) async fn serve_public_download(
     // reached doesn't use up the link
     let mut res = match roots.as_slice() {
         [one] if !one.is_folder() => serve_blob(st, headers, node_blob(st, one).await?, true).await?,
-        _ => downloads::zip_response(st, roots.clone(), tz).await?,
+        _ => {
+            let user = auth::user_by_id(st, &mut *st.db.acquire().await?, share.owner_id).await?.ok_or_else(gone)?;
+            downloads::zip_response_checked(
+                st,
+                roots.clone(),
+                tz,
+                Some(downloads::ZipAccess { user, publication: Some(share.node_id.clone()), share: Some(share.id.clone()) }),
+            )
+            .await?
+        }
     };
     if !continuation {
         count_download(st, &share).await?;
-        record_share_access(st, &share.id, share.owner_id, roots.first().map(|n| n as _), if single { "download" } else { "zip" }, visitor);
+        record_share_access(st, &share.id, share.owner_id, roots.first().map(|n| n as _), if single { "download" } else { "zip" }, visitor).await;
         note_access(st, &share.id, false);
         if single && share.max_downloads.is_some() {
             res.headers_mut().append(header::SET_COOKIE, download_cookie(st, token, &share, &roots[0].id)?);
         }
     }
     Ok(res)
+}
+
+/// Revalidate a running archive after each planned entry, including link expiry and revoked download permission.
+pub async fn check_stream_access(st: &AppState, token: &str) -> AppResult<()> {
+    let (share, _) = find_share(st, token).await?;
+    if !share.allow_download {
+        return Err(gone());
+    }
+    Ok(())
 }
 
 #[cfg(test)]

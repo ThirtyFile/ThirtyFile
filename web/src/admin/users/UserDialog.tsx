@@ -16,6 +16,7 @@ import { LocationSelect, useDefaultLocationId, useLocationName } from "@/compone
 import { useMe } from "@/lib/session";
 import { t } from "@/lib/i18n";
 import { formatBytes } from "@/lib/utils";
+import { GuestConversion } from "./GuestConversion";
 import { SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
 import { useConfirmIdentity } from "@/components/ConfirmIdentity";
 import { PERMISSION_LABEL, PERMISSIONS_HINT } from "@/admin/users/permissions";
@@ -30,6 +31,12 @@ export function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow 
   const [displayName, setDisplayName] = useState(user?.display_name ?? "");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<"admin" | "user">(user?.role ?? "user");
+  const [guest, setGuest] = useState(user?.guest ?? false);
+  const converting = !!user && guest && !user.guest;
+  const preview = useQuery({ queryKey: ["guest-conversion", user?.id], queryFn: () => api.guestConversion(user!.id), enabled: converting });
+  const [confirmedRevision, setConfirmedRevision] = useState<string | null>(null);
+  const confirmed = !!preview.data && confirmedRevision === preview.data.revision;
+  const blockedConversion = converting && (!preview.data || preview.data.owned_spaces.length > 0 || preview.data.unsafe_groups.length > 0 || !confirmed);
   const [canWrite, setCanWrite] = useState(user?.can_write ?? true);
   const [canDelete, setCanDelete] = useState(user?.can_delete ?? true);
   const [canShare, setCanShare] = useState(user?.can_share ?? true);
@@ -45,14 +52,14 @@ export function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow 
   // New users: "My files" and its location, preset from the system settings until changed here
   const [personal, setPersonal] = useState<boolean | null>(null);
   const [location, setLocation] = useState<string | null>(null);
-  const withPersonal = personal ?? system.data?.personal_spaces ?? true;
+  const withPersonal = !guest && (personal ?? system.data?.personal_spaces ?? true);
   const personalLocation = location ?? system.data?.personal_location ?? "";
   // "Default location" is sent as the location it names: left out, the system setting would apply instead
   const defaultLocation = useDefaultLocationId();
   // A new password or a different role hands the account over, and a new administrator can do everything: the
   // administrator confirms who they are first
   const identity = useConfirmIdentity("u-me");
-  const handsOver = user ? !!password || role !== user.role : role === "admin";
+  const handsOver = user ? !!password || role !== user.role || guest !== (user.guest ?? false) : role === "admin";
   const mine = handsOver ? { my_password: identity.values.password, my_code: identity.values.code } : {};
 
   const save = useMutation({
@@ -60,12 +67,21 @@ export function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow 
       const body = {
         display_name: displayName,
         role,
+        guest,
         can_write: canWrite,
         can_delete: canDelete,
         can_share: canShare,
         quota_bytes: quotaGb ? Math.round(Number(quotaGb) * GB) : 0,
       };
-      if (user) return api.updateUser(user.id, { ...body, disabled, password: password || undefined, ...mine });
+      if (user)
+        return api.updateUser(user.id, {
+          ...body,
+          disabled,
+          password: password || undefined,
+          confirm_guest: converting && confirmed,
+          guest_revision: converting ? preview.data?.revision : undefined,
+          ...mine,
+        });
       return api.createUser({ ...body, username, password, personal_space: withPersonal, personal_location: withPersonal ? personalLocation || defaultLocation : undefined, ...mine });
     },
     onSuccess: (row) => {
@@ -110,22 +126,59 @@ export function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow 
               <Input id="u-pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" {...errorProps(save.error, "u-error")} />
             </div>
             <div className="grid gap-1.5">
-              <Label id="u-role">{t("Role")}</Label>
-              <div role="group" aria-labelledby="u-role" className="flex gap-1.5">
-                <Button type="button" size="sm" variant={role === "user" ? "default" : "outline"} aria-pressed={role === "user"} disabled={self} onClick={() => setRole("user")}>
+              <Label id="u-role">{t("Account type")}</Label>
+              <div role="group" aria-labelledby="u-role" className="flex flex-wrap gap-1.5">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={role === "user" && !guest ? "default" : "outline"}
+                  aria-pressed={role === "user" && !guest}
+                  disabled={self}
+                  onClick={() => {
+                    setRole("user");
+                    setGuest(false);
+                  }}
+                >
                   {t("Standard user")}
                 </Button>
-                <Button type="button" size="sm" variant={role === "admin" ? "default" : "outline"} aria-pressed={role === "admin"} onClick={() => setRole("admin")}>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={role === "admin" ? "default" : "outline"}
+                  aria-pressed={role === "admin"}
+                  onClick={() => {
+                    setRole("admin");
+                    setGuest(false);
+                  }}
+                >
                   {t("Administrator")}
                 </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={guest ? "default" : "outline"}
+                  aria-pressed={guest}
+                  disabled={self}
+                  onClick={() => {
+                    setRole("user");
+                    setGuest(true);
+                  }}
+                >
+                  {t("Guest")}
+                </Button>
               </div>
+              {guest && (
+                <p className="text-xs text-muted-foreground">
+                  {t('Guests use only explicitly shared access, including through WebDAV and SFTP. No "My files", space creation, sharing or Manager/Owner access.')}
+                </p>
+              )}
             </div>
             <div className="grid gap-2">
               <Label>{t("Permissions")}</Label>
               <div className="flex flex-wrap gap-x-5 gap-y-2">
                 <Perm label={PERMISSION_LABEL.can_write} admin={role === "admin"} checked={canWrite} onChange={setCanWrite} />
                 <Perm label={PERMISSION_LABEL.can_delete} admin={role === "admin"} checked={canDelete} onChange={setCanDelete} />
-                <Perm label={PERMISSION_LABEL.can_share} admin={role === "admin"} checked={canShare} onChange={setCanShare} />
+                <Perm label={PERMISSION_LABEL.can_share} admin={role === "admin"} checked={!guest && canShare} disabled={guest} onChange={setCanShare} />
               </div>
               <p className="text-xs text-muted-foreground">{PERMISSIONS_HINT}</p>
             </div>
@@ -149,7 +202,7 @@ export function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow 
             {!user && (
               <div className="grid gap-1.5">
                 <Label className="flex items-center gap-2 font-normal">
-                  <Checkbox checked={withPersonal} disabled={!system.data} onCheckedChange={(v) => setPersonal(!!v)} />
+                  <Checkbox checked={withPersonal} disabled={guest || !system.data} onCheckedChange={(v) => setPersonal(!!v)} />
                   {t('Create "My files" (a private space only they can see)')}
                 </Label>
                 {withPersonal && <LocationSelect aria-label={t('Storage location of "My files"')} value={personalLocation} onChange={setLocation} blank="default" disabled={!system.data} />}
@@ -166,7 +219,7 @@ export function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow 
                         ? t("My files pending (location unavailable)")
                         : t('No "My files"')}
                   </span>
-                  {!user.personal_space && (
+                  {!guest && !user.personal_space && (
                     <Button type="button" variant="link" className="h-auto p-0" onClick={() => onPersonal("add", user)}>
                       {t('Create "My files"…')}
                     </Button>
@@ -185,6 +238,7 @@ export function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow 
                 {t("Disable this account (can't sign in, and share links stop working)")}
               </Label>
             )}
+            {converting && <GuestConversion query={preview} confirmed={confirmed} onConfirm={(v) => setConfirmedRevision(v ? (preview.data?.revision ?? null) : null)} />}
             {handsOver && (
               <div className="grid gap-2 rounded-md border p-3">
                 <p className="text-xs text-muted-foreground">
@@ -201,7 +255,7 @@ export function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow 
             <Button type="button" variant="outline" onClick={onClose}>
               {t("Cancel")}
             </Button>
-            <Button type="submit" disabled={save.isPending || (!user && (!username || !password)) || (handsOver && !identity.ready)}>
+            <Button type="submit" disabled={save.isPending || blockedConversion || (!user && (!username || !password)) || (handsOver && !identity.ready)}>
               {save.isPending && <Loader2Icon className="animate-spin" />}
               {user ? t("Save") : t("Create")}
             </Button>
@@ -213,10 +267,10 @@ export function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow 
 }
 
 /** Account permission checkboxes; admins always have every permission */
-function Perm({ label, checked, admin, onChange }: { label: string; checked: boolean; admin: boolean; onChange(v: boolean): void }) {
+function Perm({ label, checked, admin, disabled, onChange }: { label: string; checked: boolean; admin: boolean; disabled?: boolean; onChange(v: boolean): void }) {
   return (
     <Label className="flex items-center gap-2 font-normal">
-      <Checkbox checked={admin || checked} disabled={admin} onCheckedChange={(v) => onChange(!!v)} />
+      <Checkbox checked={admin || checked} disabled={admin || disabled} onCheckedChange={(v) => onChange(!!v)} />
       {label}
     </Label>
   );

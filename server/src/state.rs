@@ -133,6 +133,8 @@ pub struct SystemSettings {
     pub share_max_days: i64,
     /// Public share links can be created and opened; while off, existing links stop working (they aren't deleted)
     pub public_links: bool,
+    pub share_own_groups: bool,
+    pub guest_max_days: i64,
     /// Earlier versions kept per file (0 = none)
     pub version_keep: i64,
     /// Days an earlier version is kept after it was replaced (0 = no limit)
