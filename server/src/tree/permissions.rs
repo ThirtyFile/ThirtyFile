@@ -139,6 +139,11 @@ pub async fn allows_on(conn: &mut SqliteConnection, user: &User, role: Role, nee
         fresh_role = Some(Role::Manager);
     }
     let role = fresh_role.ok_or_else(|| AppError::not_found("Item not found"))?.min(role);
+    allows_current(conn, user, role, need, node).await
+}
+
+/// The capability and ownership checks after the caller has resolved the current account and role.
+async fn allows_current(conn: &mut SqliteConnection, user: &User, role: Role, need: Need, node: &Node) -> AppResult<()> {
     let refused = match allows(user, role, need) {
         Ok(()) => return Ok(()),
         Err(e) => e,
@@ -295,7 +300,11 @@ pub async fn live_role_on(conn: &mut SqliteConnection, user: &User, node: &Node)
 /// The user's role on a node (see `role_on`), and whether it or a folder it is in is in the trash
 async fn access(conn: &mut SqliteConnection, user: &User, node: &Node) -> AppResult<(Option<Role>, bool)> {
     let current = crate::auth::current_user(conn, user).await?;
-    let user = &current;
+    access_current(conn, &current, node).await
+}
+
+/// Roles are always queried again, with the current time; only the account may be transaction-local.
+async fn access_current(conn: &mut SqliteConnection, user: &User, node: &Node) -> AppResult<(Option<Role>, bool)> {
     let Some(drive) = get_drive(conn, node.drive()).await? else { return Ok((None, false)) };
     if drive.disabled || (user.guest && drive.kind == super::SpaceKind::Personal && drive.owner_id == Some(user.id)) {
         return Ok((None, false));
@@ -404,6 +413,50 @@ pub async fn node_for(conn: &mut SqliteConnection, user: &User, id: &str, need: 
         return Err(read_only_error(&n));
     }
     Ok(n)
+}
+
+/// Authorization for one trash transaction. BEGIN IMMEDIATE prevents another writer from changing account fields
+/// until it ends, but grants may expire and this transaction changes nodes, so neither roles nor nodes are cached.
+/// The transaction borrow prevents carrying the refreshed account into another transaction or past commit.
+pub(crate) struct TrashAccess<'tx, 'db> {
+    tx: &'tx mut sqlx::Transaction<'db, sqlx::Sqlite>,
+    actor: User,
+    scoped: bool,
+}
+
+impl<'tx, 'db> TrashAccess<'tx, 'db> {
+    /// Called only after the trash operation has its space locks, write lock and BEGIN IMMEDIATE transaction.
+    pub(crate) async fn new(tx: &'tx mut sqlx::Transaction<'db, sqlx::Sqlite>, actor: &User) -> AppResult<Self> {
+        let actor = crate::auth::current_user(tx, actor).await?;
+        let scoped = actor.protocol_root.is_some()
+            || actor.protocol_key.is_some()
+            || actor.sftp_credential.is_some()
+            || actor.ftp_credential.is_some()
+            || actor.activity_source.is_some();
+        Ok(Self { tx, actor, scoped })
+    }
+
+    pub(crate) async fn node(&mut self, id: &str) -> AppResult<Node> {
+        // Protocol credentials and atomic cancellation flags can expire/change during the transaction. Keep their
+        // existing per-operation validators, including publication boundaries and read-only credential scopes.
+        if self.scoped {
+            return node_for(self.tx, &self.actor, id, Need::Delete).await;
+        }
+        let id = resolve_alias(&self.actor, id)?;
+        let node = get_node(self.tx, id).await?.ok_or_else(|| AppError::not_found("Item not found"))?;
+        let (role, in_trash) = access_current(self.tx, &self.actor, &node).await?;
+        let role = role.filter(|_| !in_trash && node.trashed_at.is_none()).ok_or_else(|| AppError::not_found("Item not found"))?;
+        allows_current(self.tx, &self.actor, role, Need::Delete, &node).await?;
+        if node.space_read_only {
+            return Err(read_only_error(&node));
+        }
+        Ok(node)
+    }
+
+    /// The original trash, subtree, busy and disk checks use this same transaction and refreshed account.
+    pub(crate) fn parts(&mut self) -> (&mut SqliteConnection, &User) {
+        (&mut **self.tx, &self.actor)
+    }
 }
 
 /// A read-only space can be browsed, downloaded and shared

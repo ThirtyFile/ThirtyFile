@@ -7,6 +7,10 @@ use axum::{Json, extract::State};
 use suppaftp::tokio::AsyncRustlsFtpStream;
 use tokio::io::AsyncReadExt;
 
+// Test the production wrapper itself; the vendored crate has no upstream test-only dependencies.
+#[path = "../../vendor/libunftp/src/server/tls_upload_reader.rs"]
+mod tls_upload_reader;
+
 async fn download(ftp: &mut AsyncRustlsFtpStream, name: &str) -> Result<Vec<u8>, suppaftp::FtpError> {
     let mut stream = ftp.retr_as_stream(name).await?;
     let mut bytes = vec![];
@@ -248,6 +252,82 @@ async fn secure_client(env: &TestEnv, key: &manage::Created, tls: Arc<rustls::Cl
     ftp.login(&key.folder.username, &key.password).await.unwrap();
     ftp.transfer_type(suppaftp::types::FileType::Binary).await.unwrap();
     ftp
+}
+
+async fn secure_upload_stream(ftp: &mut AsyncRustlsFtpStream, tls: Arc<rustls::ClientConfig>, name: &str) -> tokio_rustls::client::TlsStream<tokio::net::TcpStream> {
+    let reply = ftp.custom_command("EPSV", &[suppaftp::Status::ExtendedPassiveMode]).await.unwrap().as_string().unwrap();
+    let port: u16 = reply.split("|||").nth(1).unwrap().split('|').next().unwrap().parse().unwrap();
+    let stream = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    ftp.custom_command(format!("STOR {name}"), &[suppaftp::Status::AboutToSend]).await.unwrap();
+    tokio_rustls::TlsConnector::from(tls).connect("localhost".try_into().unwrap(), stream).await.unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ftps_upload_eof_returns_close_notify_before_the_success_reply() {
+    use tokio::io::AsyncWriteExt;
+    let (env, _, created, plain) = fixture(false).await;
+    plain.finish().await;
+    let (server, tls) = tls_listener(&env).await;
+    let mut ftp = secure_client(&env, &created, tls.clone()).await;
+    for (name, content) in [("empty.txt", vec![]), ("encrypted.txt", vec![42; 131_072])] {
+        let mut data = secure_upload_stream(&mut ftp, tls.clone(), name).await;
+        assert_eq!(data.get_ref().1.handshake_kind(), Some(rustls::HandshakeKind::Resumed), "upload TLS must retain the control connection's session cache");
+        data.write_all(&content).await.unwrap();
+        // Like FTP_TLS.unwrap(), send close_notify, then require the peer's TLS close_notify instead of accepting
+        // a truncated TCP EOF. The server must finish this shutdown before storage can report success.
+        data.shutdown().await.unwrap();
+        let mut reply = vec![];
+        let eof = tokio::time::timeout(Duration::from_secs(5), data.read_to_end(&mut reply)).await.unwrap();
+        let response = tokio::time::timeout(Duration::from_secs(5), ftp.read_response(suppaftp::Status::ClosingDataConnection)).await.unwrap().unwrap();
+        assert_eq!(response.status, suppaftp::Status::ClosingDataConnection);
+        assert_eq!(bytes(&env, &created.folder.node_id, name).await, content);
+        assert!(reply.is_empty());
+        assert!(eof.is_ok(), "the upload peer must send close_notify: {eof:?}");
+    }
+    ftp.quit().await.unwrap();
+    drop(ftp);
+    server.finish().await;
+    env.st.db.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ftps_sender_can_send_close_notify_then_close_without_waiting_for_our_reply() {
+    let (env, _, created, plain) = fixture(false).await;
+    plain.finish().await;
+    let (server, tls) = tls_listener(&env).await;
+    let mut ftp = secure_client(&env, &created, tls).await;
+    // suppaftp sends its close_notify, immediately drops the data socket, then reads the control-channel reply.
+    for (name, content) in [("empty.txt", vec![]), ("encrypted.txt", vec![42; 131_072])] {
+        assert_eq!(ftp.put_file(name, &mut std::io::Cursor::new(&content)).await.unwrap_or_else(|error| panic!("{name}: {error:?}")), content.len() as u64);
+        assert_eq!(bytes(&env, &created.folder.node_id, name).await, content);
+    }
+    ftp.quit().await.unwrap();
+    drop(ftp);
+    server.finish().await;
+    env.st.db.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ftps_truncated_uploads_refuse_success_and_preserve_previous_bytes() {
+    use tokio::io::AsyncWriteExt;
+    let (env, _, created, plain) = fixture(false).await;
+    plain.finish().await;
+    let (server, tls) = tls_listener(&env).await;
+    let mut ftp = secure_client(&env, &created, tls.clone()).await;
+    ftp.put_file("encrypted.txt", &mut std::io::Cursor::new(b"original")).await.unwrap();
+    let mut data = secure_upload_stream(&mut ftp, tls, "encrypted.txt").await;
+    data.write_all(b"incomplete replacement").await.unwrap();
+    data.flush().await.unwrap();
+    // A TCP half-close without a TLS close_notify is truncation, not a successful end of an upload.
+    data.get_mut().0.shutdown().await.unwrap();
+    drop(data);
+    assert!(tokio::time::timeout(Duration::from_secs(5), ftp.read_response(suppaftp::Status::ClosingDataConnection)).await.unwrap().is_err());
+    assert_eq!(bytes(&env, &created.folder.node_id, "encrypted.txt").await, b"original");
+    assert_eq!(std::fs::read_dir(env.st.tmp_dir()).unwrap().count(), 0);
+    let _ = ftp.quit().await;
+    drop(ftp);
+    server.finish().await;
+    env.st.db.close().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

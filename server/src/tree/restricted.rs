@@ -123,13 +123,18 @@ pub async fn protect_saved(conn: &mut SqliteConnection, node: &Node) -> AppResul
     Ok(())
 }
 
+// Carry the flag while walking the subtree. A final join back to nodes lets SQLite scan unrelated rows by id.
+const RESTRICTED_SUBTREE_SQL: &str = "WITH RECURSIVE sub(id, restricted) AS (
+    SELECT id, restricted FROM nodes WHERE id = ?1
+    UNION ALL SELECT n.id, n.restricted FROM nodes n JOIN sub ON n.parent_id = sub.id
+  ) SELECT id FROM sub WHERE restricted AND id > ?2 ORDER BY id LIMIT 128";
+
 /// Moving or deleting a parent must never carry along descendants the caller cannot act on. Refusal is generic:
 /// neither the name nor even the number of restricted descendants is disclosed.
 pub async fn require_subtree(conn: &mut SqliteConnection, user: &User, node: &Node, need: super::Need) -> AppResult<()> {
     let mut after = String::new();
     loop {
-        let ids: Vec<(String,)> = sqlx::query_as("WITH RECURSIVE sub(id) AS (SELECT ?1 UNION ALL SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id) SELECT n.id FROM nodes n JOIN sub ON n.id = sub.id WHERE n.restricted AND n.id > ?2 ORDER BY n.id LIMIT 128")
-            .bind(&node.id).bind(&after).fetch_all(&mut *conn).await?;
+        let ids: Vec<(String,)> = sqlx::query_as(RESTRICTED_SUBTREE_SQL).bind(&node.id).bind(&after).fetch_all(&mut *conn).await?;
         if ids.is_empty() {
             return Ok(());
         }
@@ -142,5 +147,73 @@ pub async fn require_subtree(conn: &mut SqliteConnection, user: &User, node: &No
             }
         }
         after = ids.last().unwrap().0.clone();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{testutil, tree::Need};
+
+    #[tokio::test]
+    async fn checking_an_empty_subtree_does_not_scan_unrelated_nodes() {
+        let env = testutil::env().await;
+        let owner = env.user("owner", true).await;
+        let empty = env.folder(&owner, owner.root(), "Empty").await;
+        sqlx::query(
+            "WITH RECURSIVE items(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM items WHERE n < 5000)
+             INSERT INTO nodes (id, owner_id, parent_id, kind, name, drive_id, created_at, updated_at, restricted)
+             SELECT printf('unrelated-%05d', n), ?1, ?2, 'folder', printf('Unrelated %d', n),
+                    (SELECT drive_id FROM nodes WHERE id = ?2), ?3, ?3, 1 FROM items",
+        )
+        .bind(owner.id)
+        .bind(owner.root())
+        .bind(now())
+        .execute(&env.st.db)
+        .await
+        .unwrap();
+        let explain = format!("EXPLAIN QUERY PLAN {RESTRICTED_SUBTREE_SQL}");
+        let plan: Vec<(i64, i64, i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(explain.as_str())).bind(&empty).bind("").fetch_all(&env.st.db).await.unwrap();
+        let (version,): (String,) = sqlx::query_as("SELECT sqlite_version()").fetch_one(&env.st.db).await.unwrap();
+        println!("SQLite {version}: {plan:?}");
+        assert!(
+            plan.iter().all(|(_, _, _, detail)| !detail.starts_with("SCAN n ") && !(detail.starts_with("SEARCH n ") && detail.contains("(id>?)"))),
+            "An empty subtree must not search unrelated node rows: {plan:?}"
+        );
+        let mut conn = env.st.db.acquire().await.unwrap();
+        let node = super::super::get_node(&mut conn, &empty).await.unwrap().unwrap();
+        require_subtree(&mut conn, &owner, &node, Need::Delete).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn subtree_checks_keep_restricted_descendants_after_the_first_page() {
+        let env = testutil::env().await;
+        let owner = env.user("owner", true).await;
+        let editor = env.user("editor", true).await;
+        let parent = env.folder(&owner, owner.root(), "Shared").await;
+        env.grant(&parent, &editor, "editor").await;
+        sqlx::query(
+            "WITH RECURSIVE items(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM items WHERE n < 128)
+             INSERT INTO nodes (id, owner_id, parent_id, kind, name, drive_id, created_at, updated_at, restricted)
+             SELECT printf('restricted-%03d', n), ?1, ?2, 'folder', printf('Restricted %d', n),
+                    (SELECT drive_id FROM nodes WHERE id = ?2), ?3, ?3, 1 FROM items",
+        )
+        .bind(owner.id)
+        .bind(&parent)
+        .bind(now())
+        .execute(&env.st.db)
+        .await
+        .unwrap();
+        for i in 0..129 {
+            env.grant(&format!("restricted-{i:03}"), &editor, if i == 128 { "viewer" } else { "editor" }).await;
+        }
+        let mut conn = env.st.db.acquire().await.unwrap();
+        let node = super::super::get_node(&mut conn, &parent).await.unwrap().unwrap();
+        require_subtree(&mut conn, &owner, &node, Need::Delete).await.unwrap();
+        let error = require_subtree(&mut conn, &editor, &node, Need::Delete).await.unwrap_err();
+        assert_eq!(error.status, axum::http::StatusCode::FORBIDDEN);
+        assert!(!error.message.contains("Restricted"));
+        sqlx::query("UPDATE grants SET role = 'editor' WHERE node_id = 'restricted-128'").execute(&mut *conn).await.unwrap();
+        require_subtree(&mut conn, &editor, &node, Need::Delete).await.unwrap();
     }
 }

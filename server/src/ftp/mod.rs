@@ -7,6 +7,8 @@ pub mod manage;
 mod storage;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tls_tests;
 
 use crate::{
     error::{AppError, AppResult},
@@ -16,6 +18,7 @@ use libunftp::{
     ServerBuilder,
     options::{ActivePassiveMode, FtpsRequired, PassiveHost},
 };
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use std::{
     collections::HashMap,
     net::{IpAddr, Shutdown},
@@ -92,10 +95,11 @@ fn tls(settings: &Settings, private_plain: bool) -> AppResult<Option<Arc<rustls:
         (None, None) if private_plain => return Ok(None),
         _ => return Err(AppError::bad_request("Mount an FTP TLS certificate and key, or allow plaintext on private networks")),
     };
-    let mut cert = std::io::BufReader::new(std::fs::File::open(cert)?);
-    let certs = rustls_pemfile::certs(&mut cert).collect::<Result<Vec<_>, _>>()?;
-    let key =
-        rustls_pemfile::private_key(&mut std::io::BufReader::new(std::fs::File::open(key)?))?.ok_or_else(|| AppError::bad_request("The FTP TLS key is missing"))?;
+    let certs = CertificateDer::pem_reader_iter(std::fs::File::open(cert)?).collect::<Result<Vec<_>, _>>().map_err(AppError::internal)?;
+    let key = PrivateKeyDer::from_pem_reader(std::fs::File::open(key)?).map_err(|e| match e {
+        rustls::pki_types::pem::Error::NoItemsFound => AppError::bad_request("The FTP TLS key is missing"),
+        e => AppError::internal(e),
+    })?;
     let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
     let mut config = rustls::ServerConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()

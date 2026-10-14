@@ -52,6 +52,10 @@ struct MeasuringReader<R> {
     command: &'static str,
 }
 
+#[path = "tls_upload_reader.rs"]
+mod tls_upload_reader;
+use tls_upload_reader::TlsUploadReader;
+
 impl<W: AsyncWrite + Unpin> AsyncWrite for MeasuringWriter<W> {
     fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> std::task::Poll<Result<usize, std::io::Error>> {
         let this = self.get_mut();
@@ -580,9 +584,14 @@ where
             FtpsConfig::Building { .. } => panic!("Illegal state"),
             FtpsConfig::On { tls_config } => {
                 let io = async move {
-                    let acceptor: TlsAcceptor = tls_config.into();
+                    // Upload data sockets are single-use and clients may never read post-handshake tickets.
+                    // Keep the control connection's shared cache and accept its resumptions, without issuing
+                    // new TLS 1.3 tickets that can make a write-only client's immediate close reset TCP.
+                    let mut upload_config = tls_config.as_ref().clone();
+                    upload_config.send_tls13_tickets = 0;
+                    let acceptor: TlsAcceptor = Arc::new(upload_config).into();
                     let tls_stream = acceptor.accept(socket).await.unwrap();
-                    MeasuringReader::new(tls_stream, command)
+                    MeasuringReader::new(TlsUploadReader::new(tls_stream), command)
                 }
                 .await;
                 Box::new(io) as Box<dyn AsyncRead + Send + Unpin + Sync>

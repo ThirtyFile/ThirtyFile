@@ -9,8 +9,10 @@ const nameOf = (i: number) => `Item ${String(i).padStart(4, "0")}`;
 
 /** A folder of `size` folders, made through the API a few at a time; in `parent`, or in My files */
 async function bigFolder(page: Page, size = COUNT, parent?: string): Promise<string> {
+  const started = Date.now();
   const big = await makeFolder(page, "Large", parent);
   for (let i = 0; i < size; i += 25) await Promise.all(Array.from({ length: Math.min(25, size - i) }, (_, k) => makeFolder(page, nameOf(i + k), big)));
+  console.info(`Large folder fixture: ${size} items in ${Date.now() - started} ms`);
   return big;
 }
 
@@ -30,8 +32,32 @@ function part(page: Page, id: string, offset: number) {
  */
 function lastBatch(page: Page, path: string, count: number): Promise<Response> {
   let left = count;
-  return page.waitForResponse((r) => r.request().method() === "POST" && new URL(r.url()).pathname === path && (left -= r.request().postDataJSON().ids.length) <= 0);
+  const started = Date.now();
+  return page.waitForResponse(async (r) => {
+    if (r.request().method() !== "POST" || new URL(r.url()).pathname !== path) return false;
+    const size = r.request().postDataJSON().ids.length;
+    console.info(`${path}: ${size} items, status ${r.status()}, ${Date.now() - started} ms after confirmation`);
+    // A failed earlier batch stops the operation: return it to the success assertion instead of hiding it as a timeout.
+    if (!r.ok()) {
+      console.error(`${path}: ${(await r.text()).slice(0, 2000)}`);
+      return true;
+    }
+    left -= size;
+    return left <= 0;
+  });
 }
+
+test("the batch waiter reports an earlier HTTP failure without waiting for the remaining items", async ({ page }) => {
+  await signIn(page);
+  await page.route("**/api/nodes/trash", (route) => route.fulfill({ status: 503, json: { error: "The storage is temporarily unavailable" } }));
+  const failed = lastBatch(page, "/api/nodes/trash", 2100);
+  await page.evaluate(async () => {
+    await fetch("/api/nodes/trash", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: ["fixture-item"] }) });
+  });
+  const response = await failed;
+  expect(response.status()).toBe(503);
+  expect(await response.json()).toEqual({ error: "The storage is temporarily unavailable" });
+});
 
 /** Where the parts the page asks for start */
 function parts(page: Page) {
@@ -139,8 +165,10 @@ test("going up to a folder far down a large folder shows and selects the folder 
   // Into the last item (by its address: it isn't loaded), then up again
   await page.goto(`/files/${last}`);
   await expect(page.getByText("No files here yet")).toBeVisible();
+  const restored = part(page, big, 1000);
   await page.keyboard.press("Alt+ArrowUp");
   await page.waitForURL(`**/files/${big}`);
+  expect((await restored).ok()).toBe(true);
   const left = page.locator("[data-node-id]").filter({ hasText: "zz last" });
   await expect(left).toHaveAttribute("aria-selected", "true");
   await expect(left).toBeInViewport();
