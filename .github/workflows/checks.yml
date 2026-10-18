@@ -1,7 +1,9 @@
-# The required pull-request gate: formatting, translations, types, lint, the interface's unit tests, and the server
-# compiled with clippy, so nothing that doesn't build reaches main. No server tests, coverage, browser tests or image
-# builds: complete verification is run locally, before releases, or through Build's manual entry point.
-# Pushes to main run it too, to keep the Rust build cache warm for pull requests (they restore it; only main saves it).
+# The required pull-request gate: formatting, translations, types, lint, the interface's unit tests with their coverage
+# floor, the server compiled with clippy, the server's dependencies (cargo deny), and the server's tests for changes to
+# the server, so what made releases fail shows on the pull request. No browser tests or image builds: complete
+# verification is run locally, before releases, or through Build's manual entry point.
+# Pushes to main run it too, server tests included, to keep the Rust build cache warm for pull requests (they restore
+# it; only main saves it).
 name: Checks
 
 on:
@@ -20,8 +22,8 @@ jobs:
   check:
     name: Checks passed
     runs-on: ubuntu-latest
-    # A cold Rust cache compiles every dependency once
-    timeout-minutes: 30
+    # A cold Rust cache compiles every dependency once, for clippy and for the tests
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -43,4 +45,19 @@ jobs:
           workspaces: server
           shared-key: checks
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Known security problems in the Rust dependencies, their licences and where they come from (server/deny.toml),
+      # as before releases: a new advisory shows here rather than when a release is cut
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        with:
+          tool: cargo-deny
       - run: bash scripts/check.sh quick
+      - name: Rust dependencies
+        run: cargo deny --manifest-path server/Cargo.toml check
+      # The server's tests, when the pull request changes the server (or the API shapes its tests compare)
+      - name: Server tests
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && git diff --quiet "origin/$GITHUB_BASE_REF...HEAD" -- server/ web/tests/contract/; then
+            echo "The server isn't changed: its tests run before releases"
+          else
+            cd server && cargo test --locked
+          fi

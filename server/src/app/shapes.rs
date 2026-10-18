@@ -96,6 +96,38 @@ async fn api_shapes_match_the_recorded_ones() {
     };
     record("Job", &call(&app, &me, Method::GET, &format!("/api/jobs/{job}"), None).await);
 
+    // Restricting a folder, and turning a member into a guest: what each would change
+    record("RestrictionPreview", &call(&app, &me, Method::GET, &format!("/api/nodes/{folder}/restriction"), None).await);
+    record("GuestConversionPreview", &call(&app, &me, Method::GET, &format!("/api/admin/users/{}/guest-conversion", amy.id), None).await);
+
+    // The protocols: S3 with a bucket and a key, FTP with a receive folder, SFTP with a key, and an app password
+    let password = testutil::password();
+    // Published from a team space's folder
+    let exchange = env.folder(&admin, &env.st.shared_root().unwrap(), "Exchange").await;
+    let s3 = json!({ "enabled": true, "hostname": "s3.example.com", "region": "us-east-1", "managers_publish": false });
+    record("S3Config", &call(&app, &me, Method::PUT, "/api/admin/s3", Some(s3)).await);
+    let bucket = call(&app, &me, Method::POST, "/api/s3/buckets", Some(json!({ "node_id": exchange, "name": "reports", "password": password }))).await;
+    record("NewS3Bucket", &bucket);
+    let key = json!({ "description": "Backup", "writable": false, "expires_at": null, "password": password });
+    let bucket_id = bucket["id"].as_str().unwrap();
+    record("NewS3Key", &call(&app, &me, Method::POST, &format!("/api/s3/buckets/{bucket_id}/keys"), Some(key)).await);
+    let buckets = call(&app, &me, Method::GET, &format!("/api/s3/buckets?node_id={exchange}"), None).await;
+    record("S3Bucket", &buckets["buckets"][0]);
+    record("S3Key", &buckets["buckets"][0]["keys"][0]);
+    let ftp = json!({ "enabled": true, "managers_publish": false, "allow_private_plaintext": false });
+    record("FtpStatus", &call(&app, &me, Method::PUT, "/api/admin/ftp", Some(ftp)).await);
+    let receive =
+        json!({ "node_id": exchange, "name": "Scanner", "enabled": true, "allow_list": false, "allow_read": false, "expires_at": null, "password": password });
+    record("FtpCreated", &call(&app, &me, Method::POST, "/api/ftp/folders", Some(receive)).await);
+    record("FtpFolder", &call(&app, &me, Method::GET, &format!("/api/ftp/folders?node_id={exchange}"), None).await["folders"][0]);
+    record("SftpSettings", &call(&app, &me, Method::GET, "/api/admin/sftp", None).await);
+    let private = russh::keys::PrivateKey::from(russh::keys::ssh_key::private::Ed25519Keypair::from_seed(&[7; 32]));
+    let public = private.public_key().to_openssh().unwrap();
+    record("SftpKey", &call(&app, &me, Method::POST, "/api/auth/sftp-keys", Some(json!({ "name": "Laptop", "public_key": public, "password": password }))).await);
+    let app_password = json!({ "name": "Backup", "scope": "read", "password": password });
+    record("NewAppPassword", &call(&app, &me, Method::POST, "/api/auth/app-passwords", Some(app_password)).await);
+    record("AppPassword", &call(&app, &me, Method::GET, "/api/auth/app-passwords", None).await[0]);
+
     let now = serde_json::to_string_pretty(&Value::Object(shapes)).unwrap() + "\n";
     if std::env::var_os("THIRTYFILE_UPDATE_SHAPES").is_some() {
         std::fs::write(SHAPES, &now).unwrap();

@@ -1,6 +1,6 @@
 import { generateKeyPairSync } from "node:crypto";
 import { expect, test } from "@playwright/test";
-import { answer, signIn, signInAsNewUser, unique, USER_PASSWORD } from "./helpers";
+import { answer, asAdmin, signIn, signInAsNewUser, unique, USER_PASSWORD } from "./helpers";
 
 function publicKey() {
   const { publicKey } = generateKeyPairSync("ed25519");
@@ -13,6 +13,11 @@ function publicKey() {
   };
   return `ssh-ed25519 ${Buffer.concat([length(algorithm.length), algorithm, length(raw.length), raw]).toString("base64")}`;
 }
+
+// The server is shared: SFTP goes off again, so a retry, or a later run on the same server, finds it off as by default
+test.afterAll(({ browser }, info) =>
+  asAdmin(browser, info, async (request) => expect((await request.put("/api/admin/sftp", { data: { enabled: false, keys_enabled: false } })).ok()).toBe(true)),
+);
 
 test("SFTP is disabled by default and administrators can enable access and SSH keys", async ({ page }) => {
   await signIn(page);

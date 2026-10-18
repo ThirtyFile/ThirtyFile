@@ -37,10 +37,12 @@ const folder: FtpFolder = {
   allow_list: false,
   allow_read: false,
   expires_at: null,
+  created_at: 1,
   last_used_at: null,
   active: true,
 };
-const created: FtpCreated = { id: folder.id, node_id: folder.node_id, name: folder.name, username: folder.username, password: "new-device-password" };
+const { creator: _creator, folder_name: _folder, active: _active, ...made } = folder;
+const created: FtpCreated = { ...made, password: "new-device-password" };
 let root: Root;
 let qc: QueryClient;
 

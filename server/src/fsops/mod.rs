@@ -275,6 +275,31 @@ pub(crate) mod testing {
 
     static HUNG: Mutex<Option<HashMap<String, Duration>>> = Mutex::new(None);
 
+    static WAITING: Mutex<Option<HashMap<String, usize>>> = Mutex::new(None);
+
+    /// A change waiting for the scan lock of a folder space (`lock_space`), counted while it waits
+    pub struct Waiting(String);
+
+    impl Waiting {
+        pub fn new(drive: &str) -> Waiting {
+            *WAITING.lock().get_or_insert_default().entry(drive.to_string()).or_default() += 1;
+            Waiting(drive.to_string())
+        }
+    }
+
+    impl Drop for Waiting {
+        fn drop(&mut self) {
+            if let Some(n) = WAITING.lock().get_or_insert_default().get_mut(&self.0) {
+                *n -= 1;
+            }
+        }
+    }
+
+    /// How many changes are waiting for the scan lock of the folder space `drive` now (one that has it isn't counted)
+    pub fn waiting(drive: &str) -> usize {
+        WAITING.lock().get_or_insert_default().get(drive).copied().unwrap_or(0)
+    }
+
     /// Every call to the disk of the folder space `drive` takes `delay` until the guard is dropped
     pub fn hang(drive: &str, delay: Duration) -> impl Drop {
         struct Answer(String);

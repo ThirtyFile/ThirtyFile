@@ -15,7 +15,7 @@ export default defineConfig({
       reporter: ["text-summary", "json-summary"],
       // A floor under what the unit tests cover (pnpm test --coverage, as CI runs them fails below it): raised as tests
       // are added, never lowered to let a change through
-      thresholds: { statements: 39, branches: 29, functions: 32, lines: 40 },
+      thresholds: { statements: 40, branches: 30, functions: 33, lines: 41 },
     },
   },
 });

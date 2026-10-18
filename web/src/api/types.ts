@@ -1181,6 +1181,12 @@ export interface Device {
   current: boolean;
 }
 
+/** An app password just made: the token itself is only returned this once */
+export interface NewAppPassword {
+  token: string;
+  app_password: AppPassword;
+}
+
 /** An app password (the token itself is only returned once, when it is created) */
 export interface AppPassword {
   id: string;

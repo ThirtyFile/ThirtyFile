@@ -2,15 +2,20 @@
 # Starts an image the way people run it: with the compose.yaml that is shipped (read-only, few capabilities), on
 # folders bind-mounted from the host, which Docker creates as root so the server has to take them over for user 1000.
 # The latest release starts first and writes a file; the new image then starts on the same folders, upgrades them and
-# must still serve that file, and again after a restart.
+# must still serve that file, and again after a restart. On the new image SFTP, FTP and S3 are turned on and used once
+# each (smoke-protocols.sh), FTP with a certificate mounted as the guide says.
 #   smoke-test.sh <image> [<previous image>]
-# SMOKE_PLATFORM=linux/arm64 starts another platform's images (under QEMU). SMOKE_PORT and SMOKE_NAME (the Compose
-# project and container) let it run beside other instances.
+# SMOKE_PLATFORM=linux/arm64 starts another platform's images (under QEMU). SMOKE_PORT (the web's; SFTP and FTP take the
+# next two), SMOKE_PASSIVE (FTP's passive ports) and SMOKE_NAME (the Compose project and container) let it run beside
+# other instances.
 set -euo pipefail
 IMAGE="$1"
 PREVIOUS="${2:-ghcr.io/thirtyfile/thirtyfile:latest}"
 PLATFORM="${SMOKE_PLATFORM:-}"
 PORT="${SMOKE_PORT:-18080}"
+SFTP_PORT=$((PORT + 1))
+FTP_PORT=$((PORT + 2))
+PASSIVE="${SMOKE_PASSIVE:-30000-30001}"
 NAME="${SMOKE_NAME:-smoke}"
 BASE="http://127.0.0.1:$PORT"
 PASSWORD="smoke-$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
@@ -38,6 +43,11 @@ cleanup() {
 trap cleanup EXIT
 
 cp "$SHIPPED" "$DIR/compose.yaml"
+# FTP's certificate, made for the test; user 1000 reads it in the container
+mkdir "$DIR/ftp-tls"
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=localhost" \
+  -keyout "$DIR/ftp-tls/privkey.pem" -out "$DIR/ftp-tls/fullchain.pem" 2>/dev/null
+chmod 644 "$DIR/ftp-tls/privkey.pem"
 {
   echo "services:"
   echo "  thirtyfile:"
@@ -45,6 +55,18 @@ cp "$SHIPPED" "$DIR/compose.yaml"
   echo "    container_name: $NAME"
   echo "    ports: !override"
   echo "      - \"127.0.0.1:$PORT:8080\""
+  echo "      - \"127.0.0.1:$SFTP_PORT:2022\""
+  echo "      - \"127.0.0.1:$FTP_PORT:2121\""
+  echo "      - \"127.0.0.1:$PASSIVE:$PASSIVE\""
+  # As compose.yaml's comments say to turn them on
+  echo "    environment:"
+  echo "      THIRTYFILE_SFTP_ADDR: \"0.0.0.0:2022\""
+  echo "      THIRTYFILE_FTP_ADDR: \"0.0.0.0:2121\""
+  echo "      THIRTYFILE_FTP_PASSIVE: \"$PASSIVE\""
+  echo "      THIRTYFILE_FTP_CERT: /ftp-tls/fullchain.pem"
+  echo "      THIRTYFILE_FTP_KEY: /ftp-tls/privkey.pem"
+  echo "    volumes:"
+  echo "      - ./ftp-tls:/ftp-tls:ro"
   if [ -n "$PLATFORM" ]; then echo "    platform: $PLATFORM"; fi
 } > "$DIR/compose.override.yaml"
 
@@ -113,6 +135,7 @@ new_file "$DIR/new.cookies" hello.txt 'a plain file'
 added="$FILE_ID"
 on_disk=$(docker cp "$NAME:/storage/users/admin/hello.txt" - | tar -xO) || fail "My files isn't the folder storage/users/admin"
 [ "$on_disk" = "a plain file" ] || fail "storage/users/admin/hello.txt reads \"$on_disk\""
+bash "$(dirname "$0")/smoke-protocols.sh" "$BASE" "$PASSWORD" "$SFTP_PORT" "$FTP_PORT" || fail "a protocol doesn't work in the image"
 
 echo "== The new image, restarted"
 compose "$IMAGE" restart --timeout 30

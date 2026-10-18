@@ -113,7 +113,7 @@
           </li>
           <li><strong>完成更改</strong>，執行下方檢查。</li>
           <li><strong>建立 Pull Request。</strong>標題用清晰語言說明改動，並新增一個標籤。在說明中寫 <code>Closes #123</code>，合併後即可關閉對應 Issue。</li>
-          <li><strong>等待檢查。</strong>輕量的 <strong>Checks passed</strong> 檢查必須通過才能合併。</li>
+          <li><strong>等待檢查。</strong><strong>Checks passed</strong> 檢查必須通過才能合併。</li>
           <li><strong>合併。</strong>Pull Request 在 <code>main</code> 上壓縮為一個提交，隨後刪除分支。</li>
         </ol>
         <h2 id="checks">檢查</h2>
@@ -122,7 +122,7 @@
         <div class="table-scroll"><table>
           <thead><tr><th>部分</th><th>檢查內容</th></tr></thead>
           <tbody>
-            <tr><td><code>scripts/check.sh quick</code></td><td>自動 Pull Request 檢查：前端格式、翻譯、模組邊界、端到端測試結構、類型和 lint；Rust 格式；遷移編號及已發布遷移保持不變；網站連結。不執行單元/瀏覽器測試、Rust 編譯或映像建置</td></tr>
+            <tr><td><code>scripts/check.sh quick</code></td><td>自動 Pull Request 檢查：下方的前端檢查及單元測試與其覆蓋率門檻；Rust 格式和 clippy；遷移編號及已發布遷移保持不變；網站連結。在 GitHub 上，Pull Request 也會檢查伺服器的相依套件（<code>cargo deny</code>），並在變更伺服器時執行伺服器測試。不執行瀏覽器測試或映像建置</td></tr>
             <tr><td><code>scripts/check.sh web</code></td><td>介面：按鎖定檔安裝相依套件、格式（<code>pnpm format:check</code>）、翻譯（<code>node scripts/check-i18n.mjs</code>）、確保 <code>web/src/ooxml</code> 的 Office 程式碼不匯入應用程式其他模組（<code>node scripts/check-boundaries.mjs</code>）、確保端到端測試沒有固定等待且名稱包含隨機部分（<code>node scripts/check-e2e.mjs</code>）、類型、lint 和單元測試。使用 <code>scripts/check.sh web --coverage</code> 時（與 GitHub 一樣），覆蓋率低於 <code>web/vitest.config.ts</code> 中的門檻也會失敗</td></tr>
             <tr><td><code>scripts/check.sh server</code></td><td>伺服器：格式（<code>cargo fmt --check</code>）、<code>cargo test</code>，以及將警告視為錯誤的 <code>cargo clippy</code></td></tr>
             <tr><td><code>scripts/check.sh e2e</code></td><td>端到端測試：透過真實瀏覽器（Playwright）對從倉庫建置的伺服器執行登入、上傳和預覽。多個測試並行執行（GitHub 上為 4 個），因此每個測試使用獨立資料夾，名稱含隨機部分，操作後等待伺服器回應而非固定時間；<code>web/tests/e2e/helpers.ts</code> 提供這些輔助功能。首次執行前，用 <code>cd web &amp;&amp; pnpm exec playwright install chromium</code> 安裝瀏覽器</td></tr>
@@ -144,7 +144,7 @@ cd web &amp;&amp; pnpm format</code></pre>
           <li>網頁應用程式的 API 型別（<code>web/src/api/types.ts</code>）是手寫的。伺服器有一項測試把主要回應的結構記錄在 <code>web/tests/contract/shapes.json</code>，結構一改就會失敗：在 <code>server/</code> 執行 <code>THIRTYFILE_UPDATE_SHAPES=1 cargo test api_shapes</code>，再修改型別直到 <code>pnpm typecheck</code> 通過。</li>
           <li>會更改使用者檔案的邏輯（公式、活頁簿儲存、文字編碼）須在 <code>web/tests/unit/</code> 中新增單元測試。</li>
         </ul>
-        <p>每個 Pull Request 都執行上述輕量檢查。完整測試與映像建置在正式發布和預發布前執行，也可在 <strong>Actions › Build › Run workflow</strong> 手動執行；手動驗證不發布任何內容。發布前，兩種架構的映像都會使用 <code>compose.yaml</code> 在最新已發布版本的資料上啟動。CodeQL 在合併後、每週及發布前掃描 <code>main</code>。合併到 <code>main</code> 不發布任何內容，網站也不發布：指南隨版本發布，以描述使用者實際可安裝的功能。對目前已發布版本也正確的指南修復可手動發布：在 <strong>Actions › Website › Run workflow</strong> 中選擇 <code>main</code> 為要發布的分支或標籤。</p>
+        <p>每個 Pull Request 都執行上述檢查，約需數分鐘：<code>scripts/check.sh quick</code>、<code>cargo deny</code>，以及變更伺服器時的伺服器測試。完整測試與映像建置在正式發布和預發布前執行，也可在 <strong>Actions › Build › Run workflow</strong> 手動執行；手動驗證不發布任何內容。發布前，兩種架構的映像都會使用 <code>compose.yaml</code> 在最新已發布版本的資料上啟動。CodeQL 在合併後、每週及發布前掃描 <code>main</code>。合併到 <code>main</code> 不發布任何內容，網站也不發布：指南隨版本發布，以描述使用者實際可安裝的功能。對目前已發布版本也正確的指南修復可手動發布：在 <strong>Actions › Website › Run workflow</strong> 中選擇 <code>main</code> 為要發布的分支或標籤。</p>
         <h2 id="translations">其他語言的網站</h2>
         <p>首頁與全部 16 篇指南都提供英文、繁體中文、簡體中文與日文。每個語言都有相同的 17 個頁面：</p>
         <div class="table-scroll"><table>

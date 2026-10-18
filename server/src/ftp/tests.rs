@@ -40,13 +40,8 @@ async fn fixture(folders: bool) -> (TestEnv, User, manage::Created, Listener) {
     )
     .await
     .unwrap();
-    let socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = socket.local_addr().unwrap().port();
-    drop(socket);
     let server =
-        start(env.st.clone(), Settings { address: "127.0.0.1:0".into(), passive: format!("{port}-{port}"), host: String::new(), cert: None, key: None }, cfg)
-            .await
-            .unwrap();
+        start(env.st.clone(), Settings { address: "127.0.0.1:0".into(), passive: "0-0".into(), host: String::new(), cert: None, key: None }, cfg).await.unwrap();
     (env, admin, created, server)
 }
 async fn client(env: &TestEnv, key: &manage::Created) -> AsyncRustlsFtpStream {
@@ -122,17 +117,17 @@ async fn revocation_after_receive_while_waiting_for_final_transaction_keeps_orig
         let _ = ftp.quit().await;
         result
     });
+    // Received whole, it waits for the write lock to be put in place
     let staged = async {
         loop {
-            let count = std::fs::read_dir(env.st.tmp_dir()).unwrap().count();
-            if count > 0 {
+            let sizes: Vec<u64> = std::fs::read_dir(env.st.tmp_dir()).unwrap().flatten().filter_map(|e| e.metadata().ok()).map(|m| m.len()).collect();
+            if sizes.contains(&(b"replacement".len() as u64)) {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     };
     tokio::time::timeout(Duration::from_secs(5), staged).await.unwrap();
-    tokio::time::sleep(Duration::from_millis(100)).await;
     sqlx::query("UPDATE ftp_receive_folders SET enabled=0 WHERE id=?").bind(&created.folder.id).execute(&env.st.db).await.unwrap();
     drop(guard);
     assert!(tokio::time::timeout(Duration::from_secs(5), transfer).await.unwrap().unwrap().is_err());
@@ -155,7 +150,14 @@ async fn disabled_supervisor_does_not_bind_or_read_bad_certificate() {
         key: Some(env.dir.join("missing-key")),
     };
     let server = supervise(env.st.clone(), settings);
-    tokio::time::sleep(Duration::from_millis(650)).await;
+    // Once it has looked at the settings (FTP is off): nothing is bound or read
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while env.st.part::<Memory>().looks.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
     assert!(env.st.part::<Memory>().status.read().error.is_none());
     assert!(!env.st.part::<Memory>().status.read().listening);
     let http = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -231,14 +233,11 @@ async fn tls_listener(env: &TestEnv) -> (Listener, Arc<rustls::ClientConfig>) {
         .unwrap()
         .with_root_certificates(roots)
         .with_no_client_auth();
-    let socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = socket.local_addr().unwrap().port();
-    drop(socket);
     let cfg = config::Config { enabled: true, managers_publish: false, allow_private_plaintext: false };
     crate::db::set_setting(&mut env.st.db.acquire().await.unwrap(), "ftp", &serde_json::to_string(&cfg).unwrap()).await.unwrap();
     let listener = start(
         env.st.clone(),
-        Settings { address: "127.0.0.1:0".into(), passive: format!("{port}-{port}"), host: String::new(), cert: Some(cert_path), key: Some(key_path) },
+        Settings { address: "127.0.0.1:0".into(), passive: "0-0".into(), host: String::new(), cert: Some(cert_path), key: Some(key_path) },
         cfg,
     )
     .await
@@ -367,7 +366,13 @@ async fn ftps_preallocated_socket_cannot_downgrade_then_store_plaintext() {
     if accepted {
         data.write_all(b"plaintext on TLS-only listener").await.unwrap();
         data.shutdown().await.unwrap();
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        // Only when the server took it: the file it stores fails the test as soon as it is there
+        let _ = tokio::time::timeout(Duration::from_secs(5), async {
+            while crate::paths::child_named(&mut env.st.db.acquire().await.unwrap(), &created.folder.node_id, "must-not-exist.txt").await.unwrap().is_none() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
     }
     let node = crate::paths::child_named(&mut env.st.db.acquire().await.unwrap(), &created.folder.node_id, "must-not-exist.txt").await.unwrap();
     assert!(!accepted && node.is_none(), "a previously allocated passive socket must not authorize a plaintext STOR");

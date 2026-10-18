@@ -307,7 +307,14 @@ async fn rmdir_rechecks_disk_contents_after_waiting_for_a_space_turn() {
         let result = sftp.remove_dir("/My files/Unindexed").await;
         (sftp, result)
     });
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    // Waiting for its turn, behind the lock held here
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while crate::fsops::testing::waiting(parent.drive()) == 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
     assert!(!removing.is_finished());
     let file = parent.fs_pinned().unwrap().join("Unindexed").unwrap().join("Thumbs.db").unwrap();
     std::fs::write(file.as_path(), b"keep").unwrap();

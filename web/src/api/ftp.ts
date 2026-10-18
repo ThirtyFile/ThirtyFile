@@ -28,9 +28,11 @@ export interface FtpFolder extends FtpChange {
   creator: string;
   folder_name: string;
   active: boolean;
+  created_at: number;
   last_used_at: number | null;
 }
-export interface FtpCreated extends Pick<FtpFolder, "id" | "node_id" | "name" | "username"> {
+/** A receive folder just made, without what the list adds to it: its password is shown this once */
+export interface FtpCreated extends Omit<FtpFolder, "creator" | "folder_name" | "active"> {
   password: string;
 }
 export interface FtpConfirm {

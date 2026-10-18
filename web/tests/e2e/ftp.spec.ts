@@ -1,9 +1,17 @@
 import { test, expect } from "@playwright/test";
 import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
-import { PASSWORD, answer, makeFolder, signIn, unique } from "./helpers";
+import { PASSWORD, answer, asAdmin, makeFolder, signIn, unique } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
+
+// The server is shared: FTP goes off again, so a retry, or a later run on the same server, finds it off as by default
+test.afterAll(({ browser }, info) =>
+  asAdmin(browser, info, async (request) => {
+    const off = { enabled: false, managers_publish: false, allow_private_plaintext: false };
+    expect((await request.put("/api/admin/ftp", { data: off })).ok()).toBe(true);
+  }),
+);
 
 test("administrators configure receive folders and manage device credentials on desktop and mobile", async ({ page }) => {
   const errors: string[] = [];

@@ -22,7 +22,17 @@ vi.mock("@/admin/SettingsFrame", () => ({
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const config: S3Config = { enabled: false, hostname: "", region: "us-east-1", managers_publish: false };
-const key: S3Key = { id: "key-1", access_key: "test-access", description: "Backup reader", writable: false, enabled: true, expires_at: null, last_used_at: null };
+const key: S3Key = {
+  id: "key-1",
+  bucket_id: "bucket-1",
+  access_key: "test-access",
+  description: "Backup reader",
+  writable: false,
+  enabled: true,
+  expires_at: null,
+  created_at: 1,
+  last_used_at: null,
+};
 const bucket: S3Bucket = {
   id: "bucket-1",
   name: "client-backups",

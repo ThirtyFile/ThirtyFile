@@ -139,6 +139,8 @@ jobs:
           find "$CARGO_LLVM_COV_TARGET_DIR" -maxdepth 1 -name '*.profraw' -delete 2>/dev/null || true
           bash ../scripts/check.sh server
           bash ../scripts/check.sh e2e
+          # Tests that passed only when run again (CI retries once): listed, so a flaky test is seen and fixed
+          node ../web/scripts/e2e-summary.mjs >> "$GITHUB_STEP_SUMMARY"
           {
             echo "### Backend coverage (tests and the browser test)"
             echo '```'
@@ -149,10 +151,13 @@ jobs:
           # as tests are added, never lowered to let a change through
           cargo llvm-cov report --fail-under-lines 90 > /dev/null
 
-      # Known security problems in dependencies, their licences and where they come from (server/deny.toml)
-      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+      # Known security problems in dependencies, their licences and where they come from (server/deny.toml), with the
+      # toolchain installed above (the cargo-deny action's container looked for it and logged an error each run)
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
-          manifest-path: server/Cargo.toml
+          tool: cargo-deny
+      - name: Rust dependencies
+        run: cargo deny --manifest-path server/Cargo.toml check
       # And of the npm packages; their licences are checked against the list in web/scripts/third-party-notices.mjs,
       # which also writes their notices into the image
       # High and critical advisories stop a release; lower ones show in the weekly scan (scan.yml), which reports every

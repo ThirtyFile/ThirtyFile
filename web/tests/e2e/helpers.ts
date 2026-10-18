@@ -3,9 +3,11 @@
 // - names get a random part (`unique`), and a test looks its rows up inside a folder of its own;
 // - after a change, a test waits for the server's answer (`answer`, `uploadFinished`), never a fixed time: a change
 //   waits its turn behind the other tests' changes, and a large one (large-folder.spec.ts) holds the server for 10–40 s.
+// - a test that changes a server-wide setting puts it back afterwards (`asAdmin` in an afterAll hook), so a retry, or a
+//   run after one that stopped halfway, finds the default.
 // scripts/check-e2e.mjs checks the specs for fixed waits and for folders and accounts made without these helpers.
 import { randomBytes } from "node:crypto";
-import { expect, type Page, type Response } from "@playwright/test";
+import { expect, type APIRequestContext, type Browser, type Page, type Response, type TestInfo } from "@playwright/test";
 
 export const PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? "e2e-admin-password";
 
@@ -28,6 +30,20 @@ export async function signIn(page: Page) {
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.waitForURL(/\/files/);
+}
+
+/**
+ * Calls the API as the administrator, outside any test's page: for afterAll hooks (`test.afterAll(({ browser }, info) =>
+ * asAdmin(browser, info, …))`) that put back a server-wide setting a test changed
+ */
+export async function asAdmin(browser: Browser, info: TestInfo, work: (request: APIRequestContext) => Promise<unknown>) {
+  const context = await browser.newContext({ baseURL: info.project.use.baseURL });
+  try {
+    expect((await context.request.post("/api/auth/login", { data: { username: "admin", password: PASSWORD } })).ok()).toBe(true);
+    await work(context.request);
+  } finally {
+    await context.close();
+  }
 }
 
 /** A new folder with a unique name in My files, or one with this name in `parent`: its id */

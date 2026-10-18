@@ -71,6 +71,15 @@
     "private": false,
     "username": ""
   },
+  "AppPassword": {
+    "created_at": 0,
+    "expires_at": null,
+    "id": "",
+    "last_ip": "",
+    "last_used_at": null,
+    "name": "",
+    "scope": ""
+  },
   "Device": {
     "created_at": 0,
     "current": false,
@@ -109,6 +118,47 @@
     "security": "",
     "username": ""
   },
+  "FtpCreated": {
+    "allow_list": false,
+    "allow_read": false,
+    "created_at": 0,
+    "creator_id": 0,
+    "enabled": false,
+    "expires_at": null,
+    "id": "",
+    "last_used_at": null,
+    "name": "",
+    "node_id": "",
+    "password": "",
+    "username": ""
+  },
+  "FtpFolder": {
+    "active": false,
+    "allow_list": false,
+    "allow_read": false,
+    "created_at": 0,
+    "creator": "",
+    "creator_id": 0,
+    "enabled": false,
+    "expires_at": null,
+    "folder_name": "",
+    "id": "",
+    "last_used_at": null,
+    "name": "",
+    "node_id": "",
+    "username": ""
+  },
+  "FtpStatus": {
+    "address": "",
+    "allow_private_plaintext": false,
+    "enabled": false,
+    "error": null,
+    "listening": false,
+    "managers_publish": false,
+    "passive_host": "",
+    "passive_ports": "",
+    "tls_ready": false
+  },
   "Grant": {
     "created_at": 0,
     "expires_at": null,
@@ -134,6 +184,28 @@
       }
     ],
     "name": ""
+  },
+  "GuestConversionPreview": {
+    "changed_grants": [
+      {
+        "expires_at": 0,
+        "id": 0,
+        "item_name": "",
+        "old_expires_at": null,
+        "old_role": "",
+        "role": ""
+      }
+    ],
+    "ftp_folders": 0,
+    "max_days": 0,
+    "owned_spaces": [],
+    "personal_bytes": 0,
+    "personal_files": 0,
+    "personal_space": false,
+    "revision": "",
+    "s3_buckets": 0,
+    "share_links": 0,
+    "unsafe_groups": []
   },
   "HistoryEntry": {
     "action": "",
@@ -235,6 +307,39 @@
     "version": "",
     "version_keep": 0
   },
+  "NewAppPassword": {
+    "app_password": {
+      "created_at": 0,
+      "expires_at": null,
+      "id": "",
+      "last_ip": "",
+      "last_used_at": null,
+      "name": "",
+      "scope": ""
+    },
+    "token": ""
+  },
+  "NewS3Bucket": {
+    "created_at": 0,
+    "creator_id": 0,
+    "enabled": false,
+    "id": "",
+    "last_used_at": null,
+    "name": "",
+    "node_id": ""
+  },
+  "NewS3Key": {
+    "access_key": "",
+    "bucket_id": "",
+    "created_at": 0,
+    "description": "",
+    "enabled": false,
+    "expires_at": null,
+    "id": "",
+    "last_used_at": null,
+    "secret_key": "",
+    "writable": false
+  },
   "Node": {
     "created_at": 0,
     "drive_id": "",
@@ -333,6 +438,66 @@
     "name": "",
     "principal_id": 0,
     "principal_type": ""
+  },
+  "RestrictionPreview": {
+    "inherited": [],
+    "restricted": false
+  },
+  "S3Bucket": {
+    "active": false,
+    "created_at": 0,
+    "creator": "",
+    "creator_id": 0,
+    "enabled": false,
+    "folder": "",
+    "id": "",
+    "keys": [
+      {
+        "access_key": "",
+        "bucket_id": "",
+        "created_at": 0,
+        "description": "",
+        "enabled": false,
+        "expires_at": null,
+        "id": "",
+        "last_used_at": null,
+        "writable": false
+      }
+    ],
+    "last_used_at": null,
+    "name": "",
+    "node_id": ""
+  },
+  "S3Config": {
+    "enabled": false,
+    "hostname": "",
+    "managers_publish": false,
+    "region": ""
+  },
+  "S3Key": {
+    "access_key": "",
+    "bucket_id": "",
+    "created_at": 0,
+    "description": "",
+    "enabled": false,
+    "expires_at": null,
+    "id": "",
+    "last_used_at": null,
+    "writable": false
+  },
+  "SftpKey": {
+    "created_at": 0,
+    "fingerprint": "",
+    "id": "",
+    "last_used_at": null,
+    "name": ""
+  },
+  "SftpSettings": {
+    "address": "",
+    "enabled": false,
+    "error": null,
+    "fingerprint": "",
+    "keys_enabled": false
   },
   "ShareInfo": {
     "allow_download": false,

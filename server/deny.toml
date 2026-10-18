@@ -38,6 +38,7 @@ confidence-threshold = 0.9
 multiple-versions = "warn"
 wildcards = "deny"
 skip = [
+  { crate = "atoi@2.0.0", reason = "sqlx-sqlite" },
   { crate = "base64@0.22.1", reason = "sqlx-core" },
   { crate = "block-buffer@0.10.4", reason = "the 0.10 RustCrypto crates sqlx and crc-fast use" },
   { crate = "cpufeatures@0.2.17", reason = "the 0.10 RustCrypto crates sqlx and crc-fast use" },
@@ -48,10 +49,15 @@ skip = [
   { crate = "sha3@0.11.0", reason = "ml-kem (through russh)" },
   { crate = "hashbrown@0.14.5", reason = "dashmap" },
   { crate = "hashbrown@0.16.1", reason = "hashlink and sqlx-core" },
+  { crate = "md-5@0.10.6", reason = "unftp-core (the FTP server)" },
   { crate = "miniz_oxide@0.8.9", reason = "png" },
+  { crate = "nix@0.30.1", reason = "libunftp (the FTP server, server/vendor/libunftp)" },
+  { crate = "nom@7.1.3", reason = "asn1-rs, through x509-parser and unftp-core (the FTP server)" },
+  { crate = "num-bigint@0.4.8", reason = "der-parser, through x509-parser and unftp-core (the FTP server)" },
   { crate = "quick-xml@0.41.0", reason = "object_store" },
   { crate = "spin@0.9.9", reason = "flume (through sqlx)" },
   { crate = "syn@2.0.119", reason = "most derive macros, next to syn 3" },
+  { crate = "synstructure@0.13.2", reason = "asn1-rs-derive, through x509-parser and unftp-core (the FTP server)" },
   { crate = "tower-http@0.6.11", reason = "reqwest" },
   { crate = "untrusted@0.7.1", reason = "aws-lc-rs" },
 ]
