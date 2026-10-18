@@ -402,12 +402,18 @@ async fn existing_public_links_and_signed_s3_keys_stop_on_conversion_without_del
     )
     .await
     .unwrap();
-    let Json(bucket) = crate::s3::manage::create(State(env.st.clone()), alice.clone(), req(json!({"node_id":shared,"name":"guest-conversion"}))).await.unwrap();
+    let Json(bucket) = crate::s3::manage::create(
+        State(env.st.clone()),
+        alice.clone(),
+        req(json!({"node_id":shared,"name":"guest-conversion","password":crate::testutil::password()})),
+    )
+    .await
+    .unwrap();
     let Json(key) = crate::s3::manage::new_key(
         State(env.st.clone()),
         alice.clone(),
         Path(bucket.id.clone()),
-        req(json!({"description":"Conversion regression","writable":true,"expires_at":null})),
+        req(json!({"description":"Conversion regression","writable":true,"expires_at":null,"password":crate::testutil::password()})),
     )
     .await
     .unwrap();

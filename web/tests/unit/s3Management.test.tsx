@@ -73,6 +73,15 @@ function type(label: string, value: string) {
     field.dispatchEvent(new Event("input", { bubbles: true }));
   });
 }
+/** The current password asked for before credentials are made (`useConfirmIdentity`'s field, labelled by `for`) */
+function typePassword(form: "s3-publish" | "s3-key", value: string) {
+  const field = document.getElementById(`${form}-password`) as HTMLInputElement | null;
+  expect(field, `${form} password`).not.toBeNull();
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, value);
+    field!.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
 const click = (name: string) => act(() => button(name).click());
 const submit = (name: string) => act(() => button(name).form!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
 const requests = (method: string) => fetchMock.mock.calls.filter(([, init]) => init?.method === method);
@@ -167,13 +176,17 @@ describe("folder buckets", () => {
     mount(<S3BucketDialog nodeId="folder-1" onClose={() => {}} />);
     await settle(() => expect(input("Bucket name").value).toBe(""));
     type("Bucket name", "  client-backups  ");
+    // Publishing asks who is acting, as making other credentials does
+    expect(button("Publish").disabled).toBe(true);
+    typePassword("s3-publish", "current-password");
     submit("Publish");
     await settle(() => expect(button("Publish").disabled).toBe(true));
-    expect(payload(requests("POST")[0])).toEqual({ node_id: "folder-1", name: "client-backups" });
+    expect(payload(requests("POST")[0])).toEqual({ node_id: "folder-1", name: "client-backups", password: "current-password" });
     await act(async () => publish.resolve(json({ error: "Bucket name is already in use" }, 409)));
     await settle(() => expect(toast.error).toHaveBeenCalledWith("Bucket name is already in use"));
     await settle(() => expect(button("Publish").disabled).toBe(false));
     expect(input("Bucket name").value).toBe("  client-backups  ");
+    expect((document.getElementById("s3-publish-password") as HTMLInputElement).value).toBe("current-password");
     submit("Publish");
     await settle(() => expect(document.querySelector('section[aria-label="client-backups"]')).not.toBeNull());
     expect(input("Bucket name").value).toBe("");
@@ -199,7 +212,7 @@ describe("folder buckets", () => {
 describe("Access Keys", () => {
   test("a new key defaults to read-only with no expiry and its secret disappears when creation is closed", async () => {
     const create = deferred<Response>();
-    fetchMock.mockImplementation(() => create.promise);
+    fetchMock.mockImplementation(async (_url, init) => (init?.method === "POST" ? create.promise : json({ enabled: false, has_password: true })));
     mount(<BucketCard bucket={bucket} />);
     click("New S3 key");
     await settle(() => expect(input("Read and change files").checked).toBe(false));
@@ -207,10 +220,12 @@ describe("Access Keys", () => {
     type("Key description", "   ");
     expect(button("Create key").disabled).toBe(true);
     type("Key description", "  Backup reader  ");
+    expect(button("Create key").disabled).toBe(true);
+    typePassword("s3-key", "current-password");
     submit("Create key");
     await settle(() => expect(button("Creating…").disabled).toBe(true));
     expect(String(requests("POST")[0][0])).toBe("/api/s3/buckets/bucket-1/keys");
-    expect(payload(requests("POST")[0])).toEqual({ description: "Backup reader", writable: false, expires_at: null });
+    expect(payload(requests("POST")[0])).toEqual({ description: "Backup reader", writable: false, expires_at: null, password: "current-password" });
     await act(async () => create.resolve(json({ ...key, secret_key: "test-secret-shown-once" })));
     await settle(() => expect(input("Access Key").readOnly).toBe(true));
     expect(input("Secret Key").readOnly).toBe(true);
@@ -233,13 +248,15 @@ describe("Access Keys", () => {
   });
 
   test("write access and the chosen end date are explicit, and a refused creation preserves the form for retry", async () => {
-    fetchMock.mockResolvedValueOnce(json({ error: "S3 key limit reached" }, 400)).mockResolvedValueOnce(json({ ...key, writable: true, secret_key: "test-retry-secret" }));
+    const answers = [json({ error: "S3 key limit reached" }, 400), json({ ...key, writable: true, secret_key: "test-retry-secret" })];
+    fetchMock.mockImplementation(async (_url, init) => (init?.method === "POST" ? answers.shift()! : json({ enabled: false, has_password: true })));
     mount(<BucketCard bucket={bucket} />);
     click("New S3 key");
     await settle(() => expect(input("Key description").value).toBe(""));
     type("Key description", " Writer ");
     act(() => input("Read and change files").click());
     type("End date (optional)", "2030-05-01T12:30");
+    typePassword("s3-key", "current-password");
     submit("Create key");
     await settle(() => expect(toast.error).toHaveBeenCalledWith("S3 key limit reached"));
     await settle(() => expect(button("Create key").disabled).toBe(false));
@@ -247,10 +264,8 @@ describe("Access Keys", () => {
     expect(input("Read and change files").checked).toBe(true);
     submit("Create key");
     await settle(() => expect(input("Secret Key").value).toBe("test-retry-secret"));
-    expect(requests("POST").map(payload)).toEqual([
-      { description: "Writer", writable: true, expires_at: Math.floor(new Date("2030-05-01T12:30").getTime() / 1000) },
-      { description: "Writer", writable: true, expires_at: Math.floor(new Date("2030-05-01T12:30").getTime() / 1000) },
-    ]);
+    const sent = { description: "Writer", writable: true, expires_at: Math.floor(new Date("2030-05-01T12:30").getTime() / 1000), password: "current-password" };
+    expect(requests("POST").map(payload)).toEqual([sent, sent]);
     expect(input("Secret Key").value).toBe("test-retry-secret");
   });
 

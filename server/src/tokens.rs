@@ -109,6 +109,16 @@ pub async fn confirm_identity(st: &AppState, user: &User, password: Option<Strin
     crate::twofactor::confirm_code(st, user.id, code).await
 }
 
+/// Whether someone may hand out credentials of a published folder (an S3 key, an FTP password), or turn it on or widen
+/// it again: credentials act as the person who published it, so only they or an administrator can. Others who manage
+/// the folder can still turn it off, narrow it or delete it.
+pub fn may_hand_out(current: &User, creator_id: i64) -> AppResult<()> {
+    if current.is_admin() || current.id == creator_id {
+        return Ok(());
+    }
+    Err(AppError::forbidden("Only the person who published it, or an administrator, can give out its credentials or open it up again"))
+}
+
 /// Creates an app password; the token is in the response and can't be shown again
 pub async fn create(
     State(st): State<AppState>,

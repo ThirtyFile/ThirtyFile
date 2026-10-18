@@ -138,7 +138,7 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
     };
     sqlx::query("INSERT INTO ftp_receive_folders(id,node_id,creator_id,name,username,password_hash,enabled,allow_list,allow_read,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
         .bind(&folder.id).bind(&folder.node_id).bind(folder.creator_id).bind(&folder.name).bind(&folder.username).bind(&folder.password_hash).bind(folder.enabled).bind(folder.allow_list).bind(folder.allow_read).bind(folder.expires_at).bind(folder.created_at).execute(&mut *tx).await?;
-    crate::logs::record_activity(&mut tx, &user, None, "settings", "Created FTP receive folder").await?;
+    crate::logs::record_activity(&mut tx, &user, None, "settings", &format!("Created FTP receive folder {}", folder.name)).await?;
     tx.commit().await?;
     Ok(Json(Created { folder, password }))
 }
@@ -173,7 +173,15 @@ pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<Strin
     let req = req.change;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    managed(&mut tx, &user, &id).await?;
+    let folder = managed(&mut tx, &user, &id).await?;
+    // Turning it on, letting the device see or read more, or giving it longer: only who published it, or an administrator
+    let widens = (req.enabled && !folder.enabled)
+        || (req.allow_list && !folder.allow_list)
+        || (req.allow_read && !folder.allow_read)
+        || folder.expires_at.is_some_and(|was| req.expires_at.is_none_or(|now| now > was));
+    if widens {
+        crate::tokens::may_hand_out(&crate::auth::current_user(&mut tx, &user).await?, folder.creator_id)?;
+    }
     sqlx::query("UPDATE ftp_receive_folders SET name=?,enabled=?,allow_list=?,allow_read=?,expires_at=?,generation=generation+1 WHERE id=?")
         .bind(req.name.trim())
         .bind(req.enabled)
@@ -183,7 +191,7 @@ pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<Strin
         .bind(id)
         .execute(&mut *tx)
         .await?;
-    crate::logs::record_activity(&mut tx, &user, None, "settings", "Updated FTP receive folder").await?;
+    crate::logs::record_activity(&mut tx, &user, None, "settings", &format!("Updated FTP receive folder {}", req.name.trim())).await?;
     tx.commit().await?;
     Ok(Json(serde_json::json!({"ok":true})))
 }
@@ -200,10 +208,11 @@ pub async fn rotate(State(st): State<AppState>, user: User, Path(id): Path<Strin
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     let mut folder = managed(&mut tx, &user, &id).await?;
+    crate::tokens::may_hand_out(&crate::auth::current_user(&mut tx, &user).await?, folder.creator_id)?;
     sqlx::query("UPDATE ftp_receive_folders SET password_hash=?,generation=generation+1 WHERE id=?").bind(&hash).bind(id).execute(&mut *tx).await?;
     folder.password_hash = hash;
     folder.generation += 1;
-    crate::logs::record_activity(&mut tx, &user, None, "settings", "Rotated FTP receive folder password").await?;
+    crate::logs::record_activity(&mut tx, &user, None, "settings", &format!("Rotated the password of FTP receive folder {}", folder.name)).await?;
     tx.commit().await?;
     Ok(Json(Created { folder, password }))
 }
@@ -211,9 +220,9 @@ pub async fn delete(State(st): State<AppState>, user: User, Path(id): Path<Strin
     confirm(&st, &user, req.password, req.code.as_deref()).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    managed(&mut tx, &user, &id).await?;
+    let folder = managed(&mut tx, &user, &id).await?;
     sqlx::query("DELETE FROM ftp_receive_folders WHERE id=?").bind(id).execute(&mut *tx).await?;
-    crate::logs::record_activity(&mut tx, &user, None, "settings", "Removed FTP receive folder").await?;
+    crate::logs::record_activity(&mut tx, &user, None, "settings", &format!("Removed FTP receive folder {}", folder.name)).await?;
     tx.commit().await?;
     Ok(Json(serde_json::json!({"ok":true})))
 }

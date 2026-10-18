@@ -75,7 +75,10 @@ async fn two_browser_requests_for_the_last_key_slot_create_exactly_one_key() {
             .header("user-agent", "S3 key limit regression")
             .header("cookie", &cookie)
             .header("content-type", "application/json")
-            .body(serde_json::json!({ "description": format!("Existing key {index}"), "writable": true, "expires_at": null }).to_string())
+            .body(
+                serde_json::json!({ "description": format!("Existing key {index}"), "writable": true, "expires_at": null, "password": crate::testutil::password() })
+                    .to_string(),
+            )
             .send()
             .await
             .unwrap();
@@ -97,7 +100,7 @@ async fn two_browser_requests_for_the_last_key_slot_create_exactly_one_key() {
                 .header("user-agent", "S3 key limit regression")
                 .header("cookie", cookie)
                 .header("content-type", "application/json")
-                .body(serde_json::json!({ "description": description, "writable": true, "expires_at": null }).to_string())
+                .body(serde_json::json!({ "description": description, "writable": true, "expires_at": null, "password": crate::testutil::password() }).to_string())
                 .send()
                 .await
                 .unwrap();

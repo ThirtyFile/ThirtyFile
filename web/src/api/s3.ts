@@ -28,16 +28,20 @@ export interface S3Bucket {
   active: boolean;
   keys: S3Key[];
 }
+/** Who is acting, asked again (`useConfirmIdentity`) */
+type Confirm = { password?: string; code?: string };
+
 export const s3Api = {
   s3Config: (signal?: AbortSignal) => get<S3Config>("/admin/s3", signal),
   s3Options: (signal?: AbortSignal) => get<S3Config>("/s3/options", signal),
   saveS3Config: (config: S3Config) => request<S3Config>("PUT", "/admin/s3", config),
   s3Buckets: (nodeId?: string, search?: string, signal?: AbortSignal) => get<{ can_publish: boolean; buckets: S3Bucket[] }>(`/s3/buckets${qs({ node_id: nodeId, search })}`, signal),
-  publishS3Bucket: (nodeId: string, name: string) => post<S3Bucket>("/s3/buckets", { node_id: nodeId, name }),
+  /** `confirm`: the person's password (and code), asked again, as for other credentials */
+  publishS3Bucket: (nodeId: string, name: string, confirm: Confirm) => post<S3Bucket>("/s3/buckets", { node_id: nodeId, name, ...confirm }),
   setS3Bucket: (id: string, enabled: boolean) => request("PATCH", enc`/s3/buckets/${id}`, { enabled }),
   deleteS3Bucket: (id: string) => request("DELETE", enc`/s3/buckets/${id}`),
-  newS3Key: (id: string, description: string, writable: boolean, expiresAt: number | null) =>
-    post<S3Key & { secret_key: string }>(enc`/s3/buckets/${id}/keys`, { description, writable, expires_at: expiresAt }),
+  newS3Key: (id: string, description: string, writable: boolean, expiresAt: number | null, confirm: Confirm) =>
+    post<S3Key & { secret_key: string }>(enc`/s3/buckets/${id}/keys`, { description, writable, expires_at: expiresAt, ...confirm }),
   setS3Key: (id: string, key: string, enabled: boolean) => request("PATCH", enc`/s3/buckets/${id}/keys/${key}`, { enabled }),
   deleteS3Key: (id: string, key: string) => request("DELETE", enc`/s3/buckets/${id}/keys/${key}`),
 };

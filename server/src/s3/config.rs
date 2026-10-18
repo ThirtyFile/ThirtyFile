@@ -54,6 +54,8 @@ pub async fn save(State(st): State<AppState>, Admin(user): Admin, Json(mut confi
     let mut tx = db::begin_write(&st.db).await?;
     crate::auth::require_admin(&mut tx, &user).await?;
     db::set_setting(&mut tx, "s3", &serde_json::to_string(&config).map_err(AppError::internal)?).await?;
+    let detail = if config.enabled { format!("S3 access is on at {}", config.hostname) } else { "S3 access is off".to_string() };
+    crate::logs::record_activity(&mut tx, &user, None, "settings", &detail).await?;
     tx.commit().await?;
     *st.part::<Memory>().config.write() = Some(config.clone());
     Ok(Json(config))

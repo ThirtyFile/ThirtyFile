@@ -10,9 +10,13 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/dialogs";
+import { useConfirmIdentity } from "@/components/ConfirmIdentity";
 import { ErrorState } from "@/components/ErrorState";
 import { t } from "@/lib/i18n";
 import { formatDateTime } from "@/lib/utils";
+
+/** Credentials outlast the browser session that makes them, so who makes them is asked again */
+const recentNote = () => t("Sign in again before managing S3 keys if your sign-in is older than 10 minutes.");
 
 export const s3FolderQuery = (nodeId: string) => ({ queryKey: ["s3-buckets", nodeId], queryFn: ({ signal }: { signal: AbortSignal }) => api.s3Buckets(nodeId, undefined, signal) });
 
@@ -22,9 +26,11 @@ function KeyForm({ bucket, close }: { bucket: S3Bucket; close(): void }) {
   const [writable, setWritable] = useState(false);
   const [expiry, setExpiry] = useState("");
   const [created, setCreated] = useState<(S3Key & { secret_key: string }) | null>(null);
+  const identity = useConfirmIdentity("s3-key");
   const make = useMutation({
-    mutationFn: () => api.newS3Key(bucket.id, description.trim(), writable, expiry ? Math.floor(new Date(expiry).getTime() / 1000) : null),
+    mutationFn: () => api.newS3Key(bucket.id, description.trim(), writable, expiry ? Math.floor(new Date(expiry).getTime() / 1000) : null, identity.values),
     onSuccess: (key) => {
+      identity.clear();
       setCreated(key);
       void qc.invalidateQueries({ queryKey: ["s3-buckets"] });
     },
@@ -85,7 +91,8 @@ function KeyForm({ bucket, close }: { bucket: S3Bucket; close(): void }) {
               {t("End date (optional)")}
               <Input className="mt-2" type="datetime-local" value={expiry} onChange={(e) => setExpiry(e.target.value)} />
             </Label>
-            <Button type="submit" disabled={make.isPending || !description.trim()}>
+            {identity.fields(recentNote())}
+            <Button type="submit" disabled={make.isPending || !description.trim() || !identity.ready}>
               {make.isPending ? t("Creating…") : t("Create key")}
             </Button>
           </form>
@@ -173,10 +180,12 @@ export function S3BucketDialog({ nodeId, onClose }: { nodeId: string; onClose():
   const q = useQuery(s3FolderQuery(nodeId));
   const options = useQuery({ queryKey: ["s3-options"], queryFn: ({ signal }) => api.s3Options(signal) });
   const [name, setName] = useState("");
+  const identity = useConfirmIdentity("s3-publish");
   const publish = useMutation({
-    mutationFn: () => api.publishS3Bucket(nodeId, name.trim()),
+    mutationFn: () => api.publishS3Bucket(nodeId, name.trim(), identity.values),
     onSuccess: () => {
       setName("");
+      identity.clear();
       void qc.invalidateQueries({ queryKey: ["s3-buckets"] });
     },
     onError: (e) => toast.error(e.message),
@@ -202,25 +211,28 @@ export function S3BucketDialog({ nodeId, onClose }: { nodeId: string; onClose():
             )}
             {q.data.can_publish ? (
               <form
-                className="flex gap-2"
+                className="grid gap-2"
                 onSubmit={(e) => {
                   e.preventDefault();
                   publish.mutate();
                 }}
               >
-                <Input
-                  aria-label={t("Bucket name")}
-                  placeholder={t("Bucket name")}
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  minLength={3}
-                  maxLength={63}
-                  pattern="[a-z0-9][a-z0-9-]*[a-z0-9]"
-                  required
-                />
-                <Button type="submit" disabled={publish.isPending}>
-                  {t("Publish")}
-                </Button>
+                <div className="flex gap-2">
+                  <Input
+                    aria-label={t("Bucket name")}
+                    placeholder={t("Bucket name")}
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    minLength={3}
+                    maxLength={63}
+                    pattern="[a-z0-9][a-z0-9-]*[a-z0-9]"
+                    required
+                  />
+                  <Button type="submit" disabled={publish.isPending || !identity.ready}>
+                    {t("Publish")}
+                  </Button>
+                </div>
+                {identity.fields(recentNote())}
               </form>
             ) : (
               <p>{t("This folder can't be published as an S3 bucket")}</p>
