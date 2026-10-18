@@ -162,6 +162,8 @@ export function DetailsPane({ selected, folder, onClose, count, whole }: { selec
       ...(node.kind === "folder" ? ([[t("Contains"), contents.data ? containsText(contents.data) : pending(contents)]] as [string, string][]) : []),
       ...(isRoot ? [] : ([[t("Location"), location]] as [string, string][])),
       ...(info.data ? ([[t("My role"), ROLE_LABEL[info.data.role]]] as [string, string][]) : []),
+      // Access from above stops at it
+      ...(node.kind === "folder" && node.restricted ? ([[t("Access"), t("Restricted folder")]] as [string, string][]) : []),
       [t("Date modified"), formatDateTime(node.updated_at)],
       [t("Date created"), formatDateTime(node.created_at)],
       // Nobody, for an item found on the disk of a folder space

@@ -149,6 +149,13 @@ describe("showing tags", () => {
     expect(el.querySelector("[aria-label=Favorite]")).not.toBeNull();
   });
 
+  test("a restricted folder's lock, with its name as the label", () => {
+    const el = show(<ItemMarks item={node("a", undefined, { kind: "folder", restricted: true })} />);
+    expect(el.querySelector('[role="img"][aria-label="Restricted folder"]')).not.toBeNull();
+    const open = show(<ItemMarks item={node("b", undefined, { kind: "folder", restricted: false })} />);
+    expect(open.innerHTML).toBe("");
+  });
+
   test("nothing for an item without tags, and no list of tags is asked for", () => {
     const tags = vi.spyOn(api, "tags");
     const el = show(<ItemMarks item={node("a")} />);

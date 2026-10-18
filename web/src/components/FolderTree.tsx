@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type Dispatch, type KeyboardEvent, type SetStateAction } from "react";
 import { Link, NavLink } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRightIcon, ChevronsDownUpIcon, CloudOffIcon, FolderIcon, FolderOpenIcon, LayersIcon, LocateFixedIcon, type LucideIcon } from "lucide-react";
+import { ChevronRightIcon, ChevronsDownUpIcon, CloudOffIcon, FolderIcon, FolderOpenIcon, LayersIcon, LocateFixedIcon, LockKeyholeIcon, type LucideIcon } from "lucide-react";
 import { api, type Node, type NodeInfo } from "@/api";
 import { keys } from "@/api/queryKeys";
 import { useFolderDrop } from "@/lib/dnd";
@@ -142,7 +142,7 @@ function Subfolders({ parentId, folders, depth, activeId }: { parentId: string; 
   return (
     <>
       {folders.slice(0, count).map((f, i) => (
-        <TreeFolder key={f.id} id={f.id} name={f.name} depth={depth + 1} pos={i + 1} size={folders.length} activeId={activeId} hasFolders={f.has_folders} />
+        <TreeFolder key={f.id} id={f.id} name={f.name} depth={depth + 1} pos={i + 1} size={folders.length} activeId={activeId} hasFolders={f.has_folders} restricted={f.restricted} />
       ))}
       {count < folders.length && (
         <button
@@ -193,6 +193,7 @@ function TreeFolder({
   size,
   activeId,
   hasFolders,
+  restricted,
 }: {
   id: string;
   name: string;
@@ -202,6 +203,8 @@ function TreeFolder({
   activeId?: string;
   /** From the parent's listing: whether it has folders in it (unknown: an arrow until it is expanded) */
   hasFolders?: boolean;
+  /** Access from above stops here (a lock after its name) */
+  restricted?: boolean;
 }) {
   const open = useExpanded().has(id);
   const children = useQuery({
@@ -243,6 +246,7 @@ function TreeFolder({
               <span data-name className="truncate">
                 {name}
               </span>
+              {restricted && <LockKeyholeIcon className="size-3 shrink-0 text-muted-foreground" aria-label={t("Restricted folder")} role="img" />}
             </Link>
           )}
         </div>

@@ -637,11 +637,11 @@ pub async fn grant(State(st): State<AppState>, user: User, Path(id): Path<String
     }
     let principal_id = if principal_type == PrincipalType::Everyone { 0 } else { req.principal_id };
     let name = principal_name(&mut tx, principal_type, principal_id).await?.ok_or_else(|| AppError::bad_request("User or group not found"))?;
-    crate::guests::validate_grant(&mut tx, &user, principal_type, principal_id, role, req.expires_at).await?;
+    let expires_at = crate::guests::validate_grant(&mut tx, &user, principal_type, principal_id, role, req.expires_at).await?;
     // Someone who manages this only until a given time can't give access that includes themselves beyond it
     if !user.is_admin()
         && let Some(until) = tree::manages_until(&mut tx, &user, &node).await?
-        && req.expires_at.is_none_or(|t| t > until)
+        && expires_at.is_none_or(|t| t > until)
         && tree::grant_applies_to(&mut tx, &user, principal_type, principal_id).await?
     {
         return Err(AppError::forbidden("Your access here ends at a set time, so you can't give yourself access that lasts longer"));
@@ -659,11 +659,11 @@ pub async fn grant(State(st): State<AppState>, user: User, Path(id): Path<String
         if !user.is_admin() && my_role.is_some_and(|r| old > r) {
             return Err(AppError::forbidden("You can't change the access of someone whose role is higher than yours"));
         }
-        if old == Role::Owner && (role != Role::Owner || req.expires_at.is_some()) {
+        if old == Role::Owner && (role != Role::Owner || expires_at.is_some()) {
             require_other_owner(&mut tx, &node.id, principal_type, principal_id).await?;
         }
     }
-    add_grant(&mut tx, &node.id, principal_type.as_str(), principal_id, role.as_str(), Some(user.id), req.expires_at).await?;
+    add_grant(&mut tx, &node.id, principal_type.as_str(), principal_id, role.as_str(), Some(user.id), expires_at).await?;
     // New access is announced to the people it is for; a changed role or expiry isn't
     let emails = if is_new {
         let (grant_id,): (i64,) = sqlx::query_as("SELECT id FROM grants WHERE node_id = ? AND principal_type = ? AND principal_id = ?")
