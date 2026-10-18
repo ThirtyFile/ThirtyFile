@@ -70,12 +70,18 @@ pub async fn stage_restored(st: &AppState, into: &Node, received: Received) -> A
 }
 
 async fn stage_inner(st: &AppState, into: &Node, received: Received, restored: bool) -> AppResult<Staged> {
-    let md5 = match tokio::fs::File::open(&received.path).await {
-        Ok(file) => Some(crate::s3::etag::reader(file).await?),
-        // Restoring an already stored version only changes references, even while its storage is offline.
-        // The content-change trigger invalidates the old checksum; its next successful read fills the cache.
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound && received.hash.is_some() && !into.in_folder_space() => None,
-        Err(e) => return Err(e.into()),
+    // The S3 ETag, worked out while the content is at hand, only while S3 is on: otherwise nothing reads the content a
+    // second time for it, and the first S3 read of the file works it out (s3/etag.rs)
+    let md5 = if !crate::s3::config::routing(st).await?.enabled {
+        None
+    } else {
+        match tokio::fs::File::open(&received.path).await {
+            Ok(file) => Some(crate::s3::etag::reader(file).await?),
+            // Restoring an already stored version only changes references, even while its storage is offline.
+            // The content-change trigger invalidates the old checksum; its next successful read fills the cache.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && received.hash.is_some() && !into.in_folder_space() => None,
+            Err(e) => return Err(e.into()),
+        }
     };
     let kind = if into.in_folder_space() {
         Kind::Folder(fsops::stage_upload(st, into, &received.path, received.size).await?)
@@ -375,6 +381,47 @@ mod tests {
         let path = env.st.tmp_dir().join(new_id());
         std::fs::write(&path, body).unwrap();
         Received { path, size: body.len() as u64, hash: None }
+    }
+
+    #[tokio::test]
+    async fn uploads_are_read_again_for_the_s3_etag_only_while_s3_is_on() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let md5 =
+            async |id: &str| -> Option<String> { sqlx::query_scalar("SELECT content_md5 FROM nodes WHERE id = ?").bind(id).fetch_one(&env.st.db).await.unwrap() };
+        let off = env.upload(&amy, amy.root(), "off.txt", b"hello").await;
+        assert_eq!(md5(&off).await, None, "S3 is off: its first read works it out");
+        let on = crate::s3::config::Config { enabled: true, hostname: "s3.example.com".into(), region: "us-east-1".into(), managers_publish: false };
+        let _ = crate::s3::config::save(axum::extract::State(env.st.clone()), crate::auth::Admin(env.admin().await), axum::Json(on)).await.unwrap();
+        let kept = env.upload(&amy, amy.root(), "on.txt", b"hello").await;
+        assert_eq!(md5(&kept).await.as_deref(), Some("5d41402abc4b2a76b9719d911017c592"));
+    }
+
+    #[tokio::test]
+    async fn s3_validators_are_cleared_only_when_the_content_changes() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let folder = env.folder(&amy, amy.root(), "Docs").await;
+        let file = env.upload(&amy, amy.root(), "a.txt", b"hello").await;
+        let plain = env.upload(&amy, amy.root(), "b.txt", b"other").await;
+        let cache = || sqlx::query("UPDATE nodes SET content_md5 = 'cached', md5_version = 'v' WHERE id = ?").bind(&file).execute(&env.st.db);
+        cache().await.unwrap();
+        let mut c = env.st.db.acquire().await.unwrap();
+        // total_changes() counts what triggers change too
+        let mut changes = async |sql: &str, id: &str| -> i64 {
+            let (before,): (i64,) = sqlx::query_as("SELECT total_changes()").fetch_one(&mut *c).await.unwrap();
+            sqlx::query(sqlx::AssertSqlSafe(sql)).bind(id).execute(&mut *c).await.unwrap();
+            let (after,): (i64,) = sqlx::query_as("SELECT total_changes()").fetch_one(&mut *c).await.unwrap();
+            after - before
+        };
+        let touch = "UPDATE nodes SET updated_at = updated_at + 1 WHERE id = ?";
+        // The update and what always comes with it (the backups' list of changes), against a file with nothing cached
+        let base = changes(touch, &plain).await;
+        assert_eq!(changes(touch, &folder).await, base, "touching a folder runs nothing more");
+        assert_eq!(changes(touch, &file).await, base, "a rename or touch keeps the digest: reads check it against the content's version");
+        assert_eq!(changes("UPDATE nodes SET size = size + 1 WHERE id = ?", &file).await, base + 1, "new content clears it");
+        let (md5,): (Option<String>,) = sqlx::query_as("SELECT content_md5 FROM nodes WHERE id = ?").bind(&file).fetch_one(&mut *c).await.unwrap();
+        assert_eq!(md5, None);
     }
 
     async fn used(env: &TestEnv, drive: &str) -> i64 {

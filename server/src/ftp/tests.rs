@@ -138,6 +138,33 @@ async fn revocation_after_receive_while_waiting_for_final_transaction_keeps_orig
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_supervisor_with_ftp_off_reads_its_settings_only_when_they_change() {
+    let env = testutil::env().await;
+    let settings = Settings { address: "127.0.0.1:0".into(), passive: "0-0".into(), host: String::new(), cert: None, key: None };
+    let server = supervise(env.st.clone(), settings);
+    let looks = || env.st.part::<Memory>().looks.load(std::sync::atomic::Ordering::SeqCst);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while looks() == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    // It used to read them every half second
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(looks(), 1);
+    let _ = config::save(State(env.st.clone()), crate::auth::Admin(env.admin().await), Json(config::Config::default())).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while looks() < 2 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    server.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn disabled_supervisor_does_not_bind_or_read_bad_certificate() {
     let env = testutil::env().await;
     let socket = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

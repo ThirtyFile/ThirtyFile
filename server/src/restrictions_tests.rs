@@ -517,3 +517,44 @@ async fn a_restricted_folder_moved_on_disk_where_the_scan_cant_follow_keeps_its_
     let report = crate::folders::scan(&env.st, &space.drive).await.unwrap();
     assert!(report.skipped.iter().any(|s| s.contains("Other/Secret") && s.contains("restricted folder is gone")), "{report:?}");
 }
+
+#[tokio::test]
+async fn a_members_space_size_leaves_out_only_what_restricted_folders_hide_from_them() {
+    let f = fixture().await;
+    restrict(&f).await;
+    // Inside the restricted folder: a part shared with the member, and in it a restricted folder again
+    let open = f.env.folder(&f.owner, &f.restricted, "Open part").await;
+    f.env.upload(&f.owner, &open, "open.txt", b"12345").await;
+    f.env.grant(&open, &f.member, "viewer").await;
+    let closed = f.env.folder(&f.owner, &open, "Closed").await;
+    f.env.upload(&f.owner, &closed, "closed.txt", b"abc").await;
+    restrict_node(&f, &closed).await;
+    let used = |v: &Value| v.as_array().unwrap().iter().find(|d| d["root_id"] == f.root.as_str()).unwrap()["used_bytes"].as_i64().unwrap();
+    let all = used(&json_call(&f, &f.own_cookie, Method::GET, "/api/drives", None).await);
+    let seen = used(&json_call(&f, &f.member_cookie, Method::GET, "/api/drives", None).await);
+    // Every file the member can see, one by one
+    let sql = format!(
+        "SELECT COALESCE(SUM(n.size), 0) FROM nodes n WHERE n.drive_id = (SELECT drive_id FROM nodes WHERE id = ?1) AND n.kind = 'file' AND {}",
+        crate::tree::visible_sql(&f.member, "n.id")
+    );
+    let (one_by_one,): (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(&f.root).fetch_one(&f.env.st.db).await.unwrap();
+    assert_eq!(seen, one_by_one);
+    assert_eq!(all - seen, ("confidential-payroll".len() + "abc".len()) as i64);
+}
+
+#[tokio::test]
+async fn restricting_a_folder_leaves_records_about_other_spaces_alone() {
+    let f = fixture().await;
+    // The member's own file, in their own space, which they were told about and then deleted for good
+    let mine = f.env.upload(&f.member, f.member.root(), "holiday-plans.txt", b"beach").await;
+    let notice = crate::notify::Notice { kind: "shared", node_id: Some(mine.clone()), data: json!({"name":"holiday-plans.txt","item":"file"}) };
+    let _ = crate::notify::add(&mut f.env.st.db.acquire().await.unwrap(), &[f.member.id], &notice).await.unwrap();
+    json_call(&f, &f.member_cookie, Method::POST, "/api/nodes/trash", Some(json!({"ids":[mine]}))).await;
+    let job = json_call(&f, &f.member_cookie, Method::POST, "/api/trash/delete", Some(json!({"ids":[mine]}))).await;
+    if let Some(id) = job["id"].as_str().filter(|id| !id.is_empty()) {
+        assert_eq!(crate::jobs::wait_for(&f.env.st, id).await.state, "done");
+    }
+    restrict(&f).await;
+    let notifications = json_call(&f, &f.member_cookie, Method::GET, "/api/notifications", None).await;
+    assert!(notifications.to_string().contains("holiday-plans.txt"), "{notifications}");
+}

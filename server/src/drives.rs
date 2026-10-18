@@ -97,7 +97,7 @@ async fn drive_infos(
         "SELECT d.id, d.location_id, COALESCE(l.name, '') AS location_name,
                 CASE WHEN d.kind = 'personal' THEN COALESCE(u.quota_bytes, 0) ELSE d.quota_bytes END AS quota_bytes,
                 COALESCE(u.username, '') AS owner_name, COALESCE(g.n, 0) AS member_count, d.last_scan_at, d.scan_report,
-                EXISTS(SELECT 1 FROM nodes n WHERE n.drive_id = d.id AND n.restricted) AS restricted
+                EXISTS(SELECT 1 FROM nodes n WHERE n.drive_id = d.id AND n.restricted = 1) AS restricted
          FROM drives d
          LEFT JOIN storage_locations l ON l.id = d.location_id
          LEFT JOIN users u ON u.id = d.owner_id
@@ -117,13 +117,9 @@ async fn drive_infos(
         let details = scan_details.is_some() && d.is_folder();
         let private = d.kind == tree::SpaceKind::Personal && d.owner_id != scan_details;
         let partial_usage = r.restricted && !admin && role != Some(Role::Owner);
-        let used_bytes = if partial_usage {
-            let sql = format!("SELECT COALESCE(SUM(n.size), 0) FROM nodes n WHERE n.drive_id = ?1 AND n.kind = 'file' AND {}", tree::visible_sql(user, "n.id"));
-            let (bytes,): (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(&d.id).fetch_one(&mut *conn).await?;
-            bytes
-        } else {
-            d.used_bytes
-        };
+        // What the user sees of it: the space's size less what restricted folders hide (asked each time the list is
+        // polled, so the files are never added up)
+        let used_bytes = if partial_usage { (d.used_bytes - tree::hidden_bytes(conn, user, &d.id).await?).max(0) } else { d.used_bytes };
         out.push(DriveInfo {
             mode: d.mode,
             read_only: d.read_only,

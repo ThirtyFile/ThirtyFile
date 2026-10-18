@@ -25,8 +25,13 @@ use russh::{
 };
 use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 
+/// How often the settings are read again when nothing says they changed
+const IDLE: Duration = Duration::from_secs(5);
+
 #[derive(Default)]
 pub struct Memory {
+    /// Told when the settings change (`settings::update`), so the listener follows at once
+    pub changed: tokio::sync::Notify,
     pub address: crate::sync::RwLock<String>,
     pub fingerprint: crate::sync::RwLock<String>,
     pub error: crate::sync::RwLock<Option<String>>,
@@ -142,13 +147,24 @@ pub fn supervise(st: AppState, address: &str) -> Listener {
         }
         let mut active: Option<Listener> = None;
         let mut retry = tokio::time::Instant::now();
-        let mut tick = tokio::time::interval(Duration::from_millis(500));
+        let (mut first, mut enabled) = (true, false);
         loop {
+            // The settings are read right away, then when they change, or now and then: every half second while a
+            // start that failed waits to be tried again, else every few seconds
+            let wait = if std::mem::take(&mut first) {
+                Duration::ZERO
+            } else if enabled && active.is_none() {
+                Duration::from_millis(500)
+            } else {
+                IDLE
+            };
             tokio::select! {
                 _ = stopped.changed() => break,
-                _ = tick.tick() => (),
+                _ = tokio::time::sleep(wait) => (),
+                _ = st.part::<Memory>().changed.notified() => (),
             }
-            if !settings::flag(&st, "sftp_enabled").await.unwrap_or(false) {
+            enabled = settings::flag(&st, "sftp_enabled").await.unwrap_or(false);
+            if !enabled {
                 if let Some(listener) = active.take() {
                     listener.finish().await;
                     *st.part::<Memory>().address.write() = address.clone();

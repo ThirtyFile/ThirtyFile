@@ -397,9 +397,15 @@ pub async fn node_for(conn: &mut SqliteConnection, user: &User, id: &str, need: 
         None
     };
     let user = current.as_ref().unwrap_or(user);
-    let current = crate::auth::current_user(conn, user).await?;
+    // The account as it is now, loaded once for every check below (an SFTP session's credential checked first, as
+    // `allows_on` does), and the role worked out once
+    let sftp = crate::auth::sftp::current_user(conn, user, need != Need::Read).await?;
+    let current = crate::auth::current_user(conn, sftp.as_ref().unwrap_or(user)).await?;
     let user = &current;
-    let (n, role) = node_with_role(conn, user, id).await?;
+    let id = resolve_alias(user, id)?;
+    let n = get_node(conn, id).await?.filter(|n| n.trashed_at.is_none()).ok_or_else(|| AppError::not_found("Item not found"))?;
+    let (role, in_trash) = access_current(conn, user, &n).await?;
+    let role = role.filter(|_| !in_trash).ok_or_else(|| AppError::not_found("Item not found"))?;
     if let Some(root) = &user.protocol_root {
         if !crate::access::inside(conn, root, &n.id).await? {
             return Err(AppError::forbidden("Object is outside the bucket"));
@@ -408,7 +414,7 @@ pub async fn node_for(conn: &mut SqliteConnection, user: &User, id: &str, need: 
             return Err(AppError::not_found("Item not found"));
         }
     }
-    allows_on(conn, user, role, need, &n).await?;
+    allows_current(conn, user, role, need, &n).await?;
     if matches!(need, Need::Add | Need::Write | Need::Move | Need::Delete) && n.space_read_only {
         return Err(read_only_error(&n));
     }
@@ -560,12 +566,28 @@ pub async fn shared_with_me_outside(conn: &mut SqliteConnection, user: &User, me
         super::visible_sql(user, "n.id")
     );
     let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(user.id).bind(now()).fetch_all(&mut *conn).await?;
+    // In a space the user is a member of, an item is shared from outside only when a restricted folder above it hides
+    // the way to it: spaces without one are skipped, and the way is looked at once per folder
+    let restricted = super::restricted_drives(conn, &member_of.iter().map(String::as_str).collect::<Vec<_>>()).await?;
+    let mut starts: HashMap<String, usize> = HashMap::new();
     let mut map: HashMap<String, (Node, Role, String)> = HashMap::new();
     for r in rows {
         let role = r.role;
         if member_of.iter().any(|d| d == r.node.drive()) {
-            let path = super::path_of(conn, &r.node.id).await?;
-            if super::visible_path_start(conn, user, &path).await? == 0 {
+            if !restricted.contains(r.node.drive()) {
+                continue;
+            }
+            let parent = r.node.parent_id.clone().unwrap_or_default();
+            let start = match starts.get(&parent) {
+                Some(start) => *start,
+                None => {
+                    let path = super::path_of(conn, &r.node.id).await?;
+                    let start = super::visible_path_start(conn, user, &path).await?;
+                    starts.insert(parent, start);
+                    start
+                }
+            };
+            if start == 0 {
                 continue;
             }
         }

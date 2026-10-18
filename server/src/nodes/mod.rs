@@ -216,8 +216,8 @@ async fn locate(st: &AppState, user: &User, mut nodes: Vec<Node>) -> AppResult<V
     // One query for the paths of all parents instead of one recursive query per row
     let parent_ids: Vec<String> = nodes.iter().filter_map(|n| n.parent_id.clone()).collect::<HashSet<_>>().into_iter().collect();
     let paths = tree::paths_of(&mut c, &parent_ids).await?;
-    let restricted_drives: std::collections::HashSet<String> =
-        sqlx::query_as::<_, (String,)>("SELECT DISTINCT drive_id FROM nodes WHERE restricted").fetch_all(&mut *c).await?.into_iter().map(|(id,)| id).collect();
+    let listed: Vec<&str> = nodes.iter().map(|n| n.drive()).collect::<HashSet<_>>().into_iter().collect();
+    let restricted_drives = tree::restricted_drives(&mut c, &listed).await?;
     let mut visible_starts: HashMap<String, usize> = HashMap::new();
     let mut out = Vec::with_capacity(nodes.len());
     for mut node in nodes {
