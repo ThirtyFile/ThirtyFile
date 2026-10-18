@@ -44,6 +44,9 @@ pub struct Memory {
     pub status: crate::sync::RwLock<Status>,
     pub changed: tokio::sync::Notify,
     pub sessions: crate::sync::Mutex<HashMap<String, Weak<tokio::sync::Semaphore>>>,
+    /// Tests: how many times the supervisor has looked at the settings, to wait for its next look rather than a time
+    #[cfg(test)]
+    pub looks: std::sync::atomic::AtomicU64,
 }
 #[derive(Clone)]
 pub struct Settings {
@@ -80,10 +83,27 @@ impl Drop for Listener {
     }
 }
 
+/// Tests: counts one look of the supervisor once it is done with it (`Memory::looks`)
+#[cfg(test)]
+struct Looked<'a>(&'a AppState);
+
+#[cfg(test)]
+impl Drop for Looked<'_> {
+    fn drop(&mut self) {
+        self.0.part::<Memory>().looks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 fn passive_ports(value: &str) -> AppResult<std::ops::RangeInclusive<u16>> {
     let (from, to) = value.split_once('-').ok_or_else(|| AppError::bad_request("Use a passive port range such as 30000-30009"))?;
     let from: u16 = from.parse().map_err(|_| AppError::bad_request("Invalid FTP passive port range"))?;
     let to: u16 = to.parse().map_err(|_| AppError::bad_request("Invalid FTP passive port range"))?;
+    // Tests: "0-0" lets the system choose a free port for each passive connection (the reply names the one it chose),
+    // so tests running at once never try to take the same one
+    #[cfg(test)]
+    if (from, to) == (0, 0) {
+        return Ok(0..=0);
+    }
     if from == 0 || to < from || u32::from(to) - u32::from(from) > 999 {
         return Err(AppError::bad_request("Use 1–1000 FTP passive ports"));
     }
@@ -123,6 +143,8 @@ pub fn supervise(st: AppState, settings: Settings) -> Listener {
         loop {
             tokio::select! {_=stopped.changed()=>break,_=tick.tick()=>(),_=st.part::<Memory>().changed.notified()=>()}
             let cfg = config::load(&st).await.unwrap_or_default();
+            #[cfg(test)]
+            let _looked = Looked(&st);
             if current.as_ref() != Some(&cfg) {
                 if let Some(listener) = active.take() {
                     listener.finish().await;

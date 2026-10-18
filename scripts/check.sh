@@ -11,8 +11,10 @@
 #                              (the first time, get the browser: cd web && pnpm exec playwright install chromium)
 #   scripts/check.sh site      the website: each translated page in every language with matching language links, and
 #                              links and anchors that resolve (scripts/check-site.mjs; it needs only Node)
-#   scripts/check.sh quick     pull-request checks: the interface checks with its unit tests, the migration files, the
-#                              server's formatting and clippy (it compiles), and the website; no server or browser tests
+#   scripts/check.sh quick     pull-request checks: the interface checks with its unit tests and their coverage floor,
+#                              the migration files, the server's formatting and clippy (it compiles), and the website.
+#                              On GitHub, pull requests also check the server's dependencies (cargo deny) and run its
+#                              tests when they change the server (checks.yml); no browser tests
 #   scripts/check.sh web-static  the interface checks without unit tests
 #   scripts/check.sh released-migrations  released migrations are unchanged (needs Git tags)
 # Arguments after `web` go to the unit tests (CI passes --coverage).
@@ -85,7 +87,7 @@ released_migrations() {
 }
 
 quick() {
-  (web)
+  (web --coverage)
   migrations
   (released_migrations)
   (cd "$ROOT/server" && cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings)

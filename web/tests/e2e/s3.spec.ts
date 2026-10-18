@@ -1,9 +1,17 @@
 import { test, expect } from "@playwright/test";
 import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
-import { signIn, makeFolder, PASSWORD, unique } from "./helpers";
+import { asAdmin, signIn, makeFolder, PASSWORD, unique } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
+
+// The server is shared: S3 goes off again, so a retry, or a later run on the same server, finds it off as by default
+test.afterAll(({ browser }, info) =>
+  asAdmin(browser, info, async (request) => {
+    const off = { enabled: false, hostname: "", region: "us-east-1", managers_publish: false };
+    expect((await request.put("/api/admin/s3", { data: off })).ok()).toBe(true);
+  }),
+);
 
 test("administrators configure S3, publish from a folder menu and manage keys shown only once", async ({ page }) => {
   const errors: string[] = [];

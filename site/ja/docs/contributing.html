@@ -107,14 +107,14 @@
             </tbody></table></div></li>
           <li><strong>変更を行い</strong>、以下の確認を実行します。</li>
           <li><strong>プルリクエストを作ります。</strong> 内容を平易に表すタイトルと 1 つのラベルを付けます。説明に <code>Closes #123</code> を書くとマージ時に Issue を閉じます。</li>
-          <li><strong>チェックを待ちます。</strong> 軽量の <strong>Checks passed</strong> が通るまでマージできません。</li>
+          <li><strong>チェックを待ちます。</strong> <strong>Checks passed</strong> が通るまでマージできません。</li>
           <li><strong>マージします。</strong> <code>main</code> の 1 コミットになり、ブランチを削除します。</li>
         </ol>
         <h2 id="checks">チェック</h2>
         <p>プルリクエスト作成前に、1 つのスクリプトでローカルの全チェックを実行します。リリースと手動の完全検証も実行しますが、自動の PR チェックは軽量です。</p>
         <pre><code>scripts/check.sh</code></pre>
         <div class="table-scroll"><table><thead><tr><th>対象</th><th>確認内容</th></tr></thead><tbody>
-          <tr><td><code>scripts/check.sh quick</code></td><td>PR の自動確認：フロントエンドの整形、翻訳、モジュール境界、E2E 構造、型、lint、Rust の整形、migration の番号と既公開分の不変性、サイトのリンク。単体・ブラウザーテスト、Rust コンパイル、イメージビルドは実行しません</td></tr>
+          <tr><td><code>scripts/check.sh quick</code></td><td>PR の自動確認：下のフロントエンド確認と単体テスト、そのカバレッジ下限、Rust の整形と clippy、migration の番号と既公開分の不変性、サイトのリンク。GitHub では PR がサーバーの依存関係（<code>cargo deny</code>）も確認し、サーバーを変更した場合はサーバーのテストも実行します。ブラウザーテストとイメージビルドは実行しません</td></tr>
           <tr><td><code>scripts/check.sh web</code></td><td>画面：lock 通りの依存関係、整形（<code>pnpm format:check</code>）、翻訳（<code>node scripts/check-i18n.mjs</code>）、Office の <code>web/src/ooxml</code> が他のアプリコードを import しないこと（<code>node scripts/check-boundaries.mjs</code>）、E2E に固定待機やランダム部分のない名前がないこと（<code>node scripts/check-e2e.mjs</code>）、型、lint、単体テスト。GitHub と同じ <code>scripts/check.sh web --coverage</code> では <code>web/vitest.config.ts</code> のカバレッジ下限未満も失敗になります</td></tr>
           <tr><td><code>scripts/check.sh server</code></td><td>サーバー：整形（<code>cargo fmt --check</code>）、<code>cargo test</code>、警告をエラーにする <code>cargo clippy</code></td></tr>
           <tr><td><code>scripts/check.sh e2e</code></td><td>ソースからビルドしたサーバーへ、実ブラウザー（Playwright）でサインイン、アップロード、プレビューします。並列実行（GitHub は 4）するため、各テストで独自フォルダーとランダム名を使い、固定時間でなく操作後のサーバー応答を待ちます。<code>web/tests/e2e/helpers.ts</code> にヘルパーがあります。初回は <code>cd web &amp;&amp; pnpm exec playwright install chromium</code> でブラウザーを取得します</td></tr>
@@ -135,7 +135,7 @@ cd web &amp;&amp; pnpm format</code></pre>
           <li>Web アプリの API の型（<code>web/src/api/types.ts</code>）は手書きです。サーバーのテストが主なレスポンスの構造を <code>web/tests/contract/shapes.json</code> に記録しており、構造が変わると失敗します。<code>server/</code> で <code>THIRTYFILE_UPDATE_SHAPES=1 cargo test api_shapes</code> を実行し、<code>pnpm typecheck</code> が通るまで型を直してください。</li>
           <li>数式、ブック保存、文字コードなど、ファイルを変更するロジックには <code>web/tests/unit/</code> の単体テストを用意します。</li>
         </ul>
-        <p>PR は軽量チェックを実行します。完全テストとイメージはリリース、プレリリース前、または <strong>Actions › Build › Run workflow</strong> で実行し、手動検証では公開しません。公開前に両アーキテクチャを <code>compose.yaml</code> と前リリースのデータで起動します。CodeQL はマージ後の <code>main</code>、週次、リリース前に走ります。<code>main</code> のマージはサイトも含め何も公開しません。ガイドはインストールできる内容を示すためリリースで公開します。既公開版にも正しいガイドの修正は、<strong>Actions › Website › Run workflow</strong> で公開元に <code>main</code> を指定して手動公開できます。</p>
+        <p>PR は上記のチェックを実行し、数分かかります：<code>scripts/check.sh quick</code>、<code>cargo deny</code>、サーバーを変更した場合はサーバーのテスト。完全テストとイメージはリリース、プレリリース前、または <strong>Actions › Build › Run workflow</strong> で実行し、手動検証では公開しません。公開前に両アーキテクチャを <code>compose.yaml</code> と前リリースのデータで起動します。CodeQL はマージ後の <code>main</code>、週次、リリース前に走ります。<code>main</code> のマージはサイトも含め何も公開しません。ガイドはインストールできる内容を示すためリリースで公開します。既公開版にも正しいガイドの修正は、<strong>Actions › Website › Run workflow</strong> で公開元に <code>main</code> を指定して手動公開できます。</p>
         <h2 id="translations">他言語のサイト</h2>
         <p>ホームと全 16 ガイドは英語、繁体字中国語、簡体字中国語、日本語で利用でき、各言語に同じ 17 ページがあります。</p>
         <div class="table-scroll"><table><thead><tr><th>ページ</th><th>英語</th><th>他言語</th></tr></thead><tbody>

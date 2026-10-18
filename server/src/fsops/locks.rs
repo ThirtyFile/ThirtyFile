@@ -167,6 +167,8 @@ pub async fn lock_seen(st: &AppState, user: &User, ids: &[&str]) -> AppResult<Sp
 }
 
 pub async fn lock_space(st: &AppState, drive_id: &str) -> OwnedMutexGuard<()> {
+    #[cfg(test)]
+    let _waiting = testing::Waiting::new(drive_id);
     crate::folders::drive_lock(st, drive_id).lock_owned().await
 }
 

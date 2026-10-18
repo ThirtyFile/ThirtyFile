@@ -112,7 +112,7 @@
           </li>
           <li><strong>完成更改</strong>，执行下方检查。</li>
           <li><strong>创建 Pull Request。</strong>标题用清晰语言说明改动，并添加一个标签。在说明中写 <code>Closes #123</code>，合并后即可关闭对应 Issue。</li>
-          <li><strong>等待检查。</strong>轻量的 <strong>Checks passed</strong> 检查必须通过才能合并。</li>
+          <li><strong>等待检查。</strong><strong>Checks passed</strong> 检查必须通过才能合并。</li>
           <li><strong>合并。</strong>Pull Request 在 <code>main</code> 上压缩为一个提交，随后删除分支。</li>
         </ol>
         <h2 id="checks">检查</h2>
@@ -121,7 +121,7 @@
         <div class="table-scroll"><table>
           <thead><tr><th>部分</th><th>检查内容</th></tr></thead>
           <tbody>
-            <tr><td><code>scripts/check.sh quick</code></td><td>自动 Pull Request 检查：前端格式、翻译、模块边界、端到端测试结构、类型和 lint；Rust 格式；迁移编号及已发布迁移保持不变；网站链接。不运行单元/浏览器测试、Rust 编译或镜像构建</td></tr>
+            <tr><td><code>scripts/check.sh quick</code></td><td>自动 Pull Request 检查：下方的前端检查及单元测试与其覆盖率门槛；Rust 格式和 clippy；迁移编号及已发布迁移保持不变；网站链接。在 GitHub 上，Pull Request 也会检查服务器的依赖（<code>cargo deny</code>），并在更改服务器时运行服务器测试。不运行浏览器测试或镜像构建</td></tr>
             <tr><td><code>scripts/check.sh web</code></td><td>界面：按锁文件安装依赖、格式（<code>pnpm format:check</code>）、翻译（<code>node scripts/check-i18n.mjs</code>）、确保 <code>web/src/ooxml</code> 的 Office 代码不导入应用其他模块（<code>node scripts/check-boundaries.mjs</code>）、确保端到端测试没有固定等待且名称包含随机部分（<code>node scripts/check-e2e.mjs</code>）、类型、lint 和单元测试。使用 <code>scripts/check.sh web --coverage</code> 时（与 GitHub 一样），覆盖率低于 <code>web/vitest.config.ts</code> 中的门槛也会失败</td></tr>
             <tr><td><code>scripts/check.sh server</code></td><td>服务器：格式（<code>cargo fmt --check</code>）、<code>cargo test</code>，以及将警告视为错误的 <code>cargo clippy</code></td></tr>
             <tr><td><code>scripts/check.sh e2e</code></td><td>端到端测试：通过真实浏览器（Playwright）对从仓库构建的服务器执行登录、上传和预览。多个测试并行运行（GitHub 上为 4 个），因此每个测试使用独立文件夹，名称含随机部分，操作后等待服务器响应而非固定时间；<code>web/tests/e2e/helpers.ts</code> 提供这些辅助功能。首次运行前，用 <code>cd web &amp;&amp; pnpm exec playwright install chromium</code> 安装浏览器</td></tr>
@@ -143,7 +143,7 @@ cd web &amp;&amp; pnpm format</code></pre>
           <li>网页应用的 API 类型（<code>web/src/api/types.ts</code>）是手写的。服务器有一项测试把主要响应的结构记录在 <code>web/tests/contract/shapes.json</code>，结构一改就会失败：在 <code>server/</code> 运行 <code>THIRTYFILE_UPDATE_SHAPES=1 cargo test api_shapes</code>，再修改类型直到 <code>pnpm typecheck</code> 通过。</li>
           <li>会更改用户文件的逻辑（公式、工作簿保存、文本编码）须在 <code>web/tests/unit/</code> 中添加单元测试。</li>
         </ul>
-        <p>每个 Pull Request 都运行上述轻量检查。完整测试与镜像构建在正式发布和预发布前运行，也可在 <strong>Actions › Build › Run workflow</strong> 手动运行；手动验证不发布任何内容。发布前，两种架构的镜像都会使用 <code>compose.yaml</code> 在最新已发布版本的数据上启动。CodeQL 在合并后、每周及发布前扫描 <code>main</code>。合并到 <code>main</code> 不发布任何内容，网站也不发布：指南随版本发布，以描述用户实际可安装的功能。对当前已发布版本也正确的指南修复可手动发布：在 <strong>Actions › Website › Run workflow</strong> 中选择 <code>main</code> 为要发布的分支或标签。</p>
+        <p>每个 Pull Request 都运行上述检查，约需几分钟：<code>scripts/check.sh quick</code>、<code>cargo deny</code>，以及更改服务器时的服务器测试。完整测试与镜像构建在正式发布和预发布前运行，也可在 <strong>Actions › Build › Run workflow</strong> 手动运行；手动验证不发布任何内容。发布前，两种架构的镜像都会使用 <code>compose.yaml</code> 在最新已发布版本的数据上启动。CodeQL 在合并后、每周及发布前扫描 <code>main</code>。合并到 <code>main</code> 不发布任何内容，网站也不发布：指南随版本发布，以描述用户实际可安装的功能。对当前已发布版本也正确的指南修复可手动发布：在 <strong>Actions › Website › Run workflow</strong> 中选择 <code>main</code> 为要发布的分支或标签。</p>
         <h2 id="translations">其他语言的网站</h2>
         <p>首页和全部 16 篇指南提供英文、繁体中文、简体中文和日文版本。每种语言覆盖相同的 17 个页面：</p>
         <div class="table-scroll"><table>

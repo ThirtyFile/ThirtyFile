@@ -5,21 +5,25 @@
 import { expect, test } from "vitest";
 import type {
   AccessInfo,
+  AppPassword,
   Activity,
   Device,
   Drive,
   EmailSettings,
   Grant,
   Group,
+  GuestConversionPreview,
   HistoryEntry,
   Job,
   Located,
   LogStatus,
   Me,
+  NewAppPassword,
   Node,
   NodeInfo,
   NotificationSettings,
   Principal,
+  RestrictionPreview,
   ShareInfo,
   SharedItem,
   SsoSettings,
@@ -28,6 +32,9 @@ import type {
   TwoFactorStatus,
   UserRow,
 } from "@/api/types";
+import type { FtpCreated, FtpFolder, FtpStatus } from "@/api/ftp";
+import type { NewS3Bucket, NewS3Key, S3Bucket, S3Config, S3Key } from "@/api/s3";
+import type { SftpKey, SftpSettings } from "@/api/sftp";
 import shapes from "../contract/shapes.json";
 
 type Shapes = typeof shapes;
@@ -46,21 +53,35 @@ function agrees<D extends { missing: never; unknown: never }>(): D | undefined {
 /** Each recorded response, checked against the type the app reads it as */
 const checked: { [K in keyof Shapes]: unknown } = {
   AccessInfo: agrees<Drift<Shapes["AccessInfo"], AccessInfo>>(),
+  AppPassword: agrees<Drift<Shapes["AppPassword"], AppPassword>>(),
   Activity: agrees<Drift<Shapes["Activity"], Activity>>(),
   Device: agrees<Drift<Shapes["Device"], Device>>(),
   Drive: agrees<Drift<Shapes["Drive"], Drive>>(),
   EmailSettings: agrees<Drift<Shapes["EmailSettings"], EmailSettings>>(),
+  FtpCreated: agrees<Drift<Shapes["FtpCreated"], FtpCreated>>(),
+  FtpFolder: agrees<Drift<Shapes["FtpFolder"], FtpFolder>>(),
+  FtpStatus: agrees<Drift<Shapes["FtpStatus"], FtpStatus>>(),
   Grant: agrees<Drift<Shapes["Grant"], Grant>>(),
   Group: agrees<Drift<Shapes["Group"], Group>>(),
+  GuestConversionPreview: agrees<Drift<Shapes["GuestConversionPreview"], GuestConversionPreview>>(),
   HistoryEntry: agrees<Drift<Shapes["HistoryEntry"], HistoryEntry>>(),
   Job: agrees<Drift<Shapes["Job"], Job>>(),
   Located: agrees<Drift<Shapes["Located"], Located>>(),
   LogStatus: agrees<Drift<Shapes["LogStatus"], LogStatus>>(),
   Me: agrees<Drift<Shapes["Me"], Me>>(),
+  NewAppPassword: agrees<Drift<Shapes["NewAppPassword"], NewAppPassword>>(),
+  NewS3Bucket: agrees<Drift<Shapes["NewS3Bucket"], NewS3Bucket>>(),
+  NewS3Key: agrees<Drift<Shapes["NewS3Key"], NewS3Key>>(),
   Node: agrees<Drift<Shapes["Node"], Node>>(),
   NodeInfo: agrees<Drift<Shapes["NodeInfo"], NodeInfo>>(),
   NotificationSettings: agrees<Drift<Shapes["NotificationSettings"], NotificationSettings>>(),
   Principal: agrees<Drift<Shapes["Principal"], Principal>>(),
+  RestrictionPreview: agrees<Drift<Shapes["RestrictionPreview"], RestrictionPreview>>(),
+  S3Bucket: agrees<Drift<Shapes["S3Bucket"], S3Bucket>>(),
+  S3Config: agrees<Drift<Shapes["S3Config"], S3Config>>(),
+  S3Key: agrees<Drift<Shapes["S3Key"], S3Key>>(),
+  SftpKey: agrees<Drift<Shapes["SftpKey"], SftpKey>>(),
+  SftpSettings: agrees<Drift<Shapes["SftpSettings"], SftpSettings>>(),
   ShareInfo: agrees<Drift<Shapes["ShareInfo"], ShareInfo>>(),
   SharedItem: agrees<Drift<Shapes["SharedItem"], SharedItem>>(),
   SsoSettings: agrees<Drift<Shapes["SsoSettings"], SsoSettings>>(),

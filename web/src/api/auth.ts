@@ -1,5 +1,5 @@
 import { request, get, post, enc, qs, send } from "@/api/client";
-import type { SsoProvider, LinkedIdentity, Me, TwoFactorPending, TwoFactorSetup, TwoFactorStatus, Device, AppPassword } from "@/api/types";
+import type { SsoProvider, LinkedIdentity, Me, TwoFactorPending, TwoFactorSetup, TwoFactorStatus, Device, AppPassword, NewAppPassword } from "@/api/types";
 import type { Lang } from "@/lib/i18n";
 import type { StyleChoice } from "@/lib/style/device";
 
@@ -43,8 +43,7 @@ export const authApi = {
   signOutUserDevice: (userId: number, id: string) => request("DELETE", `/admin/users/${userId}/sessions/${encodeURIComponent(id)}`),
   signOutUserDevices: (userId: number) => request<{ removed: number }>("DELETE", `/admin/users/${userId}/sessions`),
   appPasswords: () => get<AppPassword[]>("/auth/app-passwords"),
-  createAppPassword: (req: { name: string; scope: "read" | "write"; expires_days?: number; password?: string; code?: string }) =>
-    post<{ token: string; app_password: AppPassword }>("/auth/app-passwords", req),
+  createAppPassword: (req: { name: string; scope: "read" | "write"; expires_days?: number; password?: string; code?: string }) => post<NewAppPassword>("/auth/app-passwords", req),
   deleteAppPassword: (id: string) => request("DELETE", `/auth/app-passwords/${encodeURIComponent(id)}`),
   ssoProviders: () => get<SsoProvider[]>("/auth/sso/providers"),
   /** Start a third-party login (full-page redirect); link = link to the currently signed-in account */
