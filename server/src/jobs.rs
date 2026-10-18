@@ -91,8 +91,8 @@ impl Limit {
 #[derive(Debug, Clone, Serialize)]
 pub struct Job {
     pub id: String,
-    /// "compress", "extract", "move", "copy", "delete", "empty_trash", "scan", "delete_user", "remove_personal" or
-    /// "webdav"
+    /// "compress", "extract", "move", "copy", "delete", "restore", "empty_trash", "scan", "delete_user",
+    /// "remove_personal" or "webdav"
     pub kind: &'static str,
     /// "running", "done" or "failed"
     pub state: &'static str,

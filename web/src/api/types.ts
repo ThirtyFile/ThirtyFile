@@ -42,7 +42,7 @@ export interface Tag {
 export interface Job {
   /** Empty for a change that was done at once */
   id: string;
-  kind: "compress" | "extract" | "move" | "copy" | "delete" | "empty_trash" | "scan" | "delete_user" | "remove_personal" | "webdav";
+  kind: "compress" | "extract" | "move" | "copy" | "delete" | "restore" | "empty_trash" | "scan" | "delete_user" | "remove_personal" | "webdav";
   state: "running" | "done" | "failed";
   /** Work done so far, of `total` (bytes, or items) */
   done: number;

@@ -18,6 +18,7 @@ export default {
   "Moving…": "正在移动…",
   "Copying…": "正在复制…",
   "Deleting permanently…": "正在永久删除…",
+  "Restoring…": "正在还原…",
   "Emptying the trash…": "正在清空回收站…",
   "Checking the folder for changes…": "正在检查文件夹的更改…",
   "Deleting the user…": "正在删除用户…",

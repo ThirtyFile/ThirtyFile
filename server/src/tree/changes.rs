@@ -34,7 +34,7 @@ thread_local! {
     static TEST_BATCH: std::cell::Cell<Option<i64>> = const { std::cell::Cell::new(None) };
 }
 
-fn batch() -> i64 {
+pub(crate) fn batch() -> i64 {
     #[cfg(test)]
     if let Some(b) = TEST_BATCH.with(|b| b.get()) {
         return b;
@@ -171,15 +171,22 @@ pub async fn trash(conn: &mut SqliteConnection, node_id: &str, trash_id: &str, a
     Ok(Some(Unfinished { id: c.id, frontier: Some(frontier) }))
 }
 
-/// Takes everything that went to the trash with `node_id` out of it; the item itself is taken out by the caller
+/// Takes everything that went to the trash with `node_id` (`trash_id`) and is in it out of the trash; the item itself
+/// is taken out by the caller
 pub async fn restore(conn: &mut SqliteConnection, node_id: &str, trash_id: &str) -> AppResult<Option<Unfinished>> {
-    let (_, done) = restore_batch(conn, trash_id, batch()).await?;
+    Ok(restore_up_to(conn, node_id, trash_id, batch()).await?.1)
+}
+
+/// `restore`, taking out at most `limit` items in this transaction: returns how many it took out, and what is left
+pub async fn restore_up_to(conn: &mut SqliteConnection, node_id: &str, trash_id: &str, limit: i64) -> AppResult<(i64, Option<Unfinished>)> {
+    let mut frontier = VecDeque::from([node_id.to_string()]);
+    let (n, done) = if limit > 0 { restore_batch(conn, &mut frontier, trash_id, limit).await? } else { (0, false) };
     if done {
-        return Ok(None);
+        return Ok((n, None));
     }
     let c = Change { trash_id: Some(trash_id.into()), ..change(ChangeKind::Restore, node_id) };
     record(conn, &c).await?;
-    Ok(Some(Unfinished { id: c.id, frontier: None }))
+    Ok((n, Some(Unfinished { id: c.id, frontier: Some(frontier) })))
 }
 
 /// Starts deleting an item in the trash, and everything in it, for good: the trash no longer lists it. The deleting
@@ -271,18 +278,34 @@ async fn trash_batch(conn: &mut SqliteConnection, frontier: &mut VecDeque<String
     Ok((marked, frontier.is_empty()))
 }
 
-/// One batch of restoring from the trash
-async fn restore_batch(conn: &mut SqliteConnection, trash_id: &str, limit: i64) -> AppResult<(i64, bool)> {
-    let n = sqlx::query(
-        "UPDATE nodes SET trashed_at = NULL, trash_root = 0, trash_id = NULL, trashed_by = NULL
-         WHERE rowid IN (SELECT rowid FROM nodes WHERE trash_id = ?1 LIMIT ?2)",
-    )
-    .bind(trash_id)
-    .bind(limit)
-    .execute(conn)
-    .await?
-    .rows_affected() as i64;
-    Ok((n, n < limit))
+/// One batch of restoring from the trash: what went to the trash with the rest (`trash_id`) in the folders of
+/// `frontier`, and in the folders found in them, in turn. Only what is in the item restored comes out: when a folder
+/// in the trash is merged into another a batch at a time (nodes/trash.rs), what it still holds stays in the trash.
+/// The item itself (`trash_root`) is taken out by the caller.
+async fn restore_batch(conn: &mut SqliteConnection, frontier: &mut VecDeque<String>, trash_id: &str, limit: i64) -> AppResult<(i64, bool)> {
+    let (mut restored, mut work) = (0, 0);
+    while work < limit
+        && let Some(folder) = frontier.front().cloned()
+    {
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "UPDATE nodes SET trashed_at = NULL, trash_root = 0, trash_id = NULL, trashed_by = NULL
+             WHERE rowid IN (SELECT rowid FROM nodes WHERE parent_id = ?1 AND trash_id = ?2 AND trash_root = 0 LIMIT ?3)
+             RETURNING id, kind",
+        )
+        .bind(&folder)
+        .bind(trash_id)
+        .bind(limit - work)
+        .fetch_all(&mut *conn)
+        .await?;
+        let n = rows.len() as i64;
+        if n < limit - work {
+            frontier.pop_front();
+        }
+        frontier.extend(rows.into_iter().filter(|(_, kind)| kind == "folder").map(|(id, _)| id));
+        restored += n;
+        work += n.max(1);
+    }
+    Ok((restored, frontier.is_empty()))
 }
 
 /// One batch of deleting `top` and everything in it for good, going down its folders depth first (`stack`, the folders
@@ -388,7 +411,20 @@ async fn step(conn: &mut SqliteConnection, c: &Change, frontier: &mut Option<Vec
         }
         ChangeKind::Restore => {
             let Some(trash_id) = &c.trash_id else { return Ok((0, true)) };
-            restore_batch(conn, trash_id, limit).await
+            // After a stop, the folders to go through are found again: those out of the trash that hold items of it
+            let frontier = match frontier {
+                Some(f) => f,
+                None => {
+                    let folders: Vec<(String,)> = sqlx::query_as(
+                        "SELECT DISTINCT n.parent_id FROM nodes n JOIN nodes p ON p.id = n.parent_id WHERE n.trash_id = ? AND n.trash_root = 0 AND p.trashed_at IS NULL",
+                    )
+                    .bind(trash_id)
+                    .fetch_all(&mut *conn)
+                    .await?;
+                    frontier.insert(folders.into_iter().map(|(id,)| id).collect())
+                }
+            };
+            restore_batch(conn, frontier, trash_id, limit).await
         }
         ChangeKind::Purge => {
             // Items put in the trash on their own from inside what goes are trash items of their own: they stay, at the
@@ -1059,6 +1095,41 @@ mod tests {
         settled(&env.st).await;
         assert_eq!(below(&env, &big).await, (106, 106));
         assert_eq!(below(&env, &gone).await, (0, 0));
+    }
+
+    #[tokio::test]
+    async fn a_restore_finished_after_a_stop_takes_out_only_what_is_in_the_item_restored() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", false).await;
+        let big = big_folder(&env, &amy, amy.root(), 5, 20).await;
+        let still = env.folder(&amy, amy.root(), "Still").await;
+        let inner = env.folder(&amy, &still, "Inner").await;
+        let _ = env.file(&amy, &inner, "x.txt").await;
+        let _small = small_batches(10);
+        // Both went to the trash at once (`t`). Big came back, the first batch of what is in it with it, while Still
+        // stays in the trash, as a folder merged into another a batch at a time does (nodes/trash.rs)
+        {
+            let mut tx = crate::db::begin_write(&env.st.db).await.unwrap();
+            sqlx::query(
+                "WITH RECURSIVE sub(id) AS (SELECT ?1 UNION SELECT ?2 UNION SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id)
+                 UPDATE nodes SET trashed_at = 5, trash_id = 't' WHERE id IN sub",
+            )
+            .bind(&big)
+            .bind(&still)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+            sqlx::query("UPDATE nodes SET trash_root = 1 WHERE id = ?").bind(&still).execute(&mut *tx).await.unwrap();
+            sqlx::query("UPDATE nodes SET trashed_at = NULL, trash_id = NULL WHERE id = ?").bind(&big).execute(&mut *tx).await.unwrap();
+            assert!(restore(&mut tx, &big, "t").await.unwrap().is_some());
+            tx.commit().await.unwrap();
+        }
+        // A restart has only its row: the folders to go through are found again
+        resume(&env.st).await.unwrap();
+        settled(&env.st).await;
+        let (items, _) = below(&env, &big).await;
+        assert_eq!(below(&env, &big).await, (items, 0));
+        assert_eq!(below(&env, &still).await, (3, 3), "what is in the folder still in the trash stays there");
     }
 
     /// The issue's estimate (about 90 µs per item, so a million items hold the write lock for over 90 seconds), measured:

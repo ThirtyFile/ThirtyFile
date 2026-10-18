@@ -40,6 +40,8 @@ function runningText(kind: Job["kind"]) {
       return t("Copying…");
     case "delete":
       return t("Deleting permanently…");
+    case "restore":
+      return t("Restoring…");
     case "empty_trash":
       return t("Emptying the trash…");
     case "scan":

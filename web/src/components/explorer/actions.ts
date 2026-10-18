@@ -363,7 +363,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
     }
     // Restoring can fail, e.g. the original folder was deleted, a name conflict, or the space is full
     toastWithUndo(t("Moved to trash"), {
-      undo: () => api.restore(picked.ids),
+      undo: () => api.restore(picked.ids).then(waitForJob),
       undoneText: t("Restored"),
       label: t("Undo delete"),
       after: () => changed({ folders: parents, trash: true, contents: true, usage: true }),

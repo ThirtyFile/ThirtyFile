@@ -18,6 +18,7 @@ export default {
   "Moving…": "移動しています…",
   "Copying…": "コピーしています…",
   "Deleting permanently…": "完全に削除しています…",
+  "Restoring…": "復元しています…",
   "Emptying the trash…": "ごみ箱を空にしています…",
   "Checking the folder for changes…": "フォルダーの変更を確認しています…",
   "Deleting the user…": "ユーザーを削除しています…",

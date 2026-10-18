@@ -14,7 +14,7 @@ use crate::{
     auth::User,
     error::{AppError, AppResult},
     fsops,
-    jobs::{self, Job, Limit, Outcome},
+    jobs::{self, Job, Limit, Outcome, Tracker},
     logs,
     state::AppState,
     tree::{
@@ -242,103 +242,235 @@ async fn outer_first(conn: &mut SqliteConnection, ids: Vec<String>) -> AppResult
     Ok(by_depth.into_iter().map(|(_, id)| id).collect())
 }
 
-/// Whether a folder has access of its own, which merging it into another folder would take away: it is restricted, or
-/// has grants on it
-async fn has_own_access(conn: &mut SqliteConnection, folder: &Node) -> AppResult<bool> {
+/// Whether a folder has something of its own that merging it into another folder would take away, or widen to what
+/// that folder holds: it is restricted, or has grants, share links, an S3 bucket or an FTP receive folder on it
+async fn keeps_its_own(conn: &mut SqliteConnection, folder: &Node) -> AppResult<bool> {
     if folder.restricted {
         return Ok(true);
     }
-    let (granted,): (bool,) = sqlx::query_as("SELECT EXISTS(SELECT 1 FROM grants WHERE node_id = ?)").bind(&folder.id).fetch_one(&mut *conn).await?;
-    Ok(granted)
+    let (own,): (bool,) = sqlx::query_as(
+        "SELECT EXISTS(SELECT 1 FROM grants WHERE node_id = ?1) OR EXISTS(SELECT 1 FROM shares WHERE node_id = ?1)
+           OR EXISTS(SELECT 1 FROM s3_buckets WHERE node_id = ?1) OR EXISTS(SELECT 1 FROM ftp_receive_folders WHERE node_id = ?1)",
+    )
+    .bind(&folder.id)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(own)
+}
+
+/// Items a merge moves per transaction: in a folder space each is a rename on disk, written into the journal first
+const MERGE_BATCH: i64 = 500;
+
+/// A folder in the trash merged into the folder of its name, a batch per transaction (`merge`)
+pub struct Merging {
+    from: String,
+    into: String,
+    replace: bool,
+    trash_id: Option<String>,
+}
+
+/// What people put on a folder for themselves goes to the folder it is merged into: favorites, recent items and tags
+/// (one that folder has already stays as it is)
+async fn hand_over(conn: &mut SqliteConnection, from: &str, into: &str) -> AppResult<()> {
+    for table in ["favorites", "recent_files", "tagged"] {
+        sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE OR IGNORE {table} SET node_id = ?1 WHERE node_id = ?2"))).bind(into).bind(from).execute(&mut *conn).await?;
+    }
+    Ok(())
 }
 
 /// Merges the folder `from`, in the trash, into the folder `into` of the same name, as Windows does: what went to the
 /// trash with `from` goes into `into`, out of the trash (the folders it holds merged the same way into folders of the
-/// same name), then `from` itself goes. A file whose name `into` has already takes the place of the one there, which
-/// goes to the trash (`replace`), or gets a number. Items put in the trash on their own from inside `from` go back into
-/// `into` when they are restored. What is inside the items that come out is left to the caller (`changes::restore`).
+/// same name, unless they have something of their own, `keeps_its_own`), then `from` itself goes. A file whose name
+/// `into` has already takes the place of the one there, which goes to the trash (`m.replace`), or gets a number.
+/// Items put in the trash on their own from inside `from` go back into `into` when they are restored; in a folder
+/// space, what is on disk in `from` that the index doesn't have goes into `into` too.
+/// At most `budget` items are moved (it counts down): returns whether `from` is done, else the next batch goes on.
 fn merge<'a>(
     conn: &'a mut SqliteConnection,
     user: &'a User,
     locks: &'a fsops::SpaceLocks,
+    m: &'a Merging,
     from: &'a Node,
     into: &'a Node,
-    replace: bool,
-) -> Pin<Box<dyn Future<Output = AppResult<()>> + Send + 'a>> {
+    budget: &'a mut i64,
+) -> Pin<Box<dyn Future<Output = AppResult<bool>> + Send + 'a>> {
     Box::pin(async move {
-        let sql = format!("SELECT {NODE_COLS} FROM nodes n WHERE n.parent_id = ? AND n.trash_root = 0");
-        let items: Vec<Node> = sqlx::query_as(sqlx::AssertSqlSafe(sql)).bind(&from.id).fetch_all(&mut *conn).await?;
-        for item in &items {
-            let name = match tree::find_child(conn, &into.id, &item.name).await? {
-                // A folder with access of its own (restricted, or its own grants) keeps it: it comes back beside the
-                // folder of its name, with a number, rather than into it
-                Some(there) if there.is_folder() && item.is_folder() && !has_own_access(conn, item).await? => {
+        let sql = format!("SELECT {NODE_COLS} FROM nodes n WHERE n.parent_id = ? AND n.trash_root = 0 ORDER BY n.rowid LIMIT ?");
+        loop {
+            if *budget <= 0 {
+                return Ok(false);
+            }
+            let items: Vec<Node> = sqlx::query_as(sqlx::AssertSqlSafe(sql.clone())).bind(&from.id).bind(*budget).fetch_all(&mut *conn).await?;
+            if items.is_empty() {
+                break;
+            }
+            for item in &items {
+                if *budget <= 0 {
+                    return Ok(false);
+                }
+                let taken = tree::find_child(conn, &into.id, &item.name).await?;
+                if let Some(there) = &taken
+                    && there.is_folder()
+                    && item.is_folder()
+                    && !keeps_its_own(conn, item).await?
+                {
                     let there = tree::folder_for(conn, user, &there.id, Need::Add).await?;
-                    merge(conn, user, locks, item, &there, replace).await?;
+                    if !merge(conn, user, locks, m, item, &there, budget).await? {
+                        return Ok(false);
+                    }
                     continue;
                 }
-                Some(there) if replace => {
-                    replace_existing(conn, user, locks, &there, item).await?;
-                    item.name.clone()
+                if let Some(there) = &taken
+                    && m.replace
+                {
+                    replace_existing(conn, user, locks, there, item).await?;
                 }
-                Some(_) if into.in_folder_space() => fsops::free_name(conn, into, &item.name, item.is_folder()).await?,
-                Some(_) => tree::unique_name(conn, &into.id, &item.name, item.is_folder()).await?,
-                None => item.name.clone(),
-            };
-            if item.in_folder_space() {
-                fsops::rename(conn, locks, item, into, &name).await?;
+                let name = if into.in_folder_space() {
+                    // Also when the index has no item of that name: the disk may have one (that scans skip, or in other
+                    // letter case on a disk that ignores it)
+                    fsops::free_name(conn, into, &item.name, item.is_folder()).await?
+                } else if taken.is_some() && !m.replace {
+                    tree::unique_name(conn, &into.id, &item.name, item.is_folder()).await?
+                } else {
+                    item.name.clone()
+                };
+                if item.in_folder_space() {
+                    fsops::rename(conn, locks, item, into, &name).await?;
+                }
+                // Out of the trash at once, so the next names taken see it
+                sqlx::query("UPDATE nodes SET parent_id = ?, name = ?, trashed_at = NULL, trash_root = 0, trash_id = NULL, trashed_by = NULL WHERE id = ?")
+                    .bind(&into.id)
+                    .bind(&name)
+                    .bind(&item.id)
+                    .execute(&mut *conn)
+                    .await?;
+                *budget -= 1;
+                // What is in it comes out with it, as much as the batch has room for; the rest right after
+                if item.is_folder()
+                    && let Some(trash_id) = &m.trash_id
+                {
+                    let (n, left) = changes::restore_up_to(conn, &item.id, trash_id, *budget).await?;
+                    *budget -= n;
+                    locks.later(left);
+                }
             }
-            // Out of the trash at once, so the next names taken see it
-            sqlx::query("UPDATE nodes SET parent_id = ?, name = ?, trashed_at = NULL, trash_root = 0, trash_id = NULL, trashed_by = NULL WHERE id = ?")
-                .bind(&into.id)
-                .bind(&name)
-                .bind(&item.id)
-                .execute(&mut *conn)
-                .await?;
         }
+        // Done with what the index has in it: what was put in the trash on its own from inside it, and what is only on
+        // disk, goes into `into`, and so does what people put on it for themselves
         sqlx::query("UPDATE nodes SET parent_id = ? WHERE parent_id = ?").bind(&into.id).bind(&from.id).execute(&mut *conn).await?;
+        if from.in_folder_space() {
+            fsops::move_unindexed(conn, locks, from, into).await?;
+        }
+        hand_over(conn, &from.id, &into.id).await?;
         // Empty now (in a folder space, its folder in the trash goes with the trash folder, `fsops::clean_trash`)
         sqlx::query("DELETE FROM nodes WHERE id = ?").bind(&from.id).execute(&mut *conn).await?;
-        Ok(())
+        *budget -= 1;
+        Ok(true)
     })
 }
 
-pub async fn restore(State(st): State<AppState>, user: User, Json(req): Json<BatchReq>) -> AppResult<Json<Value>> {
+/// Merges the folder `m.from` into `m.into` (`merge`), a batch per transaction, so a folder of many items neither
+/// holds the write lock for long nor runs into a request's time limit. Each batch is whole: should one fail, the
+/// batches before it stay, and the folder in the trash holds the rest, which restoring it again merges.
+async fn merge_all(st: &AppState, user: &User, m: &Merging, progress: &Tracker) -> AppResult<()> {
+    loop {
+        let locks = fsops::lock(st, user, &[&m.from, &m.into]).await?;
+        let size = changes::batch().min(MERGE_BATCH);
+        let mut budget = size;
+        let done = {
+            let _w = st.write_lock.lock().await;
+            let mut tx = crate::db::begin_write(&st.db).await?;
+            // Restored or deleted for good meanwhile: nothing is left to merge
+            let Some(from) = tree::get_node(&mut tx, &m.from).await?.filter(|n| n.trashed_at.is_some()) else { return Ok(()) };
+            let into = tree::node_for(&mut tx, user, &m.into, Need::Add).await?;
+            locks.check(&from)?;
+            locks.check(&into)?;
+            let done = merge(&mut tx, user, &locks, m, &from, &into, &mut budget).await?;
+            tree::touch(&mut tx, &into.id).await?;
+            tx.commit().await?;
+            done
+        };
+        locks.committed();
+        progress.add((size - budget).max(0) as u64);
+        // Dropping the locks finishes what the batch left (what is in large folders that came out) before the next
+        drop(locks);
+        if done {
+            return Ok(());
+        }
+        tokio::task::yield_now().await;
+    }
+}
+
+/// How many items the merges `merging` have to move: everything in the folders in the trash
+async fn merge_size(st: &AppState, merging: &[Merging]) -> AppResult<u64> {
+    let ids = serde_json::to_string(&merging.iter().map(|m| m.from.as_str()).collect::<Vec<_>>()).unwrap();
+    let (n,): (i64,) = sqlx::query_as(
+        "WITH RECURSIVE sub(id) AS (
+           SELECT value FROM json_each(?1)
+           UNION SELECT c.id FROM nodes c JOIN sub ON c.parent_id = sub.id WHERE c.trash_root = 0
+         )
+         SELECT COUNT(*) FROM sub",
+    )
+    .bind(ids)
+    .fetch_one(&st.db)
+    .await?;
+    Ok(n as u64)
+}
+
+/// Merges what `restore_items` left to merge, counting the items into `progress`
+pub async fn finish_merges(st: &AppState, user: &User, merging: Vec<Merging>, progress: &Tracker) -> AppResult<()> {
+    if merging.is_empty() {
+        return Ok(());
+    }
+    progress.set_total(merge_size(st, &merging).await?);
+    for m in &merging {
+        merge_all(st, user, m, progress).await?;
+    }
+    Ok(())
+}
+
+pub async fn restore(State(st): State<AppState>, user: User, Json(req): Json<BatchReq>) -> AppResult<Json<Job>> {
+    let pending = jobs::reserve(&st, user.id, "restore", Limit::Changes)?;
+    let merging = restore_items(&st, &user, &req).await?;
+    // A folder merged into one of its name may hold many items: the page follows the rest as a job
+    let job = pending.run(jobs::wait(), move |t| async move { finish_merges(&st, &user, merging, &t).await.map(|()| Outcome::default()) }).await?;
+    Ok(Json(job))
+}
+
+/// Restores the items `req` names, in one transaction; a folder whose name a folder has in its place now is merged
+/// into that folder afterwards (`finish_merges`, with what this returns)
+pub async fn restore_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult<Vec<Merging>> {
     let ids = req.ids()?;
-    let locks = fsops::lock_seen(&st, &user, &ids.iter().map(String::as_str).collect::<Vec<_>>()).await?;
+    let locks = fsops::lock_seen(st, user, &ids.iter().map(String::as_str).collect::<Vec<_>>()).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
+    let mut merging = Vec::new();
     for id in &outer_first(&mut tx, ids).await? {
         // Restored into the original folder, made again (with the folders above it) if it is in the trash too
-        let (node, place) = trash_root(&mut tx, &user, id, Need::Move).await?;
+        let (node, place) = trash_root(&mut tx, user, id, Need::Move).await?;
         locks.check(&node)?;
         changes::refuse_busy(&mut tx, &node.id).await?;
-        let parent_id = make_way(&mut tx, &user, &locks, &place).await?;
+        let parent_id = make_way(&mut tx, user, &locks, &place).await?;
         // Without an answer the item gets a number when its name is taken, as it always did
         if let Some(existing) = tree::find_child(&mut tx, &parent_id, &node.name).await? {
             // A folder where a folder has its name now is merged into it, whatever the answer but Skip; unless it has
-            // access of its own, which it keeps: it then comes back with a number, as a file does
-            if node.is_folder() && existing.is_folder() && !has_own_access(&mut tx, &node).await? {
+            // something of its own, which it keeps: it then comes back with a number, as a file does
+            if node.is_folder() && existing.is_folder() && !keeps_its_own(&mut tx, &node).await? {
                 let resolution = req.resolution(&node.id);
                 if resolution == Some(Resolution::Skip) {
                     continue;
                 }
-                let into = tree::node_for(&mut tx, &user, &existing.id, Need::Add).await?;
+                let into = tree::node_for(&mut tx, user, &existing.id, Need::Add).await?;
                 locks.check(&into)?;
                 changes::refuse_busy(&mut tx, &into.id).await?;
                 let (trash_id,): (Option<String>,) = sqlx::query_as("SELECT trash_id FROM nodes WHERE id = ?").bind(&node.id).fetch_one(&mut *tx).await?;
-                logs::record_activity(&mut tx, &user, Some(&node), "restore", "").await?;
-                merge(&mut tx, &user, &locks, &node, &into, resolution == Some(Resolution::Replace)).await?;
-                // What is inside the items that came out follows, as in a restore
-                if let Some(trash_id) = trash_id {
-                    locks.later(changes::restore(&mut tx, &into.id, &trash_id).await?);
-                }
-                tree::touch(&mut tx, &into.id).await?;
+                logs::record_activity(&mut tx, user, Some(&node), "restore", "").await?;
+                merging.push(Merging { from: node.id.clone(), into: into.id, replace: resolution == Some(Resolution::Replace), trash_id });
                 continue;
             }
             match req.resolution(&node.id) {
                 Some(Resolution::Skip) => continue,
-                Some(Resolution::Replace) => replace_existing(&mut tx, &user, &locks, &existing, &node).await?,
+                Some(Resolution::Replace) => replace_existing(&mut tx, user, &locks, &existing, &node).await?,
                 Some(Resolution::Keep) | None => {}
             }
         }
@@ -362,11 +494,11 @@ pub async fn restore(State(st): State<AppState>, user: User, Json(req): Json<Bat
             locks.later(changes::restore(&mut tx, &node.id, &trash_id).await?);
         }
         tree::touch(&mut tx, &parent_id).await?;
-        logs::record_activity(&mut tx, &user, Some(&node), "restore", "").await?;
+        logs::record_activity(&mut tx, user, Some(&node), "restore", "").await?;
     }
     tx.commit().await?;
     locks.committed();
-    Ok(Json(json!({ "ok": true })))
+    Ok(merging)
 }
 
 /// Deletes items in the trash for good. They leave the trash at once; deleting a large folder takes a while, so it runs

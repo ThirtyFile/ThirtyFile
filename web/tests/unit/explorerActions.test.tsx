@@ -115,7 +115,7 @@ function server() {
   return {
     selection,
     trash: vi.spyOn(api, "trash").mockResolvedValue(undefined),
-    restore: vi.spyOn(api, "restore").mockResolvedValue(undefined),
+    restore: vi.spyOn(api, "restore").mockResolvedValue(done("restore")),
     deleteForever: vi.spyOn(api, "deleteForever").mockResolvedValue(done("delete")),
     conflicts: vi.spyOn(api, "conflicts").mockResolvedValue([]),
     move: vi.spyOn(api, "move").mockResolvedValue(done("move")),
