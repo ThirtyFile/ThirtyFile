@@ -18,8 +18,31 @@ pub struct Login {
     pub alive: Arc<AtomicBool>,
     pub plain: bool,
     pub authenticated: Arc<AtomicBool>,
+    /// Told when the device has signed in
+    pub signed_in: Arc<tokio::sync::Notify>,
     pub user: crate::sync::Mutex<Option<Device>>,
 }
+
+/// The address a connection comes from when Docker's port proxy relays it: the default gateway of the system ThirtyFile
+/// runs in (on Linux; read once). A connection from it may come from anywhere, so it never counts as the local network
+/// for plain FTP. On a host without Docker that is the router, from which devices don't connect.
+fn proxy_address() -> Option<std::net::Ipv4Addr> {
+    static GATEWAY: std::sync::OnceLock<Option<std::net::Ipv4Addr>> = std::sync::OnceLock::new();
+    *GATEWAY.get_or_init(|| default_gateway(&std::fs::read_to_string("/proc/net/route").ok()?))
+}
+
+/// The default gateway in the text of `/proc/net/route` (addresses as little-endian hex)
+fn default_gateway(routes: &str) -> Option<std::net::Ipv4Addr> {
+    routes.lines().skip(1).find_map(|line| {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        (fields.get(1) == Some(&"00000000"))
+            .then(|| u32::from_str_radix(fields.get(2)?, 16).ok())
+            .flatten()
+            .filter(|gateway| *gateway != 0)
+            .map(|gateway| std::net::Ipv4Addr::from(gateway.to_le_bytes()))
+    })
+}
+
 impl fmt::Debug for Login {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("FtpLogin").field("peer", &self.peer).finish_non_exhaustive()
@@ -49,6 +72,10 @@ impl UserDetail for Device {
 }
 
 pub fn private_peer(ip: IpAddr) -> bool {
+    // Docker's port proxy connects from the container's gateway, whoever the client is
+    if proxy_address().is_some_and(|proxy| ip.to_canonical() == IpAddr::V4(proxy)) {
+        return false;
+    }
     match ip {
         IpAddr::V4(ip) => ip.is_loopback() || ip.is_private(),
         IpAddr::V6(ip) => ip.to_ipv4_mapped().map(|v| private_peer(IpAddr::V4(v))).unwrap_or_else(|| ip.is_loopback() || (ip.segments()[0] & 0xfe00) == 0xfc00),
@@ -97,6 +124,7 @@ impl Authenticator for Login {
         let principal = Principal { username: format!("{}:{}", row.id, row.generation) };
         *self.user.lock() = Some(Device { actor, username: row.username, _permit: Arc::new(permit) });
         self.authenticated.store(true, Ordering::Release);
+        self.signed_in.notify_one();
         sqlx::query("UPDATE ftp_receive_folders SET last_used_at=? WHERE id=? AND generation=?")
             .bind(crate::util::now())
             .bind(row.id)
@@ -120,5 +148,20 @@ impl UserDetailProvider for Login {
         }
         super::credentials::access(&self.state, &user.actor, false, false).await.map_err(|_| denied())?;
         Ok(user)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_default_gateway_is_read_from_the_routing_table() {
+        let routes = [
+            "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT",
+            "eth0\t00000000\t010011AC\t0003\t0\t0\t0\t00000000\t0\t0\t0",
+            "eth0\t000011AC\t00000000\t0001\t0\t0\t0\t0000FFFF\t0\t0\t0",
+        ]
+        .join("\n");
+        assert_eq!(super::default_gateway(&routes), Some(std::net::Ipv4Addr::new(172, 17, 0, 1)));
+        assert_eq!(super::default_gateway("Iface\tDestination\tGateway\n"), None);
     }
 }

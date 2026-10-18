@@ -810,3 +810,30 @@ async fn only_the_publisher_or_an_administrator_hands_out_keys_and_every_change_
         assert!(details.contains(&expected), "{expected} not in {details:?}");
     }
 }
+
+#[tokio::test]
+async fn a_stopped_key_and_a_skewed_clock_use_none_of_the_sign_in_limit_but_unknown_keys_do() {
+    let s = server(false).await;
+    let rate = format!("ip:{}", crate::auth::limit_key_ip("127.0.0.1"));
+    // A backup job retrying with a key that was stopped: refused, but never counted, however often
+    sqlx::query("UPDATE s3_keys SET enabled = 0 WHERE id = ?").bind(&s.key.key.id).execute(&s.env.st.db).await.unwrap();
+    for _ in 0..(crate::auth::IP_FAIL_LIMIT + 5) {
+        assert!(s.client.head_bucket().bucket("backups").send().await.is_err());
+    }
+    assert!(!crate::auth::attempts_exhausted(&s.env.st, &rate, 1), "a known key refused for another reason isn't a guess");
+    // Nor does a request whose clock is far off
+    let response = reqwest::Client::new()
+        .get(format!("{}/backups", s.endpoint))
+        .header("host", "127.0.0.1")
+        .header("x-amz-date", "20000101T000000Z")
+        .header("authorization", "AWS4-HMAC-SHA256 Credential=TFX/20000101/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-date, Signature=00")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::FORBIDDEN);
+    assert!(!crate::auth::attempts_exhausted(&s.env.st, &rate, 1));
+    // An unknown key is a guess, and counts
+    let unknown = client(&s.endpoint, "TF00000000000000000000", "not-the-secret");
+    assert!(unknown.head_bucket().bucket("backups").send().await.is_err());
+    assert!(crate::auth::attempts_exhausted(&s.env.st, &rate, 1));
+}

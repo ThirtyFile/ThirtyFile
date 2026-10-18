@@ -183,6 +183,7 @@ pub async fn start(st: AppState, settings: Settings, cfg: config::Config) -> App
     let (stop, mut stopped) = tokio::sync::watch::channel(false);
     let task = tokio::spawn(async move {
         let slots = Arc::new(tokio::sync::Semaphore::new(128));
+        let pending = crate::auth::pending::Pending::default();
         let mut tasks = tokio::task::JoinSet::new();
         loop {
             tokio::select! {
@@ -190,11 +191,12 @@ pub async fn start(st: AppState, settings: Settings, cfg: config::Config) -> App
                 Some(_)=tasks.join_next(),if !tasks.is_empty()=>(),
                 result=socket.accept()=>{
                     let Ok((stream,peer))=result else{break};
+                    let Some(waiting)=pending.admit(peer.ip()) else{continue};
                     let Ok(permit)=slots.clone().try_acquire_owned() else{continue};
                     let plain=cfg.allow_private_plaintext && login::private_peer(peer.ip());
                     if !plain && tls.is_none(){continue;}
                     let (st,tls,host,ports,stop)=(st.clone(),tls.clone(),host.clone(),ports.clone(),stopped.clone());
-                    tasks.spawn(connection(st,stream,peer.ip(),Transport { plain, tls, host, ports },stop,permit));
+                    tasks.spawn(connection(st,stream,peer.ip(),Transport { plain, tls, host, ports },stop,(permit,waiting)));
                 }
             }
         }
@@ -210,7 +212,7 @@ async fn connection(
     peer: IpAddr,
     transport: Transport,
     mut stopped: tokio::sync::watch::Receiver<bool>,
-    _permit: tokio::sync::OwnedSemaphorePermit,
+    (_permit, mut waiting): (tokio::sync::OwnedSemaphorePermit, crate::auth::pending::PendingGuard),
 ) {
     let Transport { plain, tls, host, ports } = transport;
     let Ok(wire) = stream.into_std() else { return };
@@ -218,7 +220,16 @@ async fn connection(
     let Ok(stream) = tokio::net::TcpStream::from_std(wire) else { return };
     let alive = Arc::new(AtomicBool::new(true));
     let authenticated = Arc::new(AtomicBool::new(false));
-    let login = Arc::new(login::Login { state: st.clone(), peer, alive: alive.clone(), plain, authenticated: authenticated.clone(), user: Default::default() });
+    let signed_in = Arc::new(tokio::sync::Notify::new());
+    let login = Arc::new(login::Login {
+        state: st.clone(),
+        peer,
+        alive: alive.clone(),
+        plain,
+        authenticated: authenticated.clone(),
+        signed_in: signed_in.clone(),
+        user: Default::default(),
+    });
     let files = st.clone();
     let mut builder = ServerBuilder::with_user_detail_provider(Box::new(move || storage::Files(files.clone())), login.clone())
         .authenticator(login)
@@ -233,14 +244,19 @@ async fn connection(
     }
     let Ok(server) = builder.build() else { return };
     let mut service = tokio::spawn(server.service(stream));
-    let deadline = tokio::time::sleep(Duration::from_secs(30));
+    let deadline = tokio::time::sleep(Duration::from_secs(20));
     tokio::pin!(deadline);
     let mut finished = false;
     tokio::select! {
         _=&mut service=>finished=true,
         _=stopped.changed()=>(),
+        _=signed_in.notified()=>{
+            waiting.signed_in();
+            tokio::select!{_=&mut service=>finished=true,_=stopped.changed()=>(),_=tokio::time::sleep(Duration::from_secs(3600))=>()}
+        }
         _=&mut deadline=>{
             if authenticated.load(Ordering::Acquire){
+                waiting.signed_in();
                 tokio::select!{_=&mut service=>finished=true,_=stopped.changed()=>(),_=tokio::time::sleep(Duration::from_secs(3600))=>()}
             }
         }

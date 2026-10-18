@@ -17,6 +17,32 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio_rustls::TlsAcceptor;
 
+/// A data connection whose TLS handshake failed: every read and write fails, so the transfer is refused, never taken
+/// for an empty one (and the task doesn't panic)
+struct FailedHandshake;
+
+fn handshake_failed() -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::ConnectionAborted, "TLS handshake failed on the data connection")
+}
+
+impl AsyncRead for FailedHandshake {
+    fn poll_read(self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>, _: &mut ReadBuf<'_>) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Ready(Err(handshake_failed()))
+    }
+}
+
+impl AsyncWrite for FailedHandshake {
+    fn poll_write(self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>, _: &[u8]) -> std::task::Poll<std::io::Result<usize>> {
+        std::task::Poll::Ready(Err(handshake_failed()))
+    }
+    fn poll_flush(self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Ready(Err(handshake_failed()))
+    }
+    fn poll_shutdown(self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+}
+
 use crate::metrics;
 
 #[derive(Debug)]
@@ -566,13 +592,11 @@ where
             FtpsConfig::Off => Box::new(MeasuringWriter::new(socket, command)) as Box<dyn AsyncWrite + Send + Unpin + Sync>,
             FtpsConfig::Building { .. } => panic!("Illegal state"),
             FtpsConfig::On { tls_config } => {
-                let io = async move {
-                    let acceptor: TlsAcceptor = tls_config.into();
-                    let tls_stream = acceptor.accept(socket).await.unwrap();
-                    MeasuringWriter::new(tls_stream, command)
+                let acceptor: TlsAcceptor = tls_config.into();
+                match acceptor.accept(socket).await {
+                    Ok(tls_stream) => Box::new(MeasuringWriter::new(tls_stream, command)) as Box<dyn AsyncWrite + Send + Unpin + Sync>,
+                    Err(_) => Box::new(FailedHandshake),
                 }
-                .await;
-                Box::new(io) as Box<dyn AsyncWrite + Send + Unpin + Sync>
             }
         }
     }
@@ -583,18 +607,16 @@ where
             FtpsConfig::Off => Box::new(MeasuringReader::new(socket, command)) as Box<dyn AsyncRead + Send + Unpin + Sync>,
             FtpsConfig::Building { .. } => panic!("Illegal state"),
             FtpsConfig::On { tls_config } => {
-                let io = async move {
-                    // Upload data sockets are single-use and clients may never read post-handshake tickets.
-                    // Keep the control connection's shared cache and accept its resumptions, without issuing
-                    // new TLS 1.3 tickets that can make a write-only client's immediate close reset TCP.
-                    let mut upload_config = tls_config.as_ref().clone();
-                    upload_config.send_tls13_tickets = 0;
-                    let acceptor: TlsAcceptor = Arc::new(upload_config).into();
-                    let tls_stream = acceptor.accept(socket).await.unwrap();
-                    MeasuringReader::new(TlsUploadReader::new(tls_stream), command)
+                // Upload data sockets are single-use and clients may never read post-handshake tickets.
+                // Keep the control connection's shared cache and accept its resumptions, without issuing
+                // new TLS 1.3 tickets that can make a write-only client's immediate close reset TCP.
+                let mut upload_config = tls_config.as_ref().clone();
+                upload_config.send_tls13_tickets = 0;
+                let acceptor: TlsAcceptor = Arc::new(upload_config).into();
+                match acceptor.accept(socket).await {
+                    Ok(tls_stream) => Box::new(MeasuringReader::new(TlsUploadReader::new(tls_stream), command)) as Box<dyn AsyncRead + Send + Unpin + Sync>,
+                    Err(_) => Box::new(FailedHandshake),
                 }
-                .await;
-                Box::new(io) as Box<dyn AsyncRead + Send + Unpin + Sync>
             }
         }
     }

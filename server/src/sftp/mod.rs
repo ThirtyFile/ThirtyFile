@@ -215,6 +215,7 @@ pub async fn start(st: AppState, address: &str) -> Result<Listener, Box<dyn std:
     let (stop, mut stopped) = tokio::sync::watch::channel(false);
     let _task = tokio::spawn(async move {
         let slots = Arc::new(tokio::sync::Semaphore::new(256));
+        let pending = auth::pending::Pending::default();
         let mut tasks = tokio::task::JoinSet::new();
         loop {
             tokio::select! {
@@ -222,9 +223,10 @@ pub async fn start(st: AppState, address: &str) -> Result<Listener, Box<dyn std:
                 Some(_) = tasks.join_next(), if !tasks.is_empty() => (),
                 accepted = socket.accept() => match accepted {
                     Ok((stream, peer)) => {
+                        let Some(waiting) = pending.admit(peer.ip()) else { continue };
                         let Ok(slot) = slots.clone().try_acquire_owned() else { continue };
                         let (st, config, stopped) = (st.clone(), config.clone(), stopped.clone());
-                        tasks.spawn(serve_connection(st, config, stream, peer, stopped, slot));
+                        tasks.spawn(serve_connection(st, config, stream, peer, stopped, (slot, waiting)));
                     },
                     Err(e) => { tracing::error!("SFTP listener failed: {e}"); break; },
                 }
@@ -242,18 +244,19 @@ async fn serve_connection(
     stream: tokio::net::TcpStream,
     peer: SocketAddr,
     mut stopped: tokio::sync::watch::Receiver<bool>,
-    _slot: tokio::sync::OwnedSemaphorePermit,
+    (_slot, mut waiting): (tokio::sync::OwnedSemaphorePermit, auth::pending::PendingGuard),
 ) {
     let authenticated = Arc::new(tokio::sync::Notify::new());
     let connection = Connection { st, peer, login: None, channels: HashMap::new(), permit: None, authenticated: authenticated.clone(), channel_used: false };
-    let running = tokio::time::timeout(Duration::from_secs(20), russh::server::run_stream(config, stream, connection)).await;
+    let running = tokio::time::timeout(Duration::from_secs(10), russh::server::run_stream(config, stream, connection)).await;
     let Ok(Ok(mut running)) = running else { return };
     let handle = running.handle();
     let completed = tokio::select! {
         _ = &mut running => true,
         _ = stopped.changed() => false,
-        _ = tokio::time::sleep(Duration::from_secs(30)) => false,
+        _ = tokio::time::sleep(Duration::from_secs(20)) => false,
         _ = authenticated.notified() => {
+            waiting.signed_in();
             tokio::select! { _ = &mut running => true, _ = stopped.changed() => false }
         }
     };
@@ -297,6 +300,24 @@ impl russh::server::Handler for Connection {
     async fn auth_password(&mut self, username: &str, password: &str) -> Result<Auth, Self::Error> {
         Ok(self.accept(Login::Password { username: username.to_string(), token: password.to_string() }).await)
     }
+    /// A key offered without a signature yet (an SSH agent offers each of its keys in turn): accepted only if it is one
+    /// of the account's, without counting the others as failed sign-ins
+    async fn auth_publickey_offered(&mut self, username: &str, public: &PublicKey) -> Result<Auth, Self::Error> {
+        let ip = self.peer.ip().to_string();
+        let rejected = Auth::Reject { proceed_with_methods: None, partial_success: false };
+        if auth::attempts_exhausted(&self.st, &format!("ip:{}", auth::limit_key_ip(&ip)), auth::IP_FAIL_LIMIT) {
+            return Ok(rejected);
+        }
+        let (known,): (bool,) = sqlx::query_as(
+            "SELECT EXISTS(SELECT 1 FROM sftp_keys k JOIN users u ON u.id = k.user_id WHERE u.username = ? COLLATE NOCASE AND k.fingerprint = ? AND u.disabled = 0)",
+        )
+        .bind(username)
+        .bind(public.fingerprint(HashAlg::Sha256).to_string())
+        .fetch_one(&self.st.db)
+        .await
+        .unwrap_or((false,));
+        Ok(if known { Auth::Accept } else { rejected })
+    }
     async fn auth_publickey(&mut self, username: &str, public: &PublicKey) -> Result<Auth, Self::Error> {
         let ip = self.peer.ip().to_string();
         let key = format!("ip:{}", auth::limit_key_ip(&ip));
@@ -316,9 +337,8 @@ impl russh::server::Handler for Connection {
         } else {
             Auth::Reject { proceed_with_methods: None, partial_success: false }
         };
-        if !matches!(answer, Auth::Accept) {
-            auth::begin_attempt(&self.st, &key, auth::IP_FAIL_LIMIT);
-        }
+        // An unknown key isn't counted as a failed sign-in: nobody guesses a private key, and an SSH agent tries each
+        // of its keys in turn (the connection's own limit on attempts still applies)
         Ok(answer)
     }
     async fn channel_open_session(&mut self, channel: Channel<Msg>, reply: ChannelOpenHandle, _: &mut Session) -> Result<(), Self::Error> {

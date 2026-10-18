@@ -79,6 +79,8 @@ where
     pub data_abort_tx: Option<Sender<()>>,
     // The data loop listens to this so it can know when to exit.
     pub data_abort_rx: Option<Receiver<()>>,
+    // The passive data port waiting for this session's connection: a new PASV closes it, so a session holds one at most
+    pub(crate) passive_task: Option<tokio::task::AbortHandle>,
     // This may not be needed here...
     pub control_msg_tx: Option<Sender<ControlChanMsg>>,
     // The socket address of the client on the control channel
@@ -132,6 +134,7 @@ where
             data_cmd_rx: None,
             data_abort_tx: None,
             data_abort_rx: None,
+            passive_task: None,
             control_msg_tx: None,
             source,
             control_connection: None,
