@@ -258,6 +258,19 @@ pub async fn record_share_access(st: &AppState, share_id: &str, owner_id: i64, n
 
 /// Records an activity (within the caller's transaction, unlike sign-in and share link events)
 pub async fn record_activity(conn: &mut SqliteConnection, user: &User, node: Option<&dyn Item>, action: &str, detail: &str) -> AppResult<()> {
+    record_activity_into(conn, user, node, None, action, detail).await
+}
+
+/// `record_activity` for a change that names another folder in its details (`into`: where a copy or a move went): the
+/// entry is kept from whoever can't see that folder too
+pub async fn record_activity_into(
+    conn: &mut SqliteConnection,
+    user: &User,
+    node: Option<&dyn Item>,
+    into: Option<&str>,
+    action: &str,
+    detail: &str,
+) -> AppResult<()> {
     debug_assert!(super::known_action(action), "{action} isn't in logs::ACTIONS");
     let detail = match &user.activity_source {
         Some(source) => {
@@ -270,9 +283,10 @@ pub async fn record_activity(conn: &mut SqliteConnection, user: &User, node: Opt
         serde_json::from_str(&crate::tree::saved_scopes(conn, node.map(|n| n.id())).await?).map_err(crate::error::AppError::internal)?;
     let parents: Vec<serde_json::Value> =
         serde_json::from_str(&crate::tree::saved_scopes(conn, node.and_then(|n| n.parent())).await?).map_err(crate::error::AppError::internal)?;
-    for parent in parents {
-        if !scopes.contains(&parent) {
-            scopes.push(parent);
+    let into: Vec<serde_json::Value> = serde_json::from_str(&crate::tree::saved_scopes(conn, into).await?).map_err(crate::error::AppError::internal)?;
+    for scope in parents.into_iter().chain(into) {
+        if !scopes.contains(&scope) {
+            scopes.push(scope);
         }
     }
     sqlx::query("INSERT INTO activity (at, user_id, username, drive_id, node_id, node_name, action, detail, restricted_scopes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")

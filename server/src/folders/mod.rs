@@ -797,7 +797,10 @@ async fn update_index(st: &AppState, drive: &Drive, root: &Path, differing: Vec<
             let mut folder = folder_at(st, drive, &rel).await?;
             // Made by changes not made yet (a new folder in a folder gone through just before)
             if folder.is_none() && !pending.is_empty() {
-                report.removed += apply(st, drive, std::mem::take(&mut pending)).await?;
+                {
+                    let removed = apply(st, drive, std::mem::take(&mut pending), report).await?;
+                    report.removed += removed;
+                }
                 folder = folder_at(st, drive, &rel).await?;
             }
             let Some(folder) = folder else {
@@ -809,12 +812,18 @@ async fn update_index(st: &AppState, drive: &Drive, root: &Path, differing: Vec<
             gone.extend(left);
             // The changes of several folders together, a batch per transaction
             if pending.len() >= 10 * BATCH {
-                report.removed += apply(st, drive, std::mem::take(&mut pending)).await?;
+                {
+                    let removed = apply(st, drive, std::mem::take(&mut pending), report).await?;
+                    report.removed += removed;
+                }
             }
             set_progress(st, &drive.id, |p| p.done += 1);
         }
     }
-    report.removed += apply(st, drive, pending).await?;
+    {
+        let removed = apply(st, drive, pending, report).await?;
+        report.removed += removed;
+    }
     remove_gone(st, drive, root, gone, report).await
 }
 
@@ -966,7 +975,10 @@ async fn remove_gone(st: &AppState, drive: &Drive, root: &Path, mut gone: Vec<(S
         ops.push(Op::Remove { id });
         last_removed = Some(path);
     }
-    report.removed += apply(st, drive, ops).await?;
+    {
+        let removed = apply(st, drive, ops, report).await?;
+        report.removed += removed;
+    }
     Ok(())
 }
 
@@ -1096,7 +1108,7 @@ async fn try_sync_folder(st: &AppState, folder: &Node, wait: bool) -> AppResult<
         ops.into_iter().filter(|op| !matches!(op, Op::Remove { id } if !replaced.contains(id.as_str()))).collect()
     };
     let changed = !ops.is_empty();
-    if let Err(e) = apply(st, &drive, ops).await.map(|_| ()) {
+    if let Err(e) = apply(st, &drive, ops, &mut report).await.map(|_| ()) {
         drop(_scanning);
         scan_later(st, &drive.id);
         return Err(e);
@@ -1435,7 +1447,7 @@ impl Entry {
 }
 
 /// Makes the changes `ops`, a batch per transaction; returns how many items were removed
-async fn apply(st: &AppState, drive: &Drive, ops: Vec<Op>) -> AppResult<usize> {
+async fn apply(st: &AppState, drive: &Drive, ops: Vec<Op>, report: &mut ScanReport) -> AppResult<usize> {
     if ops.is_empty() {
         return Ok(0);
     }
@@ -1466,12 +1478,76 @@ async fn apply(st: &AppState, drive: &Drive, ops: Vec<Op>) -> AppResult<usize> {
             tree::schedule_blob_removal(st, unused);
         }
         match after {
-            Some(Op::Remove { id }) => removed += tree::changes::purge_now(st, &id, &drive.root_id).await?,
+            Some(Op::Remove { id }) => {
+                carry_protection(st, drive, &id, report).await?;
+                removed += tree::changes::purge_now(st, &id, &drive.root_id).await?
+            }
             Some(Op::Repath { old, new }) => tree::changes::repath_now(st, &drive.id, &old, &new).await?,
             _ => {}
         }
     }
     Ok(removed)
+}
+
+/// A folder gone from the disk that was restricted, or had grants of its own, may have been moved where the scan can't
+/// tell (without inode numbers, or to another disk): its protection goes to the folder found in the space with its name
+/// and creation time, which a move keeps. Without one, the scan report says so, for its owner to restrict it again
+/// where it is now: its content must never come back under wider access unnoticed.
+async fn carry_protection(st: &AppState, drive: &Drive, gone: &str, report: &mut ScanReport) -> AppResult<()> {
+    const SUBTREE: &str = "WITH RECURSIVE sub(id) AS (SELECT ?1 UNION ALL SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id) SELECT id FROM sub";
+    let sql = format!(
+        "SELECT n.id, n.restricted, n.name, n.fs_birth_ns, n.fs_path FROM nodes n WHERE n.id IN ({SUBTREE}) AND n.kind = 'folder'
+           AND (n.restricted OR EXISTS(SELECT 1 FROM grants g WHERE g.node_id = n.id))"
+    );
+    #[derive(sqlx::FromRow)]
+    struct Protected {
+        id: String,
+        restricted: bool,
+        name: String,
+        fs_birth_ns: Option<i64>,
+        fs_path: Option<String>,
+    }
+    let protected: Vec<Protected> = sqlx::query_as(sqlx::AssertSqlSafe(sql)).bind(gone).fetch_all(&st.db).await?;
+    for Protected { id, restricted, name, fs_birth_ns: birth, fs_path: path } in protected {
+        let sql = format!(
+            "SELECT id FROM nodes WHERE drive_id = ?1 AND kind = 'folder' AND name = ?2 AND fs_birth_ns = ?3 AND trashed_at IS NULL
+               AND id NOT IN ({})",
+            SUBTREE.replace("?1", "?4")
+        );
+        let found: Vec<(String,)> = match birth {
+            Some(birth) => sqlx::query_as(sqlx::AssertSqlSafe(sql)).bind(&drive.id).bind(&name).bind(birth).bind(gone).fetch_all(&st.db).await?,
+            None => Vec::new(),
+        };
+        if found.is_empty() {
+            if restricted {
+                report.skip(format!(
+                    "{}: a restricted folder is gone from the disk. If it was moved, restrict it again where it is now",
+                    path.as_deref().unwrap_or(&name)
+                ));
+            }
+            continue;
+        }
+        let _w = st.write_lock.lock().await;
+        let mut tx = crate::db::begin_write(&st.db).await?;
+        for (to,) in &found {
+            sqlx::query(
+                "INSERT OR IGNORE INTO grants (node_id, principal_type, principal_id, role, granted_by, created_at, expires_at)
+                 SELECT ?1, principal_type, principal_id, role, granted_by, created_at, expires_at FROM grants WHERE node_id = ?2",
+            )
+            .bind(to)
+            .bind(&id)
+            .execute(&mut *tx)
+            .await?;
+            if restricted {
+                sqlx::query("UPDATE nodes SET restricted = 1 WHERE id = ?").bind(to).execute(&mut *tx).await?;
+                if let Some(node) = tree::get_node(&mut tx, to).await? {
+                    tree::protect_saved(&mut tx, &node).await?;
+                }
+            }
+        }
+        tx.commit().await?;
+    }
+    Ok(())
 }
 
 /// Returns content of the content store no longer used (earlier versions of a removed file kept there, say), to remove

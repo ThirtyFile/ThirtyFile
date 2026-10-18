@@ -86,6 +86,11 @@ async fn restrict(f: &Fixture) {
     .await;
 }
 
+async fn restrict_node(f: &Fixture, id: &str) {
+    let path = format!("/api/nodes/{id}/restriction");
+    json_call(f, &f.own_cookie, Method::POST, &path, Some(json!({"restricted":true,"expected":false,"confirmed":true}))).await;
+}
+
 fn assert_hidden(f: &Fixture, value: &Value) {
     let text = value.to_string();
     for hidden in [&f.restricted, &f.secret, "Restricted Payroll", "compensation-secret.txt", "confidential-payroll"] {
@@ -377,4 +382,138 @@ async fn local_group_access_ends_on_membership_removal_or_grant_expiry() {
         .await
         .unwrap();
     assert_eq!(request(&f, &f.member_cookie, Method::GET, &content, None).await.0, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn links_on_restricted_items_stay_out_of_the_links_a_manager_can_manage() {
+    let f = fixture().await;
+    let hidden = json_call(&f, &f.own_cookie, Method::POST, "/api/shares", Some(json!({"node_id":f.secret}))).await;
+    let shown = json_call(&f, &f.own_cookie, Method::POST, "/api/shares", Some(json!({"node_id":f.visible}))).await;
+    restrict(&f).await;
+    let managed = json_call(&f, &f.member_cookie, Method::GET, "/api/shares?scope=managed", None).await;
+    assert!(!managed.to_string().contains(hidden["id"].as_str().unwrap()), "the hidden link's token was listed: {managed}");
+    assert_hidden(&f, &managed);
+    assert!(managed.to_string().contains(shown["id"].as_str().unwrap()), "links on items the manager sees stay listed");
+}
+
+#[tokio::test]
+async fn the_access_dialog_keeps_a_restricted_folder_above_and_its_grants_from_someone_granted_below() {
+    let f = fixture().await;
+    let hr = f.env.user("hr", true).await;
+    let inner = f.env.folder(&f.owner, &f.restricted, "Inner").await;
+    f.env.grant(&f.restricted, &hr, "viewer").await;
+    // A member of the space, with access inside the restricted folder only
+    let viewer = f.env.user("viewer", true).await;
+    f.env.grant(&f.root, &viewer, "viewer").await;
+    f.env.grant(&inner, &viewer, "viewer").await;
+    restrict(&f).await;
+    let (_, cookie) = f.env.sign_in(&viewer, "Restriction regression").await;
+    let access = json_call(&f, &cookie, Method::GET, &format!("/api/nodes/{inner}/access"), None).await;
+    let text = access["inherited"].to_string();
+    assert!(!text.contains("Restricted Payroll") && !text.contains(&f.restricted) && !text.contains("\"hr\""), "{text}");
+    // The owner still sees who has access above
+    let access = json_call(&f, &f.own_cookie, Method::GET, &format!("/api/nodes/{inner}/access"), None).await;
+    assert!(access["inherited"].to_string().contains("Restricted Payroll"));
+}
+
+#[tokio::test]
+async fn copies_and_moves_into_a_restricted_folder_keep_their_entries_from_whoever_cant_see_it() {
+    let f = fixture().await;
+    restrict(&f).await;
+    let log = format!("/api/activity?drive_id={}", f.env.drive_of(&f.department).await);
+    let plan = f.env.upload(&f.owner, &f.department, "plan.txt", b"plan").await;
+    json_call(&f, &f.own_cookie, Method::POST, "/api/nodes/copy", Some(json!({"ids":[f.visible],"dest_id":f.restricted}))).await;
+    json_call(&f, &f.own_cookie, Method::PATCH, &format!("/api/nodes/{plan}"), Some(json!({"name":"plan-renamed.txt"}))).await;
+    let before = json_call(&f, &f.member_cookie, Method::GET, &log, None).await;
+    assert!(before.to_string().contains("plan-renamed.txt"), "seen while it is outside: {before}");
+    json_call(&f, &f.own_cookie, Method::POST, "/api/nodes/move", Some(json!({"ids":[plan],"dest_id":f.restricted}))).await;
+    let after = json_call(&f, &f.member_cookie, Method::GET, &log, None).await;
+    assert_hidden(&f, &after);
+    assert!(!after.to_string().contains("plan-renamed.txt"), "an item moved into a restricted folder: {after}");
+    // Nor in the history of the item copied, which shows details to managers
+    let history = json_call(&f, &f.member_cookie, Method::GET, &format!("/api/nodes/{}/activity", f.visible), None).await;
+    assert_hidden(&f, &history);
+}
+
+#[tokio::test]
+async fn a_restore_never_puts_items_into_a_restricted_folder_the_person_cant_add_to() {
+    let f = fixture().await;
+    // Merging into a folder of the name: its restricted subfolder isn't gone into
+    let projects = f.env.folder(&f.member, &f.department, "Projects").await;
+    let payroll = f.env.folder(&f.member, &projects, "Payroll").await;
+    f.env.upload(&f.member, &payroll, "x.txt", b"x").await;
+    json_call(&f, &f.member_cookie, Method::POST, "/api/nodes/trash", Some(json!({"ids":[projects]}))).await;
+    let again = f.env.folder(&f.owner, &f.department, "Projects").await;
+    let hr_payroll = f.env.folder(&f.owner, &again, "Payroll").await;
+    restrict_node(&f, &hr_payroll).await;
+    assert_ne!(request(&f, &f.member_cookie, Method::POST, "/api/trash/restore", Some(json!({"ids":[projects]}))).await.0, StatusCode::OK);
+    let mut c = f.env.st.db.acquire().await.unwrap();
+    assert!(crate::paths::child_named(&mut c, &hr_payroll, "x.txt").await.unwrap().is_none());
+    drop(c);
+
+    // Making the way back: a restricted folder of the name isn't gone into either
+    let boxed = f.env.folder(&f.member, &f.department, "Box").await;
+    let y = f.env.upload(&f.member, &boxed, "y.txt", b"y").await;
+    json_call(&f, &f.member_cookie, Method::POST, "/api/nodes/trash", Some(json!({"ids":[y]}))).await;
+    json_call(&f, &f.member_cookie, Method::POST, "/api/nodes/trash", Some(json!({"ids":[boxed]}))).await;
+    let other_box = f.env.folder(&f.owner, &f.department, "Box").await;
+    restrict_node(&f, &other_box).await;
+    assert_ne!(request(&f, &f.member_cookie, Method::POST, "/api/trash/restore", Some(json!({"ids":[y]}))).await.0, StatusCode::OK);
+    let mut c = f.env.st.db.acquire().await.unwrap();
+    assert!(crate::paths::child_named(&mut c, &other_box, "y.txt").await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn a_restricted_folder_restored_onto_one_of_its_name_keeps_its_restriction() {
+    let f = fixture().await;
+    let hr = f.env.user("hr", true).await;
+    f.env.grant(&f.restricted, &hr, "viewer").await;
+    restrict(&f).await;
+    json_call(&f, &f.own_cookie, Method::POST, "/api/nodes/trash", Some(json!({"ids":[f.restricted]}))).await;
+    let open = f.env.folder(&f.owner, &f.department, "Restricted Payroll").await;
+    json_call(&f, &f.own_cookie, Method::POST, "/api/trash/restore", Some(json!({"ids":[f.restricted]}))).await;
+    let mut c = f.env.st.db.acquire().await.unwrap();
+    let back = crate::tree::get_node(&mut c, &f.restricted).await.unwrap().expect("not merged away");
+    assert!(back.restricted && back.trashed_at.is_none() && back.name != "Restricted Payroll", "{back:?}");
+    let (grants,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM grants WHERE node_id = ?").bind(&f.restricted).fetch_one(&mut *c).await.unwrap();
+    assert_eq!(grants, 1);
+    assert!(crate::paths::child_named(&mut c, &open, "compensation-secret.txt").await.unwrap().is_none());
+    drop(c);
+    assert_eq!(request(&f, &f.member_cookie, Method::GET, &format!("/api/nodes/{}", f.secret), None).await.0, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_restricted_folder_moved_on_disk_where_the_scan_cant_follow_keeps_its_protection_or_is_reported() {
+    let env = testutil::env().await;
+    let space = env.folder_space("Archive").await;
+    let ben = env.user("ben", true).await;
+    // As on Windows and exFAT: no identities, so a move is seen as removed and added
+    let _hidden = crate::fsops::testing::no_identities(&space.dir);
+    testutil::write_old(&space.dir.join("Docs/Secret/s.txt"), b"s");
+    std::fs::create_dir_all(space.dir.join("Other")).unwrap();
+    crate::folders::scan(&env.st, &space.drive).await.unwrap();
+    let (secret, _) = env.node_at(&space.drive, "Docs/Secret").await.unwrap();
+    sqlx::query("UPDATE nodes SET restricted = 1 WHERE id = ?").bind(&secret).execute(&env.st.db).await.unwrap();
+    env.grant(&secret, &ben, "viewer").await;
+    let birth_known = std::fs::metadata(space.dir.join("Docs/Secret")).unwrap().created().is_ok();
+
+    // Moved: the folder found with its name and creation time gets the restriction and the grants
+    std::fs::rename(space.dir.join("Docs/Secret"), space.dir.join("Other/Secret")).unwrap();
+    let report = crate::folders::scan(&env.st, &space.drive).await.unwrap();
+    let (moved, _) = env.node_at(&space.drive, "Other/Secret").await.unwrap();
+    let node = crate::tree::get_node(&mut env.st.db.acquire().await.unwrap(), &moved).await.unwrap().unwrap();
+    if birth_known {
+        assert!(node.restricted, "{report:?}");
+        let (grants,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM grants WHERE node_id = ?").bind(&moved).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(grants, 1);
+    } else {
+        assert!(report.skipped.iter().any(|s| s.contains("restricted folder is gone")), "{report:?}");
+    }
+
+    // Copied then deleted (a new creation time): the scan report says so
+    sqlx::query("UPDATE nodes SET restricted = 1 WHERE id = ?").bind(&moved).execute(&env.st.db).await.unwrap();
+    testutil::write_old(&space.dir.join("Copy/Secret/s.txt"), b"s");
+    std::fs::remove_dir_all(space.dir.join("Other/Secret")).unwrap();
+    let report = crate::folders::scan(&env.st, &space.drive).await.unwrap();
+    assert!(report.skipped.iter().any(|s| s.contains("Other/Secret") && s.contains("restricted folder is gone")), "{report:?}");
 }

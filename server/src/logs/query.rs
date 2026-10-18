@@ -137,7 +137,14 @@ pub struct ActivityQuery {
 /// out. Administrators read the log without a space, so this keeps the names in personal spaces from them.
 pub(crate) async fn query_activity(st: &AppState, q: &ActivityQuery, me: i64, limit: i64) -> AppResult<Vec<ActivityRow>> {
     let private = format!("(a.private_to IS NOT NULL AND a.private_to <> {me})");
-    let visible = crate::tree::scopes_visible_sql(me, "a.restricted_scopes");
+    // Kept from whoever can't see a restricted folder named, and, for an item still there, from whoever can't see
+    // where it is now (an entry written before it was moved into a restricted folder)
+    let visible = format!(
+        "{} AND (a.node_id IS NULL OR {private} OR NOT EXISTS(SELECT 1 FROM nodes WHERE id = a.node_id)
+           OR EXISTS(SELECT 1 FROM users WHERE id = {me} AND role = 'admin' AND NOT guest) OR {})",
+        crate::tree::scopes_visible_sql(me, "a.restricted_scopes"),
+        crate::tree::visible_to_sql(me, "a.node_id")
+    );
     let mut f = Filters::new(format!(
         "SELECT * FROM (
            SELECT a.id, a.at, a.username, a.drive_id, d.name AS drive_name, a.action, {private} AS private,

@@ -237,9 +237,11 @@ pub async fn list(State(st): State<AppState>, user: User, Query(q): Query<ListQu
         (None, None | Some("mine")) => (false, Vec::new(), Vec::new()),
         _ => return Err(AppError::bad_request("Invalid scope")),
     };
+    // Only links on items the person can see: managing a space doesn't reach into its restricted folders
+    let visible = if user.is_admin() { "1".to_string() } else { tree::visible_sql(&user, "n.id") };
     let sql = format!(
         "SELECT {SHARE_COLS} FROM {SHARE_FROM}
-         WHERE n.trashed_at IS NULL
+         WHERE n.trashed_at IS NULL AND ({visible})
            AND (?1 = 1 OR s.owner_id = ?2 OR n.drive_id IN (SELECT value FROM json_each(?3))
                 OR (n.owner_id = ?2 AND n.drive_id IN (SELECT value FROM json_each(?4))))
            AND (?5 IS NULL OR s.node_id = ?5) AND (?6 IS NULL OR n.drive_id = ?6) AND (?7 IS NULL OR s.owner_id = ?7)
