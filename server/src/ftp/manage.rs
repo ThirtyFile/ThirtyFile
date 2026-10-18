@@ -16,6 +16,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Default, Deserialize)]
 pub struct ListQuery {
     pub node_id: Option<String>,
+    /// Part of the receive folder's name, its device username, its creator's or its folder's name
+    pub search: Option<String>,
 }
 #[derive(Serialize)]
 pub struct FolderInfo {
@@ -45,10 +47,18 @@ pub async fn list(State(st): State<AppState>, user: User, Query(q): Query<ListQu
     if !allowed {
         return Ok(Json(out));
     }
-    let folders: Vec<Folder> = sqlx::query_as("SELECT * FROM ftp_receive_folders WHERE (?1 IS NULL OR node_id=?1) ORDER BY created_at DESC LIMIT 1000")
-        .bind(q.node_id)
-        .fetch_all(&mut *conn)
-        .await?;
+    let search = q.search.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_lowercase);
+    let folders: Vec<Folder> = sqlx::query_as(
+        "SELECT * FROM ftp_receive_folders f WHERE (?1 IS NULL OR f.node_id = ?1)
+           AND (?2 IS NULL OR instr(unicode_lower(f.name), ?2) > 0 OR instr(lower(f.username), ?2) > 0
+             OR EXISTS(SELECT 1 FROM users u WHERE u.id = f.creator_id AND instr(unicode_lower(u.username), ?2) > 0)
+             OR EXISTS(SELECT 1 FROM nodes n WHERE n.id = f.node_id AND instr(unicode_lower(n.name), ?2) > 0))
+         ORDER BY f.created_at DESC LIMIT 1000",
+    )
+    .bind(q.node_id)
+    .bind(search)
+    .fetch_all(&mut *conn)
+    .await?;
     for folder in folders {
         let creator = crate::auth::user_by_id(&st, &mut conn, folder.creator_id).await?;
         let active = cfg.enabled
@@ -84,11 +94,13 @@ fn replaces() -> bool {
 }
 
 impl Change {
-    fn validate(&self) -> AppResult<()> {
+    /// `kept`: the end date it has now, which may stay as it is although it is past (renaming or stopping a receive
+    /// folder that has ended); a new one must be in the future
+    fn validate(&self, kept: Option<i64>) -> AppResult<()> {
         if self.name.trim().is_empty() || self.name.chars().count() > 80 || self.name.chars().any(char::is_control) {
             return Err(AppError::bad_request("Enter a receive folder name (up to 80 characters)"));
         }
-        if self.expires_at.is_some_and(|t| t <= now()) {
+        if self.expires_at != kept && self.expires_at.is_some_and(|t| t <= now()) {
             return Err(AppError::bad_request("The receive folder's end date must be in the future"));
         }
         Ok(())
@@ -113,7 +125,7 @@ async fn confirm(st: &AppState, user: &User, password: Option<String>, code: Opt
     crate::tokens::confirm_identity(st, user, password, code, "Sign out and sign in again, then manage FTP credentials within 10 minutes").await
 }
 pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Create>) -> AppResult<Json<Created>> {
-    req.change.validate()?;
+    req.change.validate(None)?;
     confirm(&st, &user, req.password, req.code.as_deref()).await?;
     let password = random_token(32);
     let hash = crate::auth::hash_password(password.clone()).await?;
@@ -177,12 +189,12 @@ pub struct Edit {
     pub code: Option<String>,
 }
 pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<String>, Json(req): Json<Edit>) -> AppResult<Json<serde_json::Value>> {
-    req.change.validate()?;
     confirm(&st, &user, req.password, req.code.as_deref()).await?;
     let req = req.change;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     let folder = managed(&mut tx, &user, &id).await?;
+    req.validate(folder.expires_at)?;
     // Turning it on, letting the device see, read or replace more, or giving it longer: only who published it, or an
     // administrator
     let widens = (req.enabled && !folder.enabled)

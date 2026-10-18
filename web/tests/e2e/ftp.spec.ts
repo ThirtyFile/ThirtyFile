@@ -48,7 +48,7 @@ test("administrators configure receive folders and manage device credentials on 
   await expect(page.getByLabel("Device password")).toHaveCount(0);
   await page.keyboard.press("Escape");
   await page.goto("/admin/ftp");
-  await page.getByLabel("Filter receive folders").fill(device);
+  await page.getByLabel("Search receive folders").fill(device);
   const card = page.getByRole("region", { name: device });
   await expect(card.getByText("Listing blocked", { exact: false })).toBeVisible();
   const info = await (await page.request.get(`/api/ftp/folders?node_id=${node}`)).json();

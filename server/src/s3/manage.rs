@@ -48,9 +48,16 @@ pub async fn list(State(st): State<AppState>, user: User, Query(q): Query<ListQu
         return Ok(Json(FolderBuckets { can_publish, buckets: vec![] }));
     }
     let buckets: Vec<Bucket> =
-        sqlx::query_as("SELECT * FROM s3_buckets WHERE (?1 IS NULL OR node_id = ?1) AND (?2 IS NULL OR instr(name, ?2) > 0) ORDER BY created_at DESC LIMIT 1000")
-            .bind(q.node_id)
-            .bind(q.search)
+        // The bucket's name, its creator's or its folder's
+        sqlx::query_as(
+            "SELECT * FROM s3_buckets b WHERE (?1 IS NULL OR b.node_id = ?1)
+               AND (?2 IS NULL OR instr(b.name, ?2) > 0
+                 OR EXISTS(SELECT 1 FROM users u WHERE u.id = b.creator_id AND instr(unicode_lower(u.username), ?2) > 0)
+                 OR EXISTS(SELECT 1 FROM nodes n WHERE n.id = b.node_id AND instr(unicode_lower(n.name), ?2) > 0))
+             ORDER BY b.created_at DESC LIMIT 1000",
+        )
+        .bind(q.node_id)
+        .bind(q.search.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_lowercase))
             .fetch_all(&mut *conn)
             .await?;
     let mut rows = Vec::new();

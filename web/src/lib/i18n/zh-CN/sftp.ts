@@ -32,4 +32,8 @@ export default {
   "Sign out and sign in again, then add the SSH key within 10 minutes": "请退出并重新登录，再于 10 分钟内添加 SSH 密钥",
   "Added SFTP key: {name}": "已添加 SFTP 密钥：{name}",
   "Removed SFTP key: {name}": "已移除 SFTP 密钥：{name}",
+  "SFTP settings updated": "已更新 SFTP 设置",
+  "Sign in again before adding an SSH key if your sign-in is older than 10 minutes.": "若登录已超过 10 分钟，请先重新登录再添加 SSH 密钥。",
+  "Remove the SSH key \"{name}\"?": "要移除 SSH 密钥“{name}”吗？",
+  "Programs signing in with it lose access over SFTP. This can't be undone.": "使用此密钥登录的程序将无法再通过 SFTP 访问。此操作无法撤销。",
 } satisfies Record<string, string>;

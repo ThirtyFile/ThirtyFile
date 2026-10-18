@@ -1,8 +1,8 @@
+/** Simplified Chinese dictionary, split by feature and merged here (the same files as zh-TW). Keys are the English source text (plurals as "single|plural"); tc() keys are "context::English". */
 import ftp from "./ftp";
 import guests from "./guests";
 import restrictedFolders from "./restrictedFolders";
 import sftp from "./sftp";
-/** Simplified Chinese dictionary, split by feature and merged here (the same files as zh-TW). Keys are the English source text (plurals as "single|plural"); tc() keys are "context::English". */
 import s3 from "./s3";
 import server from "./server";
 import settings from "./settings";

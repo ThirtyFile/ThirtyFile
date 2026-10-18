@@ -44,7 +44,7 @@ export interface FtpConfirm {
 export const ftpApi = {
   ftpConfig: (signal?: AbortSignal) => get<FtpStatus>("/admin/ftp", signal),
   saveFtpConfig: (config: FtpConfig) => request<FtpStatus>("PUT", "/admin/ftp", config),
-  ftpFolders: (nodeId?: string, signal?: AbortSignal) => get<{ can_publish: boolean; folders: FtpFolder[] }>(`/ftp/folders${qs({ node_id: nodeId })}`, signal),
+  ftpFolders: (nodeId?: string, search?: string, signal?: AbortSignal) => get<{ can_publish: boolean; folders: FtpFolder[] }>(`/ftp/folders${qs({ node_id: nodeId, search })}`, signal),
   createFtpFolder: (node_id: string, config: FtpChange, identity: FtpConfirm) => post<FtpCreated>("/ftp/folders", { node_id, ...config, ...identity }),
   saveFtpFolder: (id: string, config: FtpChange, identity: FtpConfirm) => request("PATCH", enc`/ftp/folders/${id}`, { ...config, ...identity }),
   rotateFtpPassword: (id: string, identity: FtpConfirm) => post<FtpCreated>(enc`/ftp/folders/${id}/password`, identity),

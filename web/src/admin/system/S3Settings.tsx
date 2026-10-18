@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "@/api";
 import type { S3Config } from "@/api/s3";
+import { keys } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,9 +16,10 @@ function S3Form({ value }: { value: S3Config }) {
   const save = useMutation({
     mutationFn: () => api.saveS3Config(config),
     onSuccess: (data) => {
-      qc.setQueryData(["s3-config"], data);
-      void qc.invalidateQueries({ queryKey: ["s3-buckets"] });
-      void qc.invalidateQueries({ queryKey: ["s3-options"] });
+      qc.setQueryData(keys.s3Config(), data);
+      void qc.invalidateQueries({ queryKey: keys.bucketLists() });
+      void qc.invalidateQueries({ queryKey: keys.s3Options() });
+      void qc.invalidateQueries({ queryKey: keys.me() });
       toast.success(t("S3 settings updated"));
     },
     onError: (e) => toast.error(e.message),
@@ -35,7 +37,7 @@ function S3Form({ value }: { value: S3Config }) {
         {t("Publish team folders as buckets for backup software and other programs. Use a separate HTTPS hostname routed to this server's HTTP port.")}
       </p>
       <Label className="flex gap-2">
-        <input type="checkbox" checked={config.enabled} onChange={(e) => setConfig({ ...config, enabled: e.target.checked })} />
+        <input type="checkbox" className="size-4 accent-brand" checked={config.enabled} onChange={(e) => setConfig({ ...config, enabled: e.target.checked })} />
         {t("Enable S3 access")}
       </Label>
       <Label className="grid gap-2">
@@ -47,7 +49,7 @@ function S3Form({ value }: { value: S3Config }) {
         <Input className="mt-2" value={config.region} onChange={(e) => setConfig({ ...config, region: e.target.value })} required />
       </Label>
       <Label className="flex gap-2">
-        <input type="checkbox" checked={config.managers_publish} onChange={(e) => setConfig({ ...config, managers_publish: e.target.checked })} />
+        <input type="checkbox" className="size-4 accent-brand" checked={config.managers_publish} onChange={(e) => setConfig({ ...config, managers_publish: e.target.checked })} />
         {t("Space managers can publish buckets")}
       </Label>
       <p className="text-xs text-muted-foreground">{t("Personal spaces and spaces with share links turned off can't be published.")}</p>
@@ -59,7 +61,7 @@ function S3Form({ value }: { value: S3Config }) {
 }
 
 export function S3Settings() {
-  const q = useQuery({ queryKey: ["s3-config"], queryFn: ({ signal }) => api.s3Config(signal) });
+  const q = useQuery({ queryKey: keys.s3Config(), queryFn: ({ signal }) => api.s3Config(signal) });
   return (
     <div className="border-t">
       {q.error ? (

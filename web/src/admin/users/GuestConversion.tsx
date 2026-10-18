@@ -13,8 +13,10 @@ export function GuestConversion({ query, confirmed, onConfirm }: { query: UseQue
   if (!p) return <Pending query={query} compact loading={<p className="text-xs text-muted-foreground">{t("Loading…")}</p>} />;
   const blocked = p.owned_spaces.length > 0 || p.unsafe_groups.length > 0;
   return (
-    <div className="grid gap-3 rounded-md border p-3 text-sm" aria-live="polite">
-      <div className="font-medium">{t("Guest conversion preview")}</div>
+    <div className="grid gap-3 rounded-md border p-3 text-sm">
+      <div className="font-medium" role="status">
+        {t("Guest conversion preview")}
+      </div>
       <p className="text-xs text-muted-foreground">{t('Files are kept. "My files" is hidden while the account is a guest and becomes available again if it is changed back.')}</p>
       {p.personal_space && <p className="text-xs">{t("Personal files kept: {n} · {size}", { n: p.personal_files, size: formatBytes(p.personal_bytes) })}</p>}
       <p className="text-xs">{t("Existing share links and protocol publications stop working while this account is a guest.")}</p>

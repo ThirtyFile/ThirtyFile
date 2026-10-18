@@ -108,7 +108,9 @@ export function AccountMenu({ usage }: { usage: string | null }) {
             {usage === null
               ? me.role === "admin"
                 ? t("Administrator")
-                : t("Standard user")
+                : me.guest
+                  ? t("Guest")
+                  : t("Standard user")
               : me.role === "admin"
                 ? t("Administrator · {size} used", { size: usage })
                 : t("User · {size} used", { size: usage })}
@@ -132,9 +134,11 @@ export function AccountMenu({ usage }: { usage: string | null }) {
           <DropdownMenuItem onClick={() => setShowLogins(true)}>
             <HistoryIcon /> {t("My sign-in history")}
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setShowSftpKeys(true)}>
-            <KeySquareIcon /> {t("SFTP keys")}
-          </DropdownMenuItem>
+          {me.sftp_keys && (
+            <DropdownMenuItem onClick={() => setShowSftpKeys(true)}>
+              <KeySquareIcon /> {t("SFTP keys")}
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem onClick={() => setShowNotifications(true)}>
             <BellIcon /> {t("Notification settings")}
           </DropdownMenuItem>

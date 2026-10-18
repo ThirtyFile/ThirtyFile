@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { queries } from "@/api/queryKeys";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { errorProps } from "@/components/dialogs";
 import { t } from "@/lib/i18n";
 
 /**
@@ -23,13 +24,20 @@ export function useConfirmIdentity(id: string) {
       setPassword("");
       setCode("");
     },
-    /** The fields, or `recentNote` for an account without a password */
-    fields: (recentNote: string) =>
+    /** The fields, or `recentNote` for an account without a password; `error` (shown at `errorId`) marks the password */
+    fields: (recentNote: string, error?: unknown, errorId?: string) =>
       hasPassword ? (
         <div className="flex flex-wrap gap-2">
           <div className="grid min-w-40 flex-1 gap-1.5">
             <Label htmlFor={`${id}-password`}>{t("Your current password")}</Label>
-            <Input id={`${id}-password`} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+            <Input
+              id={`${id}-password`}
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              {...(errorId ? errorProps(error, errorId) : {})}
+            />
           </div>
           {needsCode && (
             <div className="grid w-40 gap-1.5">

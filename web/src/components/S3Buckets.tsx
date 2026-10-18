@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { DatabaseIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/api";
+import { keys } from "@/api/queryKeys";
 import type { S3Bucket, S3Key } from "@/api/s3";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,7 +19,27 @@ import { formatDateTime } from "@/lib/utils";
 /** Credentials outlast the browser session that makes them, so who makes them is asked again */
 const recentNote = () => t("Sign in again before managing S3 keys if your sign-in is older than 10 minutes.");
 
-export const s3FolderQuery = (nodeId: string) => ({ queryKey: ["s3-buckets", nodeId], queryFn: ({ signal }: { signal: AbortSignal }) => api.s3Buckets(nodeId, undefined, signal) });
+export const s3FolderQuery = (nodeId: string) => ({
+  queryKey: keys.buckets(nodeId),
+  queryFn: ({ signal }: { signal: AbortSignal }) => api.s3Buckets(nodeId, undefined, signal),
+});
+
+/** Moves the focus to the list a card was in, once the card is gone (deleted): not left on the page behind */
+export function focusList(card: HTMLElement | null) {
+  const list = card?.parentElement;
+  if (!list) return;
+  requestAnimationFrame(() => {
+    list.tabIndex = -1;
+    list.focus();
+  });
+}
+
+/** What a key's state is now: stopped, past its end date, or working */
+function keyState(key: S3Key) {
+  if (!key.enabled) return t("Stopped");
+  if (key.expires_at && key.expires_at * 1000 <= Date.now()) return t("Ended");
+  return t("Enabled");
+}
 
 function KeyForm({ bucket, close }: { bucket: S3Bucket; close(): void }) {
   const qc = useQueryClient();
@@ -34,7 +55,7 @@ function KeyForm({ bucket, close }: { bucket: S3Bucket; close(): void }) {
     onSuccess: (key) => {
       identity.clear();
       setCreated(key);
-      void qc.invalidateQueries({ queryKey: ["s3-buckets"] });
+      void qc.invalidateQueries({ queryKey: keys.bucketLists() });
     },
     onError: (e) => toast.error(e.message),
   });
@@ -85,7 +106,7 @@ function KeyForm({ bucket, close }: { bucket: S3Bucket; close(): void }) {
               <Input className="mt-2" value={description} maxLength={160} onChange={(e) => setDescription(e.target.value)} required />
             </Label>
             <Label className="flex items-center gap-2">
-              <input type="checkbox" checked={writable} onChange={(e) => setWritable(e.target.checked)} />
+              <input type="checkbox" className="size-4 accent-brand" checked={writable} onChange={(e) => setWritable(e.target.checked)} />
               {t("Read and change files")}
             </Label>
             <p className="text-xs text-muted-foreground">{t("Leave unchecked for read-only access. Read-only spaces accept read-only keys only.")}</p>
@@ -108,23 +129,31 @@ export function BucketCard({ bucket }: { bucket: S3Bucket }) {
   const qc = useQueryClient();
   const [newKey, setNewKey] = useState(false);
   const [remove, setRemove] = useState<S3Key | "bucket" | null>(null);
-  const changed = () => qc.invalidateQueries({ queryKey: ["s3-buckets"] });
+  const card = useRef<HTMLElement>(null);
+  const newKeyButton = useRef<HTMLButtonElement>(null);
+  const changed = () => qc.invalidateQueries({ queryKey: keys.bucketLists() });
   const toggle = useMutation({ mutationFn: () => api.setS3Bucket(bucket.id, !bucket.enabled), onSuccess: changed, onError: (e) => toast.error(e.message) });
   const toggleKey = useMutation({ mutationFn: (key: S3Key) => api.setS3Key(bucket.id, key.id, !key.enabled), onSuccess: changed, onError: (e) => toast.error(e.message) });
   return (
-    <section className="grid gap-3 rounded-lg border p-4" aria-label={bucket.name}>
+    <section ref={card} className="grid gap-3 rounded-lg border p-4" aria-label={bucket.name}>
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="min-w-0 flex-1 font-medium [overflow-wrap:anywhere]">{bucket.name}</h3>
-        <span className="text-xs text-muted-foreground">{bucket.active ? t("Active") : t("Stopped")}</span>
+        <span className="text-xs text-muted-foreground">
+          {bucket.active ? t("Active") : bucket.enabled ? t("Not active: S3 is off, or its creator can't publish this folder any more") : t("Stopped")}
+        </span>
       </div>
       <p className="text-xs text-muted-foreground">
-        {t("Creator")}: {bucket.creator} · {t("Folder")}: {bucket.folder} · {t("Last used")}: {bucket.last_used_at ? formatDateTime(bucket.last_used_at) : t("Never")}
+        {t("Creator: {creator} · Folder: {folder} · Last used: {when}", {
+          creator: bucket.creator,
+          folder: bucket.folder,
+          when: bucket.last_used_at ? formatDateTime(bucket.last_used_at) : t("Never"),
+        })}
       </p>
       <div className="flex flex-wrap gap-2">
         <Button size="sm" variant="outline" disabled={toggle.isPending} onClick={() => toggle.mutate()}>
           {bucket.enabled ? t("Stop bucket") : t("Enable bucket")}
         </Button>
-        <Button size="sm" variant="outline" onClick={() => setNewKey(true)}>
+        <Button ref={newKeyButton} size="sm" variant="outline" onClick={() => setNewKey(true)}>
           {t("New S3 key")}
         </Button>
         <Button size="sm" variant="outline" onClick={() => setRemove("bucket")}>
@@ -138,14 +167,10 @@ export function BucketCard({ bucket }: { bucket: S3Bucket }) {
             <strong className="[overflow-wrap:anywhere]">{key.description}</strong>
             <code className="[overflow-wrap:anywhere]">{key.access_key}</code>
             <span>
-              {key.writable ? t("Read and change files") : t("Read files only")} · {key.enabled ? t("Enabled") : t("Stopped")}
+              {key.writable ? t("Read and change files") : t("Read files only")} · {keyState(key)}
             </span>
-            <span>
-              {t("End date")}: {key.expires_at ? formatDateTime(key.expires_at) : t("No end date")}
-            </span>
-            <span>
-              {t("Last used")}: {key.last_used_at ? formatDateTime(key.last_used_at) : t("Never")}
-            </span>
+            <span>{t("End date: {date}", { date: key.expires_at ? formatDateTime(key.expires_at) : t("No end date") })}</span>
+            <span>{t("Last used: {when}", { when: key.last_used_at ? formatDateTime(key.last_used_at) : t("Never") })}</span>
             <div className="flex gap-2">
               <Button size="sm" variant="outline" disabled={toggleKey.isPending} onClick={() => toggleKey.mutate(key)}>
                 {key.enabled ? t("Revoke key") : t("Enable key")}
@@ -161,7 +186,11 @@ export function BucketCard({ bucket }: { bucket: S3Bucket }) {
       {remove && (
         <ConfirmDialog
           title={remove === "bucket" ? t("Delete bucket?") : t("Delete key?")}
-          description={t("Programs using these credentials will lose access. Files stay in their folder.")}
+          description={
+            remove === "bucket"
+              ? t("The bucket and its Access Keys are deleted for good: programs using them lose access. Files stay in their folder.")
+              : t("The Access Key is deleted for good: programs using it lose access. Files stay in their folder.")
+          }
           confirmText={t("Delete")}
           destructive
           onClose={() => setRemove(null)}
@@ -170,6 +199,9 @@ export function BucketCard({ bucket }: { bucket: S3Bucket }) {
             else await api.deleteS3Key(bucket.id, remove.id);
             await changed();
             setRemove(null);
+            // Somewhere to be once what was deleted is gone: the bucket's other buttons, or the list it was in
+            if (remove === "bucket") focusList(card.current);
+            else requestAnimationFrame(() => newKeyButton.current?.focus());
           }}
         />
       )}
@@ -180,7 +212,7 @@ export function BucketCard({ bucket }: { bucket: S3Bucket }) {
 export function S3BucketDialog({ nodeId, onClose }: { nodeId: string; onClose(): void }) {
   const qc = useQueryClient();
   const q = useQuery(s3FolderQuery(nodeId));
-  const options = useQuery({ queryKey: ["s3-options"], queryFn: ({ signal }) => api.s3Options(signal) });
+  const options = useQuery({ queryKey: keys.s3Options(), queryFn: ({ signal }) => api.s3Options(signal) });
   const [name, setName] = useState("");
   const identity = useConfirmIdentity("s3-publish");
   const publish = useMutation({
@@ -188,7 +220,7 @@ export function S3BucketDialog({ nodeId, onClose }: { nodeId: string; onClose():
     onSuccess: () => {
       setName("");
       identity.clear();
-      void qc.invalidateQueries({ queryKey: ["s3-buckets"] });
+      void qc.invalidateQueries({ queryKey: keys.bucketLists() });
     },
     onError: (e) => toast.error(e.message),
   });
@@ -207,8 +239,8 @@ export function S3BucketDialog({ nodeId, onClose }: { nodeId: string; onClose():
           <>
             {options.data && (
               <p className="text-xs [overflow-wrap:anywhere]">
-                {t("Endpoint")}: {window.location.protocol}//{options.data.hostname}
-                {window.location.port ? `:${window.location.port}` : ""} · {t("Region")}: {options.data.region} · {t("Use path-style URLs")}
+                {/* The S3 hostname is reached over HTTPS on its own (a reverse proxy), not at this page's address */}
+                {t("Endpoint: {url} · Region: {region} · Use path-style URLs", { url: `https://${options.data.hostname}`, region: options.data.region })}
               </p>
             )}
             {q.data.can_publish ? (
@@ -227,7 +259,7 @@ export function S3BucketDialog({ nodeId, onClose }: { nodeId: string; onClose():
                     onChange={(e) => setName(e.target.value)}
                     minLength={3}
                     maxLength={63}
-                    pattern="[a-z0-9][a-z0-9-]*[a-z0-9]"
+                    pattern="[a-z0-9][a-z0-9\\-]*[a-z0-9]"
                     required
                   />
                   <Button type="submit" disabled={publish.isPending || !identity.ready}>
@@ -268,7 +300,7 @@ export function S3FolderSection({ nodeId }: { nodeId: string }) {
       <h3 className="text-xs font-medium">{t("S3 buckets")}</h3>
       {q.data.buckets.map((bucket) => (
         <p key={bucket.id} className="text-xs [overflow-wrap:anywhere]">
-          {bucket.name} · {bucket.keys.length} {t("Access Keys")}
+          {t("{name} · {n} Access Key|{name} · {n} Access Keys", { name: bucket.name, n: bucket.keys.length })}
         </p>
       ))}
       <Button size="sm" variant="outline" onClick={() => setOpen(true)}>

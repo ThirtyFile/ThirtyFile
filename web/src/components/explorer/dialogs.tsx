@@ -1,10 +1,10 @@
 /** File explorer dialogs: move / copy, delete, share and access (creating and renaming are edited inline in the list) */
-import { S3BucketDialog } from "@/components/S3Buckets";
-import { FtpFolderDialog } from "@/components/FtpFolders";
 import { AccessDialog } from "@/components/AccessDialog";
 import { ConfirmDialog } from "@/components/dialogs";
 import { FolderPickerDialog } from "@/components/FolderPickerDialog";
 import { ShareDialog } from "@/components/ShareDialog";
+import { S3BucketDialog } from "@/components/S3Buckets";
+import { FtpFolderDialog } from "@/components/FtpFolders";
 import { t } from "@/lib/i18n";
 import { homeFolder } from "@/lib/home";
 import { useMe } from "@/lib/session";

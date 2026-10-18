@@ -32,4 +32,8 @@ export default {
   "Sign out and sign in again, then add the SSH key within 10 minutes": "サインアウトして再度サインインし、10 分以内に SSH キーを追加してください",
   "Added SFTP key: {name}": "SFTP キーを追加：{name}",
   "Removed SFTP key: {name}": "SFTP キーを削除：{name}",
+  "SFTP settings updated": "SFTP の設定を更新しました",
+  "Sign in again before adding an SSH key if your sign-in is older than 10 minutes.": "サインインから 10 分以上経っている場合は、SSH キーを追加する前にもう一度サインインしてください。",
+  "Remove the SSH key \"{name}\"?": "SSH キー「{name}」を削除しますか？",
+  "Programs signing in with it lose access over SFTP. This can't be undone.": "このキーでサインインするプログラムは SFTP でアクセスできなくなります。元に戻せません。",
 } satisfies Record<string, string>;

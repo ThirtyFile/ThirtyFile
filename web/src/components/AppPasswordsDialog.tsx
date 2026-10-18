@@ -3,13 +3,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CopyIcon, KeySquareIcon, Loader2Icon, PlusIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { api, type AppPassword } from "@/api";
-import { keys, queries } from "@/api/queryKeys";
+import { keys } from "@/api/queryKeys";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ErrorText, errorProps } from "@/components/dialogs";
+import { ErrorText } from "@/components/dialogs";
+import { useConfirmIdentity } from "@/components/ConfirmIdentity";
 import { useMe } from "@/lib/session";
 import { copyAndSay, formatDate, formatDateTime } from "@/lib/utils";
 import { t } from "@/lib/i18n";
@@ -43,11 +44,7 @@ export function AppPasswordsDialog({ onClose }: { onClose(): void }) {
   const q = useQuery({ queryKey: keys.appPasswords(), queryFn: api.appPasswords });
   // Making one asks for the password again (and a code with two-factor sign-in); accounts without a password must
   // have signed in recently instead
-  const tf = useQuery(queries.twoFactor);
-  const hasPassword = tf.data?.has_password ?? true;
-  const needsCode = !!tf.data?.enabled;
-  const [password, setPassword] = useState("");
-  const [code, setCode] = useState("");
+  const identity = useConfirmIdentity("ap");
   const [name, setName] = useState("");
   const [scope, setScope] = useState<"read" | "write">("read");
   const [days, setDays] = useState(90);
@@ -62,14 +59,12 @@ export function AppPasswordsDialog({ onClose }: { onClose(): void }) {
         name: name.trim(),
         scope,
         expires_days: days || undefined,
-        password: hasPassword ? password : undefined,
-        code: needsCode ? code.trim() : undefined,
+        ...identity.values,
       }),
     onSuccess: (r) => {
       setCreated({ name: r.app_password.name, token: r.token });
       setName("");
-      setPassword("");
-      setCode("");
+      identity.clear();
       qc.invalidateQueries({ queryKey: keys.notifications() });
       qc.invalidateQueries({ queryKey: keys.appPasswords() });
     },
@@ -82,7 +77,7 @@ export function AppPasswordsDialog({ onClose }: { onClose(): void }) {
     },
     onError: (e) => toast.error(e.message),
   });
-  const ready = !!name.trim() && (!hasPassword || !!password) && (!needsCode || !!code.trim());
+  const ready = !!name.trim() && identity.ready;
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (ready && !create.isPending) create.mutate();
@@ -130,29 +125,7 @@ export function AppPasswordsDialog({ onClose }: { onClose(): void }) {
               <Label htmlFor="ap-name">{t("Name")}</Label>
               <Input id="ap-name" value={name} maxLength={60} placeholder={t("For example: Nightly backup")} onChange={(e) => setName(e.target.value)} autoComplete="off" />
             </div>
-            {hasPassword ? (
-              <div className="flex flex-wrap gap-2">
-                <div className="grid min-w-40 flex-1 gap-1.5">
-                  <Label htmlFor="ap-password">{t("Your current password")}</Label>
-                  <Input
-                    id="ap-password"
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    autoComplete="current-password"
-                    {...errorProps(create.error, "ap-error")}
-                  />
-                </div>
-                {needsCode && (
-                  <div className="grid w-40 gap-1.5">
-                    <Label htmlFor="ap-code">{t("Code from your app")}</Label>
-                    <Input id="ap-code" value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" />
-                  </div>
-                )}
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground">{t("For your security, app passwords can only be created within 10 minutes of signing in.")}</p>
-            )}
+            {identity.fields(t("For your security, app passwords can only be created within 10 minutes of signing in."), create.error, "ap-error")}
             <div className="flex flex-wrap items-end gap-2">
               <div className="grid gap-1.5">
                 <Label htmlFor="ap-scope">{t("Access")}</Label>

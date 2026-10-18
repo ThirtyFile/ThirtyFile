@@ -51,6 +51,11 @@ pub struct Me {
     pub lang: crate::i18n::MeLang,
     /// The interface style they chose: `auto`, `windows` or `mac` (style.rs)
     pub style: String,
+    /// S3 buckets and FTP receive folders can be published now, and SSH keys sign in over SFTP: menus offer them only
+    /// then, without asking about each folder
+    pub s3_enabled: bool,
+    pub ftp_enabled: bool,
+    pub sftp_keys: bool,
 }
 
 async fn me_of(st: &AppState, user: User, headers: &HeaderMap) -> AppResult<Me> {
@@ -65,6 +70,9 @@ async fn me_of(st: &AppState, user: User, headers: &HeaderMap) -> AppResult<Me> 
     let lang = crate::i18n::me_lang(st, user.id, headers).await?;
     let style = crate::style::saved(st, user.id).await?;
     let personal_pending = !user.guest && personal_pending;
+    let s3_enabled = crate::s3::config::routing(st).await?.enabled;
+    let ftp_enabled = crate::ftp::config::load(st).await?.enabled;
+    let sftp_keys = crate::sftp::settings::flag(st, "sftp_enabled").await? && crate::sftp::settings::flag(st, "sftp_keys_enabled").await?;
     Ok(Me {
         user,
         used_bytes,
@@ -79,6 +87,9 @@ async fn me_of(st: &AppState, user: User, headers: &HeaderMap) -> AppResult<Me> 
         version: crate::VERSION,
         lang,
         style,
+        s3_enabled,
+        ftp_enabled,
+        sftp_keys,
     })
 }
 

@@ -65,7 +65,7 @@ test("administrators configure S3, publish from a folder menu and manage keys sh
   await page.keyboard.press("Escape");
   await page.goto("/admin/s3");
   await expect(page.getByRole("region", { name: bucket })).toBeVisible();
-  await page.getByLabel("Filter buckets").fill(bucket);
+  await page.getByLabel("Search buckets").fill(bucket);
   if (process.env.E2E_SCREENSHOT_DIR) {
     await mkdir(process.env.E2E_SCREENSHOT_DIR, { recursive: true });
     await page.screenshot({ path: join(process.env.E2E_SCREENSHOT_DIR, "s3-buckets-desktop.png") });

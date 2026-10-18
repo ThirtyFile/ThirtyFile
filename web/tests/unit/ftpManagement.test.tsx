@@ -137,7 +137,7 @@ describe("FTP receive folder management", () => {
   });
 
   test("Properties keeps existing stopped devices manageable even when new publishing is unavailable", async () => {
-    vi.mocked(api.ftpFolders).mockResolvedValue({ can_publish: false, folders: [{ ...folder, active: false }] });
+    vi.mocked(api.ftpFolders).mockResolvedValue({ can_publish: false, folders: [{ ...folder, enabled: false, active: false }] });
     await mount(<FtpFolderSection nodeId="incoming" />);
     await settled(() => expect(document.body.textContent).toContain("Office scanner · Stopped"));
     await click(button("Manage receive folders"));
@@ -224,6 +224,25 @@ describe("FTP receive folder management", () => {
     await settled(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
     expect(api.createFtpFolder).not.toHaveBeenCalled();
     expect(api.rotateFtpPassword).not.toHaveBeenCalled();
+  });
+
+  test("an ended receive folder is renamed with only its own settings sent, its end date as it was", async () => {
+    const ended = Math.floor(Date.now() / 1000) - 3600 + 17;
+    await mount(<FtpFolderCard folder={{ ...folder, expires_at: ended }} />);
+    expect(document.body.textContent).toContain("Ended");
+    await click(button("Edit"));
+    await settled(() => expect(input("Receive folder name").value).toBe(folder.name));
+    await type(input("Receive folder name"), "Old scanner");
+    await type(input("Your current password"), "current-password");
+    await click(button("Save", top()));
+    // Not the list's fields (its creator, folder name, state), and the end to the second, not as the field rounds it
+    await settled(() =>
+      expect(api.saveFtpFolder).toHaveBeenCalledWith(
+        folder.id,
+        { name: "Old scanner", enabled: true, allow_list: false, allow_read: false, replace_existing: true, expires_at: ended },
+        { password: "current-password", code: undefined },
+      ),
+    );
   });
 
   test("passwordless rotation explains the recent sign-in requirement and retains a server refusal", async () => {

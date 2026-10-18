@@ -1,5 +1,3 @@
-import { S3FolderSection } from "@/components/S3Buckets";
-import { FtpFolderSection } from "@/components/FtpFolders";
 import { useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { TagIcon, XIcon } from "lucide-react";
@@ -13,6 +11,8 @@ import { FileIcon, canBrowserThumbnail, canThumbnail, typeLabel } from "@/compon
 import { Thumb } from "@/components/fileList/thumbs";
 import { Resizer } from "@/components/Resizer";
 import { VersionsSection } from "@/components/VersionsSection";
+import { S3FolderSection } from "@/components/S3Buckets";
+import { FtpFolderSection } from "@/components/FtpFolders";
 import { ROLE_LABEL, capsFor, capsOf } from "@/lib/drives";
 import { actionLabel } from "@/components/logs/actions";
 import { useMediaQuery, useOverlayFocus } from "@/lib/focus";
@@ -200,8 +200,8 @@ export function DetailsPane({ selected, folder, onClose, count, whole }: { selec
               </DropdownMenuContent>
             </DropdownMenu>
           )}
-          {ready && node.kind === "folder" && <S3FolderSection nodeId={node.id} />}
-          {ready && node.kind === "folder" && <FtpFolderSection nodeId={node.id} />}
+          {ready && node.kind === "folder" && me.s3_enabled && <S3FolderSection nodeId={node.id} />}
+          {ready && node.kind === "folder" && me.ftp_enabled && <FtpFolderSection nodeId={node.id} />}
           <History node={node} query={history} />
           {error && (
             <ErrorState compact message={error.message} onRetry={() => Promise.all([info.error && info.refetch(), shares.error && shares.refetch(), contents.error && contents.refetch()])} />
