@@ -69,7 +69,8 @@ pub(super) struct TrashCursor {
 
 /// Trash: deleted items in spaces I'm a member of
 pub async fn list_trash(State(st): State<AppState>, user: User, Query(q): Query<TrashQuery>) -> AppResult<Json<Listing<Located>>> {
-    let (limit, after) = page_of::<TrashCursor>(q.limit, q.after.as_deref())?;
+    // A page at a time, also when no size is asked for: a large trash isn't listed and located whole
+    let (limit, after) = page_of::<TrashCursor>(Some(q.limit.unwrap_or(super::MAX_PAGE)), q.after.as_deref())?;
     let drive_ids = trash_drives(&mut *st.db.acquire().await?, &user, Role::Viewer).await?;
     let keyset = if after.is_some() { "AND (n.trashed_at < ?2 OR (n.trashed_at = ?2 AND n.id < ?3))" } else { "" };
     // The filter is one more condition on the same order, so paging works the same with it
@@ -387,10 +388,9 @@ async fn merge_all(st: &AppState, user: &User, m: &Merging, progress: &Tracker) 
             locks.check(&into)?;
             let done = merge(&mut tx, user, &locks, m, &from, &into, &mut budget).await?;
             tree::touch(&mut tx, &into.id).await?;
-            tx.commit().await?;
+            locks.commit(tx).await?;
             done
         };
-        locks.committed();
         progress.add((size - budget).max(0) as u64);
         // Dropping the locks finishes what the batch left (what is in large folders that came out) before the next
         drop(locks);
@@ -496,8 +496,7 @@ pub async fn restore_items(st: &AppState, user: &User, req: &BatchReq) -> AppRes
         tree::touch(&mut tx, &parent_id).await?;
         logs::record_activity(&mut tx, user, Some(&node), "restore", "").await?;
     }
-    tx.commit().await?;
-    locks.committed();
+    locks.commit(tx).await?;
     Ok(merging)
 }
 

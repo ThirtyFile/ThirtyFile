@@ -172,7 +172,7 @@ thread_local! {
     static TEST_WAIT: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
 }
 
-fn disk_wait() -> Duration {
+pub(crate) fn disk_wait() -> Duration {
     #[cfg(test)]
     if let Some(w) = TEST_WAIT.with(|w| w.get()) {
         return w;
@@ -481,6 +481,20 @@ fn other_disk() -> bool {
 mod tests {
     use super::*;
     use crate::testutil::{self, write_old};
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn emptying_a_folder_removes_names_that_arent_text_too() {
+        use std::os::unix::ffi::OsStrExt;
+        let dir = std::env::temp_dir().join(format!("thirtyfile-empty-{}", new_id()));
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::write(dir.join(std::ffi::OsStr::from_bytes(b"caf\xe9.txt")), b"latin-1").unwrap();
+        std::fs::create_dir(dir.join(std::ffi::OsStr::from_bytes(b"d\xff"))).unwrap();
+        std::fs::write(dir.join("sub/a.txt"), b"a").unwrap();
+        remove_contents(&crate::beneath::Pinned::root(&dir).unwrap()).unwrap();
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        std::fs::remove_dir(&dir).unwrap();
+    }
     use axum::{
         Json,
         body::Bytes,

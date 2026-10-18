@@ -114,6 +114,15 @@ pub fn spawn_writer(st: AppState, mut rx: tokio::sync::mpsc::Receiver<LogEvent>)
     LogWriter { stop, handle }
 }
 
+/// The scopes of an event whose current ones couldn't be worked out: those captured with it, and its own item
+fn own_scope(id: Option<&str>, drive: Option<&str>, captured: &str) -> String {
+    let mut scopes: Vec<serde_json::Value> = serde_json::from_str(captured).unwrap_or_default();
+    if let (Some(id), Some(drive)) = (id, drive) {
+        scopes.push(serde_json::json!({"id": id, "drive": drive}));
+    }
+    serde_json::to_string(&scopes).unwrap_or_else(|_| "[]".into())
+}
+
 /// Merge captured and current boundaries: queued events must not lose their scope after a move or purge.
 async fn queued_scopes(conn: &mut SqliteConnection, id: Option<&str>, parent: Option<&str>, drive: Option<&str>, captured: &str) -> AppResult<String> {
     let mut scopes: Vec<serde_json::Value> = serde_json::from_str(captured).map_err(crate::error::AppError::internal)?;
@@ -145,7 +154,15 @@ async fn write_batch(st: &AppState, batch: &[LogEvent]) {
         for e in batch {
             match e {
                 LogEvent::ShareAccess { at, share_id, owner_id, node_id, node_name, parent_id, drive_id, scopes, event, ip, user_agent } => {
-                    let scopes = queued_scopes(&mut tx, node_id.as_deref(), parent_id.as_deref(), drive_id.as_deref(), scopes).await?;
+                    // Scopes that can't be worked out: the visit is kept, as private as its own item, rather than lose
+                    // every event of the batch (sign-ins included)
+                    let scopes = match queued_scopes(&mut tx, node_id.as_deref(), parent_id.as_deref(), drive_id.as_deref(), scopes).await {
+                        Ok(scopes) => scopes,
+                        Err(e) => {
+                            tracing::warn!("Couldn't scope a share link visit, kept as private as its item: {}", e.message);
+                            own_scope(node_id.as_deref(), drive_id.as_deref(), scopes)
+                        }
+                    };
                     sqlx::query("INSERT INTO share_access (at, share_id, owner_id, node_id, node_name, event, ip, user_agent, restricted_scopes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
                         .bind(at)
                         .bind(share_id)
@@ -234,8 +251,10 @@ pub fn prune_share_views(st: &AppState) {
 
 /// Captures the current privacy boundary; the event itself is written by the background queue.
 pub async fn record_share_access(st: &AppState, share_id: &str, owner_id: i64, node: Option<&dyn Item>, event: &'static str, v: &Visitor) {
-    let scopes = match (node, st.db.acquire().await) {
-        (Some(_), Ok(mut c)) => crate::tree::saved_scopes(&mut c, node.map(|n| n.id())).await.unwrap_or_else(|_| "[]".into()),
+    // Captured now when a connection is free, so a move or purge before the writer gets to it doesn't lose them; a
+    // download never waits for one: the writer works them out then (`queued_scopes`)
+    let scopes = match (node, st.db.try_acquire()) {
+        (Some(_), Some(mut c)) => crate::tree::saved_scopes(&mut c, node.map(|n| n.id())).await.unwrap_or_else(|_| "[]".into()),
         _ => "[]".into(),
     };
     enqueue(

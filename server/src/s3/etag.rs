@@ -46,8 +46,9 @@ pub async fn describe_node(st: &AppState, node: &Node) -> S3Result<Described> {
     if after != version {
         return Err(s3s::s3_error!(InvalidRequest, "The file changed while it was read"));
     }
-    // A concurrent replacement must not cache an old digest on the new node content.
-    sqlx::query("UPDATE nodes SET content_md5 = ?, md5_version = ? WHERE id = ? AND blob_hash IS ? AND size = ? AND updated_at = ?")
+    // A concurrent replacement must not cache an old digest on the new node content. Only a cache: should the database
+    // be busy, the digest is worked out again next time rather than the request fail
+    if let Err(e) = sqlx::query("UPDATE nodes SET content_md5 = ?, md5_version = ? WHERE id = ? AND blob_hash IS ? AND size = ? AND updated_at = ?")
         .bind(&md5)
         .bind(version)
         .bind(&node.id)
@@ -56,6 +57,8 @@ pub async fn describe_node(st: &AppState, node: &Node) -> S3Result<Described> {
         .bind(node.updated_at)
         .execute(&st.db)
         .await
-        .map_err(super::internal)?;
+    {
+        tracing::debug!("Couldn't keep an S3 ETag: {e}");
+    }
     Ok(Described { source: Some(source), size, etag: ETag::Strong(md5), mtime })
 }

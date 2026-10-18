@@ -126,21 +126,15 @@ pub async fn request_identity<T>(st: &AppState, req: &S3Request<T>, bucket: Opti
     if bucket.is_some_and(|name| name != identity.bucket.name) {
         return Err(s3_error!(AccessDenied));
     }
+    // When they were last used, at most every five minutes: bookkeeping, which never fails the request (the database
+    // may be busy with a long change)
     let ts = now();
-    sqlx::query("UPDATE s3_keys SET last_used_at = ? WHERE id = ? AND (last_used_at IS NULL OR last_used_at < ?)")
-        .bind(ts)
-        .bind(&identity.key.id)
-        .bind(ts - 300)
-        .execute(&st.db)
-        .await
-        .map_err(super::internal)?;
-    sqlx::query("UPDATE s3_buckets SET last_used_at = ? WHERE id = ? AND (last_used_at IS NULL OR last_used_at < ?)")
-        .bind(ts)
-        .bind(&identity.bucket.id)
-        .bind(ts - 300)
-        .execute(&st.db)
-        .await
-        .map_err(super::internal)?;
+    for (table, id) in [("s3_keys", &identity.key.id), ("s3_buckets", &identity.bucket.id)] {
+        let sql = format!("UPDATE {table} SET last_used_at = ? WHERE id = ? AND (last_used_at IS NULL OR last_used_at < ?)");
+        if let Err(e) = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(ts).bind(id).bind(ts - 300).execute(&st.db).await {
+            tracing::debug!("Couldn't note when an S3 key was used: {e}");
+        }
+    }
     Ok(identity)
 }
 

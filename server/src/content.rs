@@ -255,11 +255,12 @@ pub async fn replace(conn: &mut SqliteConnection, st: &AppState, staged: &Staged
     Ok(result)
 }
 
+/// Keeps the S3 ETag worked out while staging, with the content's version. Inside the write lock: a disk that doesn't
+/// answer leaves it out (the first S3 read works it out), rather than hold every write or fail one already placed.
 async fn cache_md5(conn: &mut SqliteConnection, staged: &Staged, id: &str) -> AppResult<()> {
     let Some(md5) = &staged.md5 else { return Ok(()) };
     let node = tree::get_node(conn, id).await?.ok_or_else(|| AppError::not_found("File not found"))?;
-    let source = crate::files::Source::of(&node)?;
-    let (_, version) = source.describe(node.size as u64).await?;
+    let Some(version) = crate::files::Source::of(&node)?.version_within(node.drive()).await else { return Ok(()) };
     sqlx::query("UPDATE nodes SET content_md5 = ?, md5_version = ? WHERE id = ?").bind(md5).bind(version).bind(id).execute(conn).await?;
     Ok(())
 }

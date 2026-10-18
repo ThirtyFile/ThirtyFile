@@ -127,8 +127,7 @@ pub async fn place_folder(st: &AppState, user: &User, staged: Staging, dest_id: 
     tree::touch(&mut tx, &dest.id).await?;
     let node = tree::get_node(&mut tx, &root).await?;
     logs::record_activity(&mut tx, user, node.as_ref().map(|n| n as _), action, detail).await?;
-    tx.commit().await?;
-    locks.committed();
+    locks.commit(tx).await?;
     drop(w);
     // The folder that held it is empty now: removed before the change is reported done, so nothing half-made is left
     // behind once it is (should the change fail instead, the renames are undone and `Staging` removes it all)

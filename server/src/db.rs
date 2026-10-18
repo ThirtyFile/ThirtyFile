@@ -182,15 +182,17 @@ pub async fn shrink(pool: &SqlitePool, write_lock: &tokio::sync::Mutex<()>) {
 /// all of it, on a connection that waits for readers a moment only: a long read (a backup writing its list of files)
 /// leaves it for the next time instead of stalling every change.
 async fn empty_wal(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    let mut c = pool.acquire().await?;
-    let (busy, log, done): (i64, i64, i64) = sqlx::query_as("PRAGMA wal_checkpoint(PASSIVE)").fetch_one(&mut *c).await?;
+    // Taken out of the pool and closed afterwards: its busy_timeout is changed for a moment, and a connection left
+    // with the short one (an error, or this given up halfway) would make other changes fail when they have to wait
+    let mut c = pool.acquire().await?.detach();
+    let (busy, log, done): (i64, i64, i64) = sqlx::query_as("PRAGMA wal_checkpoint(PASSIVE)").fetch_one(&mut c).await?;
     if busy != 0 || log != done {
         return Ok(());
     }
-    let (timeout,): (i64,) = sqlx::query_as("PRAGMA busy_timeout").fetch_one(&mut *c).await?;
-    sqlx::query("PRAGMA busy_timeout = 100").execute(&mut *c).await?;
-    let emptied = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)").execute(&mut *c).await;
-    sqlx::query(sqlx::AssertSqlSafe(format!("PRAGMA busy_timeout = {timeout}"))).execute(&mut *c).await?;
+    let (timeout,): (i64,) = sqlx::query_as("PRAGMA busy_timeout").fetch_one(&mut c).await?;
+    sqlx::query("PRAGMA busy_timeout = 100").execute(&mut c).await?;
+    let emptied = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)").execute(&mut c).await;
+    sqlx::query(sqlx::AssertSqlSafe(format!("PRAGMA busy_timeout = {timeout}"))).execute(&mut c).await?;
     emptied.map(|_| ())
 }
 

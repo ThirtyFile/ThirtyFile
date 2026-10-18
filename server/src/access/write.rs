@@ -270,7 +270,9 @@ async fn scoped_metadata(conn: &mut sqlx::SqliteConnection, scope: Option<&Scope
         return Ok(());
     };
     let node = tree::get_node(conn, id).await?.ok_or_else(|| AppError::not_found("File not found"))?;
-    let (_, version) = crate::files::Source::of(&node)?.describe(node.size as u64).await?;
-    sqlx::query("UPDATE nodes SET s3_mtime=?,s3_mtime_version=? WHERE id=?").bind(&scope.mtime).bind(version).bind(id).execute(conn).await?;
+    // Inside the write lock: a disk that doesn't answer leaves the time out, as a change from elsewhere does
+    let version = crate::files::Source::of(&node)?.version_within(node.drive()).await;
+    let mtime = scope.mtime.as_ref().filter(|_| version.is_some());
+    sqlx::query("UPDATE nodes SET s3_mtime=?,s3_mtime_version=? WHERE id=?").bind(mtime).bind(version).bind(id).execute(conn).await?;
     Ok(())
 }

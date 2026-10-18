@@ -15,6 +15,37 @@ const PAGE: i64 = 200;
 
 /// Reads everything a set holds back from its destination: each snapshot's manifest and completion marker, and each
 /// content, checked against its SHA-256. What is missing or damaged is listed, and the job fails.
+/// Checks each complete snapshot of `set`: its completion marker, and its list of files (read once more before it is
+/// called damaged), reporting what isn't whole
+async fn check_snapshots(cx: &Ctx<'_>, set: &super::Set, dst: &dyn Storage) -> AppResult<()> {
+    let st = cx.st;
+    let snapshots: Vec<(String, String, i64)> =
+        sqlx::query_as("SELECT id, manifest_sha256, manifest_size FROM backup_snapshots WHERE set_id = ? AND state = 'complete'")
+            .bind(&set.id)
+            .fetch_all(&st.db)
+            .await?;
+    for (id, sha, size) in &snapshots {
+        let complete = layout::read_small(dst, &layout::complete_key(&set.id, id)).await;
+        let marker_ok = matches!(&complete, Ok(Some(b)) if serde_json::from_slice::<layout::Complete>(b).is_ok_and(|c| &c.manifest_sha256 == sha));
+        if !marker_ok {
+            cx.failed("", None, "A snapshot's completion marker is missing or changed".to_string());
+            continue;
+        }
+        let key = layout::manifest_key(&set.id, id);
+        let mut read = read_hash(dst, &key, *size as u64).await;
+        // Once more before calling it damaged (a transfer cut short), as for the content below
+        if matches!(&read, Ok((h, n)) if !(h == sha && *n == *size as u64)) {
+            read = read_hash(dst, &key, *size as u64).await;
+        }
+        match read {
+            Ok((h, n)) if &h == sha && n == *size as u64 => {}
+            Ok(_) => cx.failed("", None, "A snapshot's list of files was changed or damaged".to_string()),
+            Err(e) => return Err(read_error(&e)),
+        }
+    }
+    Ok(())
+}
+
 pub async fn verify(cx: &Ctx<'_>) -> AppResult<Stop> {
     let (st, job) = (cx.st, cx.job);
     let set = super::load_set(&st.db, &job.set_id).await?;
@@ -35,24 +66,7 @@ pub async fn verify(cx: &Ctx<'_>) -> AppResult<Stop> {
     cx.set_counts(0, 0, files, bytes);
     cx.flush().await?;
     // The snapshots first: a manifest that isn't what was written makes the snapshot useless
-    let snapshots: Vec<(String, String, i64)> =
-        sqlx::query_as("SELECT id, manifest_sha256, manifest_size FROM backup_snapshots WHERE set_id = ? AND state = 'complete'")
-            .bind(&set.id)
-            .fetch_all(&st.db)
-            .await?;
-    for (id, sha, size) in &snapshots {
-        let complete = layout::read_small(dst.as_ref(), &layout::complete_key(&set.id, id)).await;
-        let marker_ok = matches!(&complete, Ok(Some(b)) if serde_json::from_slice::<layout::Complete>(b).is_ok_and(|c| &c.manifest_sha256 == sha));
-        if !marker_ok {
-            cx.failed("", None, "A snapshot's completion marker is missing or changed".to_string());
-            continue;
-        }
-        match read_hash(dst.as_ref(), &layout::manifest_key(&set.id, id), *size as u64).await {
-            Ok((h, n)) if &h == sha && n == *size as u64 => {}
-            Ok(_) => cx.failed("", None, "A snapshot's list of files was changed or damaged".to_string()),
-            Err(e) => return Err(read_error(&e)),
-        }
-    }
+    check_snapshots(cx, &set, dst.as_ref()).await?;
     let mut last = String::new();
     loop {
         let rows: Vec<(String, i64)> =
@@ -68,7 +82,13 @@ pub async fn verify(cx: &Ctx<'_>) -> AppResult<Stop> {
                 return Ok(stop);
             }
             let key = layout::object_key(&set.id, &hash);
-            let read = cx.tries(|e: &std::io::Error| e.kind() != std::io::ErrorKind::NotFound, || read_hash(dst.as_ref(), &key, size as u64)).await;
+            let read_once = || cx.tries(|e: &std::io::Error| e.kind() != std::io::ErrorKind::NotFound, || read_hash(dst.as_ref(), &key, size as u64));
+            let mut read = read_once().await;
+            // Read once more before taking it for damaged: a transfer cut short (that FTP or SFTP ends as if the file
+            // ended) reads as content too short
+            if matches!(&read, Ok((h, n)) if !(*h == hash && *n == size as u64)) {
+                read = read_once().await;
+            }
             match read {
                 Ok((h, n)) if h == hash && n == size as u64 => {
                     let _w = st.write_lock.lock().await;
@@ -81,12 +101,12 @@ pub async fn verify(cx: &Ctx<'_>) -> AppResult<Stop> {
                 }
                 Ok(_) => {
                     cx.failed("", None, format!("The content {} is damaged", &hash[..12]));
-                    forget_object(st, &set.id, dst.as_ref(), &key, &hash).await?;
+                    forget_object(st, &set.id, &hash).await?;
                 }
                 Err(Ok(stop)) => return Ok(stop),
                 Err(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => {
                     cx.failed("", None, format!("The content {} is missing", &hash[..12]));
-                    forget_object(st, &set.id, dst.as_ref(), &key, &hash).await?;
+                    forget_object(st, &set.id, &hash).await?;
                 }
                 Err(Err(e)) => return Err(read_error(&e)),
             }
@@ -179,8 +199,23 @@ fn read_error(e: &std::io::Error) -> AppError {
     AppError::new(axum::http::StatusCode::BAD_GATEWAY, format!("Couldn't read from the copy's location: {}", crate::locations::describe(e)))
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Tests: the next reads of keys with this in them end early, as a transfer cut short does: (part of the key, reads)
+    pub(super) static SHORT_READS: std::cell::RefCell<(String, usize)> = const { std::cell::RefCell::new((String::new(), 0)) };
+}
+
 /// SHA-256 and length of what is at `key`, which should be `size` bytes (a length found otherwise is returned as it is)
 async fn read_hash(dst: &dyn Storage, key: &str, size: u64) -> std::io::Result<(String, u64)> {
+    #[cfg(test)]
+    if SHORT_READS.with_borrow_mut(|(part, n)| {
+        *n > 0 && key.contains(part.as_str()) && {
+            *n -= 1;
+            true
+        }
+    }) {
+        return Ok((String::new(), size.saturating_sub(1)));
+    }
     match dst.stat(key).await? {
         None => return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "not there")),
         Some(e) if e.size != size => return Ok((String::new(), e.size)),
@@ -285,14 +320,12 @@ async fn sweep(cx: &Ctx<'_>, dst: &dyn Storage, dir: &str) -> AppResult<Option<S
     Ok(None)
 }
 
-/// A content the destination doesn't hold whole any more: what is left of it there goes, and the set no longer counts
-/// it as held, so the next snapshot stores it again (snapshots name content by its hash, so the earlier ones that name
-/// it are whole again then). Without this, every later snapshot would take it for stored, and once the earlier good
-/// snapshots aged out, nothing would hold that file.
-async fn forget_object(st: &crate::state::AppState, set: &str, dst: &dyn crate::storage::Storage, key: &str, hash: &str) -> AppResult<()> {
-    if let Err(e) = dst.delete_at(key).await {
-        tracing::warn!("Couldn't delete damaged backup content: {e}");
-    }
+/// A content the destination doesn't hold whole any more: the set no longer counts it as held, so the next snapshot
+/// stores it again, over what is there (snapshots name content by its hash, so the earlier ones that name it are whole
+/// again then). Without this, every later snapshot would take it for stored, and once the earlier good snapshots aged
+/// out, nothing would hold that file. What is there isn't deleted: should the read have been wrong after all, the
+/// snapshots that name it can still be restored from.
+async fn forget_object(st: &crate::state::AppState, set: &str, hash: &str) -> AppResult<()> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     sqlx::query("DELETE FROM backup_objects WHERE set_id = ? AND hash = ?").bind(set).bind(hash).execute(&mut *tx).await?;

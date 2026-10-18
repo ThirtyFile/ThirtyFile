@@ -672,7 +672,13 @@ struct Compared {
 async fn compare(st: &AppState, drive: &Drive, root: &Path, report: &mut ScanReport) -> AppResult<std::io::Result<Compared>> {
     let (tx, mut rx) = tokio::sync::mpsc::channel::<(String, Vec<Entry>)>(4);
     let (root, id) = (root.to_path_buf(), drive.id.clone());
+    // One reader per space: one stuck on a disk that stopped answering keeps its thread until the disk answers, and
+    // the scans meanwhile don't start another (over days, they would take every blocking thread of the server)
+    let Some(reading) = crate::util::claim(format!("scan-read:{id}")) else {
+        return Ok(Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "the folder still doesn't answer")));
+    };
     let walker = tokio::task::spawn_blocking(move || {
+        let _reading = reading;
         let mut r = ScanReport::default();
         let res = walk_each(&root, None, &mut r, &mut |rel, items| tx.blocking_send((rel.to_string(), items)).is_ok());
         res.map(|opened| (opened, r))

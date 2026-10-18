@@ -547,16 +547,24 @@ async fn unfinished(st: &AppState) -> AppResult<Vec<(String, Option<String>, i64
     .await?)
 }
 
-/// Finishes `rows` in the background, with the locks of their folder spaces held
+/// Finishes `rows` in the background, with the locks of their folder spaces held. A space whose lock is taken (a change
+/// waiting on a disk that doesn't answer, say) is left for the next hour: the maintenance that runs this never waits.
 async fn finish_rows(st: &AppState, rows: Vec<(String, Option<String>)>) {
     let mut drives: Vec<String> = rows.iter().filter_map(|(_, d)| d.clone()).collect();
     drives.sort();
     drives.dedup();
     let mut held = Vec::with_capacity(drives.len());
+    let mut busy = HashSet::new();
     for d in &drives {
-        held.push(crate::fsops::lock_space(st, d).await);
+        match crate::folders::drive_lock(st, d).try_lock_owned() {
+            Ok(guard) => held.push(guard),
+            Err(_) => {
+                busy.insert(d.clone());
+            }
+        }
     }
-    finish_later(st, rows.into_iter().map(|(id, _)| Unfinished { id, frontier: None }).collect(), held);
+    let rows = rows.into_iter().filter(|(_, d)| d.as_ref().is_none_or(|d| !busy.contains(d)));
+    finish_later(st, rows.map(|(id, _)| Unfinished { id, frontier: None }).collect(), held);
 }
 
 /// Deletes an item and everything in it for good, a batch per transaction, without hiding it first: for items that
@@ -763,6 +771,35 @@ mod tests {
         .fetch_one(&env.st.db)
         .await
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn the_hourly_retry_leaves_a_folder_space_whose_lock_is_taken_for_the_next_hour() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        {
+            let mut tx = crate::db::begin_write(&env.st.db).await.unwrap();
+            assert!(repath(&mut tx, &space.root, &space.drive, "old", "new").await.unwrap().is_none());
+            let c = Change {
+                drive_id: Some(space.drive.clone()),
+                old_path: Some("old".into()),
+                new_path: Some("new".into()),
+                ..change(ChangeKind::Repath, &space.root)
+            };
+            record(&mut tx, &c).await.unwrap();
+            tx.commit().await.unwrap();
+        }
+        sqlx::query("UPDATE tree_changes SET created_at = created_at - 3600").execute(&env.st.db).await.unwrap();
+        // A change holds the space (waiting on a disk that doesn't answer, say): the maintenance doesn't wait for it
+        let held = crate::fsops::lock_space(&env.st, &space.drive).await;
+        tokio::time::timeout(std::time::Duration::from_secs(5), retry_unfinished(&env.st)).await.expect("it never waits").unwrap();
+        let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM tree_changes").fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(n, 1, "left for the next hour");
+        drop(held);
+        retry_unfinished(&env.st).await.unwrap();
+        settled(&env.st).await;
+        let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM tree_changes").fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(n, 0);
     }
 
     #[tokio::test]
