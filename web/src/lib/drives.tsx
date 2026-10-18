@@ -52,7 +52,8 @@ export function capsOf(role: Role | null | undefined, me: Me, readOnly = false, 
     ownWrite: contributor && (me.can_write || admin),
     ownDel: contributor && (me.can_delete || admin),
     share: linkAllowed(role, linkMakers) && (me.can_share || admin),
-    manage: atLeast(role, "manager"),
+    // As the server's can_manage_node: a manager who may share (a guest never manages access)
+    manage: atLeast(role, "manager") && !me.guest && (me.can_share || admin),
   };
 }
 

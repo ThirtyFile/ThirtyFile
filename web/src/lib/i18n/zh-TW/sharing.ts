@@ -66,6 +66,7 @@ export default {
   "Share links can be made by": "可以建立分享連結的人",
   "Share links can be made by: {who}": "可以建立分享連結的人：{who}",
   "Members can still share items with people (Share with…). Someone whose account may not share makes no links anywhere.": "成員仍可用「共用給…」把項目分享給其他人。帳號不能分享的人，在任何地方都無法建立連結。",
+  "Couldn't count the share links that would stop. Try again.": "無法計算會停止的分享連結數量，請再試一次。",
   "Stop {n} share link?|Stop {n} share links?": "要停用 {n} 個分享連結嗎？",
   "They were made by people this no longer allows. They stop working now, and work again if you change this back.": "這些連結是由這個設定不再允許的人建立的。它們會立即失效，改回原本的設定後就會恢復。",
   "Change": "變更",

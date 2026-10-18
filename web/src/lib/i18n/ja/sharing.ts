@@ -66,6 +66,7 @@ export default {
   "Share links can be made by": "共有リンクを作成できるユーザー",
   "Share links can be made by: {who}": "共有リンクを作成できるユーザー：{who}",
   "Members can still share items with people (Share with…). Someone whose account may not share makes no links anywhere.": "メンバーは引き続き「ユーザーと共有…」で項目を共有できます。アカウントで共有が許可されていない人は、どこでもリンクを作成できません。",
+  "Couldn't count the share links that would stop. Try again.": "停止する共有リンクの数を数えられませんでした。もう一度お試しください。",
   "Stop {n} share link?|Stop {n} share links?": "{n} 件の共有リンクを停止しますか？",
   "They were made by people this no longer allows. They stop working now, and work again if you change this back.": "この設定で許可されなくなった人が作成したリンクです。すぐに使えなくなり、設定を元に戻すと再び使えるようになります。",
   "Change": "変更",

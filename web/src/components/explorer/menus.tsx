@@ -107,7 +107,7 @@ export function toolbarCommands(p: ExplorerProps, s: ExplorerState, a: ExplorerA
       </DropdownMenuItem>
     ),
     copyTo: (
-      <DropdownMenuItem key="copy" disabled={none || !caps.add} onClick={() => setDialog({ t: "copy", picked: s.picked })}>
+      <DropdownMenuItem key="copy" disabled={none} onClick={() => setDialog({ t: "copy", picked: s.picked })}>
         <CopyIcon /> {t("Copy to…")}
       </DropdownMenuItem>
     ),
@@ -208,7 +208,8 @@ export function explorerMenus(p: ExplorerProps, s: ExplorerState, a: ExplorerAct
       <FolderInputIcon /> {t("Move to…")}
     </DropdownMenuItem>
   );
-  const copyTo = caps.add && (
+  // Reading what is copied is enough here; the folder it goes to is checked when it is chosen
+  const copyTo = (
     <DropdownMenuItem key="copy" onClick={() => setDialog({ t: "copy", picked: s.picked })}>
       <CopyIcon /> {t("Copy to…")}
     </DropdownMenuItem>
