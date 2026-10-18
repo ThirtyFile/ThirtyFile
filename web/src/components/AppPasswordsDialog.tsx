@@ -55,6 +55,8 @@ export function AppPasswordsDialog({ onClose }: { onClose(): void }) {
   const [created, setCreated] = useState<{ name: string; token: string } | null>(null);
 
   const create = useMutation({
+    // The new app password is in the answer: kept no longer than the dialog shows it
+    gcTime: 0,
     mutationFn: () =>
       api.createAppPassword({
         name: name.trim(),

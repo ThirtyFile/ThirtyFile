@@ -237,7 +237,12 @@ pub fn copy_permissions(from: &Pinned, to: &Pinned) -> io::Result<()> {
         use std::os::unix::fs::PermissionsExt;
         to.open_file()?.set_permissions(std::fs::Permissions::from_mode(meta.permissions().mode() & 0o777))
     };
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(all(unix, not(target_os = "linux")))]
+    let set = {
+        use std::os::unix::fs::PermissionsExt;
+        to.open_file()?.set_permissions(std::fs::Permissions::from_mode(meta.permissions().mode() & 0o777))
+    };
+    #[cfg(not(unix))]
     let set = std::fs::set_permissions(to.as_path(), meta.permissions());
     set
 }

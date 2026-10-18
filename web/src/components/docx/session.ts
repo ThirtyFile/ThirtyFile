@@ -69,13 +69,28 @@ export function dropSession(nodeId: string) {
 const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 /**
+ * Whether the editing frame may write this part into the file: one the file has, its content types, or a new XML part
+ * (or its relationships) in a folder the file already has parts in, such as the numbering part a list makes next to
+ * document.xml. Never a path outside the package: a leading "/", a backslash, "..".
+ */
+export function partAllowed(zip: JSZip, path: string): boolean {
+  if (path.startsWith("/") || path.includes("\\") || path.split("/").some((p) => p === ".." || p === "." || p === "")) return false;
+  if (zip.file(path)) return true;
+  if (path === "[Content_Types].xml") return true;
+  const at = path.lastIndexOf("/");
+  if (at <= 0 || !/^[\w.-]+\.(xml|rels)$/.test(path.slice(at + 1))) return false;
+  const folder = path.slice(0, at + 1).replace(/_rels\/$/, "");
+  return !!folder && Object.keys(zip.files).some((p) => p.startsWith(folder) && !p.slice(folder.length).includes("/") && !zip.files[p].dir);
+}
+
+/**
  * Saves the edited parts into the file (null: the file as it was when opened). Only those parts change: the archive's
  * other entries are written as they are, and a part edited before but not now is the archive's again.
  */
 export async function saveSession(s: DocxSession, nodeId: string, parts: Parts | null): Promise<Node> {
   const work = cloneZip(s.zip);
   for (const [path, text] of Object.entries(parts ?? {})) {
-    if (typeof text !== "string") throw new Error(t("Couldn't save"));
+    if (typeof text !== "string" || !partAllowed(s.zip, path)) throw new Error(t("Couldn't save"));
     work.file(path, text, { createFolders: false });
   }
   // Folder entries aren't written (only the entries themselves are dropped, not the files under them)

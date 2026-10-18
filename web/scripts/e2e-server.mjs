@@ -20,6 +20,9 @@ const server = spawn(bin, [], {
   env: {
     ...process.env,
     THIRTYFILE_ADDR: `127.0.0.1:${process.env.E2E_PORT ?? "18080"}`,
+    // When a test turns SFTP or FTP on: this machine only, and ports beside the web's, so parallel runs don't collide
+    THIRTYFILE_SFTP_ADDR: `127.0.0.1:${Number(process.env.E2E_PORT ?? "18080") + 1}`,
+    THIRTYFILE_FTP_ADDR: `127.0.0.1:${Number(process.env.E2E_PORT ?? "18080") + 2}`,
     THIRTYFILE_DATA: join(dir, "data"),
     THIRTYFILE_STORAGE: join(dir, "storage"),
     THIRTYFILE_ADMIN_PASSWORD: process.env.E2E_ADMIN_PASSWORD ?? "e2e-admin-password",
