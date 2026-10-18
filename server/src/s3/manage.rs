@@ -73,6 +73,22 @@ pub async fn list(State(st): State<AppState>, user: User, Query(q): Query<ListQu
 pub struct Publish {
     pub node_id: String,
     pub name: String,
+    /// Who is publishing, asked again (`tokens::confirm_identity`)
+    #[serde(default)]
+    pub password: Option<String>,
+    #[serde(default)]
+    pub code: Option<String>,
+}
+
+/// Credentials outlast the browser session that makes them: who is making them is asked again, as for app passwords
+async fn confirm(st: &AppState, user: &User, password: Option<String>, code: Option<&str>) -> AppResult<()> {
+    crate::tokens::confirm_identity(st, user, password, code, "Sign out and sign in again, then manage S3 keys within 10 minutes").await
+}
+
+/// Records a change to a bucket on its folder, so the entry follows the folder's access
+async fn record(conn: &mut sqlx::SqliteConnection, user: &User, bucket: &Bucket, detail: &str) -> AppResult<()> {
+    let folder = crate::tree::get_node(conn, &bucket.node_id).await?;
+    crate::logs::record_activity(conn, user, folder.as_ref().map(|n| n as _), "settings", detail).await
 }
 
 pub fn bucket_name(name: &str) -> bool {
@@ -96,6 +112,7 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Publ
     if !bucket_name(&req.name) {
         return Err(AppError::bad_request("Use 3–63 lowercase letters, digits and hyphens for the bucket name"));
     }
+    confirm(&st, &user, req.password.clone(), req.code.as_deref()).await?;
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     let current = crate::auth::user_by_id(&st, &mut tx, user.id).await?.ok_or_else(|| AppError::forbidden("The account no longer has access"))?;
@@ -117,6 +134,7 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Publ
         return Err(AppError::conflict("An S3 bucket has this name"));
     }
     result?;
+    record(&mut tx, &current, &bucket, &format!("Published S3 bucket {}", bucket.name)).await?;
     tx.commit().await?;
     Ok(Json(bucket))
 }
@@ -141,8 +159,16 @@ pub struct Enabled {
 pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<String>, Json(req): Json<Enabled>) -> AppResult<Json<serde_json::Value>> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    managed(&st, &mut tx, &user, &id).await?;
+    let bucket = managed(&st, &mut tx, &user, &id).await?;
+    let current = crate::auth::current_user(&mut tx, &user).await?;
+    if req.enabled && !bucket.enabled {
+        crate::tokens::may_hand_out(&current, bucket.creator_id)?;
+    }
     sqlx::query("UPDATE s3_buckets SET enabled = ? WHERE id = ?").bind(req.enabled).bind(id).execute(&mut *tx).await?;
+    if req.enabled != bucket.enabled {
+        let detail = if req.enabled { format!("Turned S3 bucket {} on", bucket.name) } else { format!("Stopped S3 bucket {}", bucket.name) };
+        record(&mut tx, &current, &bucket, &detail).await?;
+    }
     tx.commit().await?;
     super::multipart::cleanup_later(st.clone());
     Ok(Json(serde_json::json!({"ok": true})))
@@ -151,7 +177,9 @@ pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<Strin
 pub async fn delete(State(st): State<AppState>, user: User, Path(id): Path<String>) -> AppResult<Json<serde_json::Value>> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    managed(&st, &mut tx, &user, &id).await?;
+    let bucket = managed(&st, &mut tx, &user, &id).await?;
+    let current = crate::auth::current_user(&mut tx, &user).await?;
+    record(&mut tx, &current, &bucket, &format!("Removed S3 bucket {}", bucket.name)).await?;
     sqlx::query("DELETE FROM s3_buckets WHERE id = ?").bind(id).execute(&mut *tx).await?;
     tx.commit().await?;
     super::multipart::cleanup_later(st.clone());
@@ -163,6 +191,10 @@ pub struct NewKey {
     pub description: String,
     pub writable: bool,
     pub expires_at: Option<i64>,
+    #[serde(default)]
+    pub password: Option<String>,
+    #[serde(default)]
+    pub code: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -173,9 +205,12 @@ pub struct CreatedKey {
 }
 
 pub async fn new_key(State(st): State<AppState>, user: User, Path(bucket_id): Path<String>, Json(req): Json<NewKey>) -> AppResult<Json<CreatedKey>> {
+    confirm(&st, &user, req.password.clone(), req.code.as_deref()).await?;
     let _w = st.write_lock.lock().await;
     let mut conn = crate::db::begin_write(&st.db).await?;
     let bucket = managed(&st, &mut conn, &user, &bucket_id).await?;
+    let current = crate::auth::current_user(&mut conn, &user).await?;
+    crate::tokens::may_hand_out(&current, bucket.creator_id)?;
     let stored: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key='s3'").fetch_optional(&mut *conn).await?;
     let config: super::config::Config = stored.and_then(|(value,)| serde_json::from_str(&value).ok()).unwrap_or_default();
     let creator =
@@ -219,6 +254,12 @@ pub async fn new_key(State(st): State<AppState>, user: User, Path(bucket_id): Pa
         .bind(key.created_at)
         .execute(&mut *conn)
         .await?;
+    let detail = if key.writable {
+        format!("Made S3 key {} to read and change bucket {}", key.description, bucket.name)
+    } else {
+        format!("Made S3 key {} to read bucket {}", key.description, bucket.name)
+    };
+    record(&mut conn, &current, &bucket, &detail).await?;
     conn.commit().await?;
     Ok(Json(CreatedKey { key, secret_key }))
 }
@@ -231,8 +272,22 @@ pub async fn revoke_key(
 ) -> AppResult<Json<serde_json::Value>> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    managed(&st, &mut tx, &user, &bucket).await?;
+    let published = managed(&st, &mut tx, &user, &bucket).await?;
+    let current = crate::auth::current_user(&mut tx, &user).await?;
+    let found: Key = sqlx::query_as("SELECT * FROM s3_keys WHERE id = ? AND bucket_id = ?")
+        .bind(&key)
+        .bind(&bucket)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| AppError::not_found("Key not found"))?;
+    if req.enabled && !found.enabled {
+        crate::tokens::may_hand_out(&current, published.creator_id)?;
+    }
     sqlx::query("UPDATE s3_keys SET enabled = ? WHERE id = ? AND bucket_id = ?").bind(req.enabled).bind(key).bind(bucket).execute(&mut *tx).await?;
+    if req.enabled != found.enabled {
+        let detail = if req.enabled { format!("Turned S3 key {} on", found.description) } else { format!("Stopped S3 key {}", found.description) };
+        record(&mut tx, &current, &published, &detail).await?;
+    }
     tx.commit().await?;
     super::multipart::cleanup_later(st.clone());
     Ok(Json(serde_json::json!({"ok": true})))
@@ -241,8 +296,14 @@ pub async fn revoke_key(
 pub async fn delete_key(State(st): State<AppState>, user: User, Path((bucket, key)): Path<(String, String)>) -> AppResult<Json<serde_json::Value>> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
-    managed(&st, &mut tx, &user, &bucket).await?;
+    let published = managed(&st, &mut tx, &user, &bucket).await?;
+    let current = crate::auth::current_user(&mut tx, &user).await?;
+    let found: Option<(String,)> =
+        sqlx::query_as("SELECT description FROM s3_keys WHERE id = ? AND bucket_id = ?").bind(&key).bind(&bucket).fetch_optional(&mut *tx).await?;
     sqlx::query("DELETE FROM s3_keys WHERE id = ? AND bucket_id = ?").bind(key).bind(bucket).execute(&mut *tx).await?;
+    if let Some((description,)) = found {
+        record(&mut tx, &current, &published, &format!("Deleted S3 key {description}")).await?;
+    }
     tx.commit().await?;
     super::multipart::cleanup_later(st.clone());
     Ok(Json(serde_json::json!({"ok": true})))

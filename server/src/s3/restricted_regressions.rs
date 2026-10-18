@@ -31,15 +31,24 @@ async fn parent_bucket_hides_restrictions_and_only_explicit_child_publication_ca
     assert!(s.client.put_object().bucket("backups").key("HR/new.txt").body(ByteStream::from_static(b"must not appear")).send().await.is_err());
     assert!(s.client.copy_object().bucket("backups").key("minutes.txt").copy_source("backups/HR/payroll.txt").send().await.is_err());
     assert_eq!(&read(&s, "minutes.txt").await[..], b"public");
-    let Json(bucket) =
-        crate::s3::manage::create(State(s.env.st.clone()), s.admin.clone(), Json(crate::s3::manage::Publish { node_id: folder.id, name: "private-hr".into() }))
-            .await
-            .unwrap();
+    let Json(bucket) = crate::s3::manage::create(
+        State(s.env.st.clone()),
+        s.admin.clone(),
+        Json(crate::s3::manage::Publish { password: Some(crate::testutil::password().into()), code: None, node_id: folder.id, name: "private-hr".into() }),
+    )
+    .await
+    .unwrap();
     let Json(key) = crate::s3::manage::new_key(
         State(s.env.st.clone()),
         s.admin.clone(),
         Path(bucket.id),
-        Json(crate::s3::manage::NewKey { description: "Explicit HR scope".into(), writable: true, expires_at: None }),
+        Json(crate::s3::manage::NewKey {
+            password: Some(crate::testutil::password().into()),
+            code: None,
+            description: "Explicit HR scope".into(),
+            writable: true,
+            expires_at: None,
+        }),
     )
     .await
     .unwrap();

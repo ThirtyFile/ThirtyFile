@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
-import { signIn, makeFolder, unique } from "./helpers";
+import { signIn, makeFolder, PASSWORD, unique } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
@@ -29,12 +29,15 @@ test("administrators configure S3, publish from a folder menu and manage keys sh
   const dialog = page.getByRole("dialog", { name: "S3 buckets", exact: true });
   const bucket = `browser-${unique()}`;
   await dialog.getByLabel("Bucket name").fill(bucket);
+  // Making credentials asks who is acting
+  await dialog.getByLabel("Your current password").fill(PASSWORD);
   await dialog.getByRole("button", { name: "Publish", exact: true }).click();
   const card = dialog.getByRole("region", { name: bucket });
   await expect(card.getByRole("heading", { name: bucket, exact: true })).toBeVisible();
   await card.getByRole("button", { name: "New S3 key" }).click();
   const keyDialog = page.getByRole("dialog", { name: "New S3 key", exact: true });
   await keyDialog.getByLabel("Key description").fill("Browser contract key");
+  await keyDialog.getByLabel("Your current password").fill(PASSWORD);
   await keyDialog.getByRole("button", { name: "Create key" }).click();
   await expect(keyDialog.getByText("Save the Secret Key now. It is shown only once.")).toBeVisible();
   const access = await keyDialog.getByLabel("Access Key", { exact: true }).inputValue();

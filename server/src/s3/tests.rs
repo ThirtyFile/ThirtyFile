@@ -55,13 +55,24 @@ async fn server(folders: bool) -> Server {
     } else {
         folder
     };
-    let Json(bucket) =
-        super::manage::create(State(env.st.clone()), admin.clone(), Json(super::manage::Publish { node_id: folder, name: "backups".into() })).await.unwrap();
+    let Json(bucket) = super::manage::create(
+        State(env.st.clone()),
+        admin.clone(),
+        Json(super::manage::Publish { password: Some(crate::testutil::password().into()), code: None, node_id: folder, name: "backups".into() }),
+    )
+    .await
+    .unwrap();
     let Json(key) = super::manage::new_key(
         State(env.st.clone()),
         admin.clone(),
         Path(bucket.id.clone()),
-        Json(super::manage::NewKey { description: "Contract client".into(), writable: true, expires_at: None }),
+        Json(super::manage::NewKey {
+            password: Some(crate::testutil::password().into()),
+            code: None,
+            description: "Contract client".into(),
+            writable: true,
+            expires_at: None,
+        }),
     )
     .await
     .unwrap();
@@ -251,7 +262,13 @@ async fn presigned_get_put_readonly_revoked_and_expired_keys_are_enforced_for_ad
         State(s.env.st.clone()),
         s.admin.clone(),
         Path(s.bucket.clone()),
-        Json(super::manage::NewKey { description: "Read client".into(), writable: false, expires_at: None }),
+        Json(super::manage::NewKey {
+            password: Some(crate::testutil::password().into()),
+            code: None,
+            description: "Read client".into(),
+            writable: false,
+            expires_at: None,
+        }),
     )
     .await
     .unwrap();
@@ -308,7 +325,13 @@ async fn multipart_parts_are_streamed_replaced_bound_to_the_key_completed_and_cl
         State(s.env.st.clone()),
         s.admin.clone(),
         Path(s.bucket.clone()),
-        Json(super::manage::NewKey { description: "Other client".into(), writable: true, expires_at: None }),
+        Json(super::manage::NewKey {
+            password: Some(crate::testutil::password().into()),
+            code: None,
+            description: "Other client".into(),
+            writable: true,
+            expires_at: None,
+        }),
     )
     .await
     .unwrap();
@@ -611,7 +634,12 @@ async fn team_admin_scope_and_manager_revocation_do_not_grant_unrelated_access()
     let Json(bucket) = super::manage::create(
         State(s.env.st.clone()),
         manager.clone(),
-        Json(super::manage::Publish { node_id: identity.root.id.clone(), name: "managed-team".into() }),
+        Json(super::manage::Publish {
+            password: Some(crate::testutil::password().into()),
+            code: None,
+            node_id: identity.root.id.clone(),
+            name: "managed-team".into(),
+        }),
     )
     .await
     .unwrap();
@@ -619,7 +647,13 @@ async fn team_admin_scope_and_manager_revocation_do_not_grant_unrelated_access()
         State(s.env.st.clone()),
         manager.clone(),
         Path(bucket.id),
-        Json(super::manage::NewKey { description: "Manager key".into(), writable: true, expires_at: None }),
+        Json(super::manage::NewKey {
+            password: Some(crate::testutil::password().into()),
+            code: None,
+            description: "Manager key".into(),
+            writable: true,
+            expires_at: None,
+        }),
     )
     .await
     .unwrap();
@@ -647,9 +681,13 @@ async fn defaults_publish_personal_manager_links_trash_and_credential_rotation_a
     assert!(!super::manage::bucket_name("-bad"));
     assert!(super::manage::bucket_name("backup-2026"));
     assert!(
-        super::manage::create(State(env.st.clone()), admin.clone(), Json(super::manage::Publish { node_id: admin.root().into(), name: "personal".into() }))
-            .await
-            .is_err()
+        super::manage::create(
+            State(env.st.clone()),
+            admin.clone(),
+            Json(super::manage::Publish { password: Some(crate::testutil::password().into()), code: None, node_id: admin.root().into(), name: "personal".into() })
+        )
+        .await
+        .is_err()
     );
     let s = server(false).await;
     let identity = super::credentials::identity(&s.env.st, &s.key.key.access_key, false).await.unwrap();
@@ -677,7 +715,13 @@ async fn key_expiry_uses_the_existing_access_notice_once_and_skips_disabled_or_d
             State(s.env.st.clone()),
             s.admin.clone(),
             Path(s.bucket.clone()),
-            Json(super::manage::NewKey { description: description.into(), writable: false, expires_at: Some(expiry) }),
+            Json(super::manage::NewKey {
+                password: Some(crate::testutil::password().into()),
+                code: None,
+                description: description.into(),
+                writable: false,
+                expires_at: Some(expiry),
+            }),
         )
         .await
         .unwrap();
@@ -701,4 +745,68 @@ async fn key_expiry_uses_the_existing_access_notice_once_and_skips_disabled_or_d
     assert_eq!(data["expires_at"], expiry);
     assert!(!notices[0].2.contains(&s.key.secret_key));
     assert!(!notices[0].2.contains(&s.key.key.access_key));
+}
+
+#[tokio::test]
+async fn only_the_publisher_or_an_administrator_hands_out_keys_and_every_change_is_logged() {
+    use axum::http::StatusCode as Status;
+    let env = crate::testutil::env().await;
+    let admin = env.admin().await;
+    let manager = env.user("folder-manager", true).await;
+    let st = || State(env.st.clone());
+    crate::db::set_setting(
+        &mut env.st.db.acquire().await.unwrap(),
+        "s3",
+        &serde_json::json!({"enabled":true,"hostname":"s3.example.com","region":"us-east-1","managers_publish":true}).to_string(),
+    )
+    .await
+    .unwrap();
+    let folder = env.folder(&admin, &env.st.shared_root().unwrap(), "Exports").await;
+    env.grant(&folder, &manager, "manager").await;
+    let password = || Some(crate::testutil::password().to_string());
+    let key = |description: &str, password: Option<String>| {
+        Json(super::manage::NewKey { password, code: None, description: description.into(), writable: true, expires_at: None })
+    };
+
+    // Making credentials asks who is acting
+    let publish = |who: &crate::auth::User, name: &str, password: Option<String>| {
+        super::manage::create(st(), who.clone(), Json(super::manage::Publish { password, code: None, node_id: folder.clone(), name: name.into() }))
+    };
+    assert!(publish(&admin, "exports", None).await.is_err());
+    let Json(bucket) = publish(&admin, "exports", password()).await.unwrap();
+    assert!(super::manage::new_key(st(), admin.clone(), Path(bucket.id.clone()), key("Backup", None)).await.is_err());
+    let Json(made) = super::manage::new_key(st(), admin.clone(), Path(bucket.id.clone()), key("Backup", password())).await.unwrap();
+
+    // A manager of the folder can't give out credentials that act as the administrator, nor open things up again
+    let refused = |r: crate::error::AppResult<_>| matches!(r, Err(e) if e.status == Status::FORBIDDEN);
+    assert!(refused(super::manage::new_key(st(), manager.clone(), Path(bucket.id.clone()), key("Mine", password())).await.map(|_| ())));
+    let set_key = |who: &crate::auth::User, on: bool| {
+        super::manage::revoke_key(st(), who.clone(), Path((bucket.id.clone(), made.key.id.clone())), Json(super::manage::Enabled { enabled: on }))
+    };
+    let set_bucket =
+        |who: &crate::auth::User, on: bool| super::manage::update(st(), who.clone(), Path(bucket.id.clone()), Json(super::manage::Enabled { enabled: on }));
+    let _ = set_key(&manager, false).await.unwrap();
+    assert!(refused(set_key(&manager, true).await.map(|_| ())));
+    let _ = set_key(&admin, true).await.unwrap();
+    let _ = set_bucket(&manager, false).await.unwrap();
+    assert!(refused(set_bucket(&manager, true).await.map(|_| ())));
+    let _ = set_bucket(&admin, true).await.unwrap();
+
+    // Their own bucket is theirs to hand out
+    let Json(own) = publish(&manager, "manager-exports", password()).await.unwrap();
+    let _ = super::manage::new_key(st(), manager.clone(), Path(own.id.clone()), key("Mine", password())).await.unwrap();
+
+    let details: Vec<(String,)> = sqlx::query_as("SELECT detail FROM activity WHERE action = 'settings' ORDER BY id").fetch_all(&env.st.db).await.unwrap();
+    let details: Vec<&str> = details.iter().map(|(d,)| d.as_str()).collect();
+    for expected in [
+        "Published S3 bucket exports",
+        "Made S3 key Backup to read and change bucket exports",
+        "Stopped S3 key Backup",
+        "Turned S3 key Backup on",
+        "Stopped S3 bucket exports",
+        "Turned S3 bucket exports on",
+        "Published S3 bucket manager-exports",
+    ] {
+        assert!(details.contains(&expected), "{expected} not in {details:?}");
+    }
 }

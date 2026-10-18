@@ -377,3 +377,49 @@ async fn ftps_preallocated_socket_cannot_downgrade_then_store_plaintext() {
     server.finish().await;
     env.st.db.close().await;
 }
+
+#[tokio::test]
+async fn only_the_publisher_or_an_administrator_rotates_or_opens_up_a_receive_folder() {
+    use axum::{
+        Json,
+        extract::{Path, State},
+        http::StatusCode,
+    };
+    let env = crate::testutil::env().await;
+    let admin = env.admin().await;
+    let manager = env.user("folder-manager", true).await;
+    let st = || State(env.st.clone());
+    crate::db::set_setting(
+        &mut env.st.db.acquire().await.unwrap(),
+        "ftp",
+        &serde_json::json!({"enabled":true,"managers_publish":true,"allow_private_plaintext":false}).to_string(),
+    )
+    .await
+    .unwrap();
+    let folder = env.folder(&admin, &env.st.shared_root().unwrap(), "Scans").await;
+    env.grant(&folder, &manager, "manager").await;
+    let password = || Some(crate::testutil::password().to_string());
+    let change = |enabled: bool, read: bool| manage::Change { name: "Office printer".into(), enabled, allow_list: false, allow_read: read, expires_at: None };
+    let Json(created) =
+        manage::create(st(), admin.clone(), Json(manage::Create { node_id: folder.clone(), change: change(true, false), password: password(), code: None }))
+            .await
+            .unwrap();
+    let id = created.folder.id.clone();
+    let edit = |who: &crate::auth::User, enabled: bool, read: bool| {
+        manage::update(st(), who.clone(), Path(id.clone()), Json(manage::Edit { change: change(enabled, read), password: password(), code: None }))
+    };
+    let refused = |r: crate::error::AppResult<_>| matches!(r, Err(e) if e.status == StatusCode::FORBIDDEN);
+
+    // A manager can narrow it or turn it off, but not let the device read, turn it on again, or take its password
+    assert!(refused(edit(&manager, true, true).await.map(|_| ())));
+    let _ = edit(&manager, false, false).await.unwrap();
+    assert!(refused(edit(&manager, true, false).await.map(|_| ())));
+    let rotate = |who: &crate::auth::User| manage::rotate(st(), who.clone(), Path(id.clone()), Json(manage::Confirm { password: password(), code: None }));
+    assert!(refused(rotate(&manager).await.map(|_| ())));
+    let _ = edit(&admin, true, true).await.unwrap();
+    let _ = rotate(&admin).await.unwrap();
+
+    // The entries name the receive folder
+    let (named,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM activity WHERE detail LIKE '%Office printer%'").fetch_one(&env.st.db).await.unwrap();
+    assert!(named >= 3, "{named}");
+}
