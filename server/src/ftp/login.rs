@@ -105,6 +105,9 @@ impl Authenticator for Login {
             crate::logs::record_login_via(&self.state, None, username, "ftp_failed", "ftp", &self.peer.to_string(), &axum::http::HeaderMap::new());
             return Err(denied());
         };
+        // The right password: what refuses it from here on (its creator no longer allowed, five sessions already) is no
+        // guess, and doesn't count against the address
+        auth::attempt_succeeded(&self.state, &key);
         let mut conn = self.state.db.acquire().await.map_err(|_| denied())?;
         let mut actor = auth::user_by_id(&self.state, &mut conn, row.creator_id).await.map_err(|_| denied())?.ok_or_else(denied)?;
         actor.protocol_root = Some(row.node_id.clone());
@@ -125,14 +128,16 @@ impl Authenticator for Login {
         *self.user.lock() = Some(Device { actor, username: row.username, _permit: Arc::new(permit) });
         self.authenticated.store(true, Ordering::Release);
         self.signed_in.notify_one();
-        sqlx::query("UPDATE ftp_receive_folders SET last_used_at=? WHERE id=? AND generation=?")
+        // Bookkeeping, which never fails a sign-in
+        if let Err(e) = sqlx::query("UPDATE ftp_receive_folders SET last_used_at=? WHERE id=? AND generation=?")
             .bind(crate::util::now())
             .bind(row.id)
             .bind(row.generation)
             .execute(&self.state.db)
             .await
-            .map_err(|_| denied())?;
-        auth::attempt_succeeded(&self.state, &key);
+        {
+            tracing::debug!("Couldn't note when an FTP receive folder was used: {e}");
+        }
         Ok(principal)
     }
 }

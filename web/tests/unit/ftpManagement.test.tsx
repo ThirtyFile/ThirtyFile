@@ -36,6 +36,7 @@ const folder: FtpFolder = {
   enabled: true,
   allow_list: false,
   allow_read: false,
+  replace_existing: true,
   expires_at: null,
   created_at: 1,
   last_used_at: null,
@@ -174,7 +175,7 @@ describe("FTP receive folder management", () => {
     await settled(() =>
       expect(api.createFtpFolder).toHaveBeenCalledWith(
         "incoming",
-        { name: "Office scanner", enabled: true, allow_list: false, allow_read: false, expires_at: null },
+        { name: "Office scanner", enabled: true, allow_list: false, allow_read: false, replace_existing: true, expires_at: null },
         { password: "current-password", code: "123456" },
       ),
     );

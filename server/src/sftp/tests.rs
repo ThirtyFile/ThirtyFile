@@ -347,7 +347,10 @@ async fn exclusive_create_and_staged_size_changes_enforce_conflicts_quota_and_mo
     let mut file = sftp.open_with_flags("/My files/a.txt", OpenFlags::WRITE).await.unwrap();
     file.set_metadata(FileAttributes { size: Some(8), ..Default::default() }).await.unwrap();
     file.set_metadata(FileAttributes { size: Some(2), ..Default::default() }).await.unwrap();
-    assert!(file.set_metadata(FileAttributes { permissions: Some(0o600), ..Default::default() }).await.is_err());
+    // Permissions are accepted and left as they are (scp -p sets them)
+    file.set_metadata(FileAttributes { permissions: Some(0o600), ..Default::default() }).await.unwrap();
+    // Owners can't be kept
+    assert!(file.set_metadata(FileAttributes { uid: Some(0), ..Default::default() }).await.is_err());
     file.shutdown().await.unwrap();
     assert_eq!(sftp.read("/My files/a.txt").await.unwrap(), b"on");
     let mut file = sftp.open_with_flags("/My files/a.txt", OpenFlags::WRITE).await.unwrap();
@@ -543,4 +546,47 @@ async fn unknown_ssh_keys_use_none_of_the_sign_in_limit_and_an_address_cant_hold
     idle.clear();
     // Once they're gone, the address connects again
     let (_ssh, _sftp) = client(&env, &amy, &token(&env, &amy, "write").await).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn file_times_a_client_sets_are_kept_and_permissions_are_accepted() {
+    use russh_sftp::protocol::FileAttributes;
+    let env = testutil::env().await;
+    let amy = env.user("amy", true).await;
+    let token = token(&env, &amy, "write").await;
+    let _server = on(&env).await;
+    let (_ssh, sftp) = client(&env, &amy, &token).await;
+    let path = "/My files/photo.jpg";
+    // WinSCP sets the time on the file it writes, before closing it
+    let mut file = sftp.create(path).await.unwrap();
+    file.write_all(b"pixels").await.unwrap();
+    file.set_metadata(FileAttributes { mtime: Some(1_600_000_000), atime: Some(1_600_000_000), ..Default::default() }).await.unwrap();
+    file.shutdown().await.unwrap();
+    assert_eq!(sftp.metadata(path).await.unwrap().mtime, Some(1_600_000_000));
+    // rclone sets it once the file is there; scp -p sets permissions as well, which are accepted and left as they are
+    sftp.set_metadata(path, FileAttributes { mtime: Some(1_500_000_000), permissions: Some(0o100600), ..Default::default() }).await.unwrap();
+    let after = sftp.metadata(path).await.unwrap();
+    assert_eq!((after.mtime, after.permissions), (Some(1_500_000_000), Some(0o100644)));
+    // New content without a time: when it changed in ThirtyFile
+    let mut file = sftp.create(path).await.unwrap();
+    file.write_all(b"edited").await.unwrap();
+    file.shutdown().await.unwrap();
+    assert!(sftp.metadata(path).await.unwrap().mtime.unwrap() > 1_700_000_000);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_transfer_checks_the_account_every_few_seconds_not_for_every_packet() {
+    let env = testutil::env().await;
+    let user = env.user("packet-counter", true).await;
+    let token = token(&env, &user, "write").await;
+    let _server = on(&env).await;
+    let (_ssh, sftp) = client(&env, &user, &token).await;
+    let checks = || super::CHECKS.lock().get("packet-counter").copied().unwrap_or(0);
+    let before = checks();
+    let mut file = sftp.create("/My files/big.bin").await.unwrap();
+    file.write_all(&vec![7u8; 4 << 20]).await.unwrap();
+    file.shutdown().await.unwrap();
+    assert_eq!(sftp.read("/My files/big.bin").await.unwrap().len(), 4 << 20);
+    let made = checks() - before;
+    assert!(made < 8, "the account was checked {made} times for one file");
 }

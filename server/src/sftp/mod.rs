@@ -54,6 +54,10 @@ impl Drop for Permit {
     }
 }
 
+/// Tests: how many times each account was checked in full (`Login::user`)
+#[cfg(test)]
+pub(crate) static CHECKS: crate::sync::Mutex<std::collections::BTreeMap<String, usize>> = crate::sync::Mutex::new(std::collections::BTreeMap::new());
+
 #[derive(Clone)]
 enum Login {
     Password { username: String, token: String },
@@ -62,6 +66,13 @@ enum Login {
 
 impl Login {
     async fn user(&self, st: &AppState, peer: SocketAddr, write: bool) -> AppResult<User> {
+        #[cfg(test)]
+        {
+            let name = match self {
+                Self::Password { username, .. } | Self::Key { username, .. } => username.clone(),
+            };
+            *CHECKS.lock().entry(name).or_default() += 1;
+        }
         if !settings::flag(st, "sftp_enabled").await? {
             return Err(AppError::unauthorized());
         }

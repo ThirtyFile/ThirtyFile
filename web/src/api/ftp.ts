@@ -18,6 +18,8 @@ export interface FtpChange {
   enabled: boolean;
   allow_list: boolean;
   allow_read: boolean;
+  /** An upload replaces a file of the same name (its earlier version kept); else it gets a number */
+  replace_existing: boolean;
   expires_at: number | null;
 }
 export interface FtpFolder extends FtpChange {

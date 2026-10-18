@@ -171,8 +171,9 @@ impl StorageBackend<Device> for Files {
             use tokio::io::AsyncWriteExt;
             let result = async {
                 let mut offset = 0;
+                let mut recheck = Recheck::new();
                 loop {
-                    super::credentials::access(&st, &actor, false, true).await?;
+                    recheck.due(&st, &actor, false, true).await?;
                     let bytes = crate::access::read_at(&st, &actor, &node.id, offset, 256 * 1024).await?;
                     if bytes.is_empty() {
                         return Ok::<(), AppError>(());
@@ -186,7 +187,7 @@ impl StorageBackend<Device> for Files {
                         tokio::select! {
                             result = &mut write => { result?; break; }
                             _ = &mut deadline => return Err(AppError::bad_request("FTP download interrupted")),
-                            _ = tokio::time::sleep(Duration::from_millis(200)) => { super::credentials::access(&st,&actor,false,true).await?; }
+                            _ = tokio::time::sleep(Duration::from_millis(500)) => { recheck.due(&st, &actor, false, true).await?; }
                         }
                     }
                 }
@@ -214,10 +215,28 @@ impl StorageBackend<Device> for Files {
         let _transfer = Transfer(transfer_alive.clone());
         actor.ftp_credential.as_mut().ok_or_else(refused)?.transfer = Some(transfer_alive);
         let (parent, name) = self.parent(&actor, path.as_ref()).await.map_err(map)?;
-        let up = crate::access::upload_to(&self.0, &actor, &parent, name).await.map_err(map)?;
+        let mut up = crate::access::upload_to(&self.0, &actor, &parent, name).await.map_err(map)?;
+        // A receive folder that keeps both: a taken name gives the new file a number, and nothing there is replaced
+        let id = actor.ftp_credential.as_ref().map(|c| c.id.clone()).ok_or_else(refused)?;
+        let (replaces,): (bool,) =
+            sqlx::query_as("SELECT replace_existing FROM ftp_receive_folders WHERE id = ?").bind(&id).fetch_one(&self.0.db).await.map_err(|e| map(e.into()))?;
+        let expect = if up.existing.is_some() && !replaces {
+            let mut c = self.0.db.acquire().await.map_err(|e| map(e.into()))?;
+            up.name = if up.parent.in_folder_space() {
+                crate::fsops::free_name(&mut c, &up.parent, &up.name, false).await
+            } else {
+                crate::tree::unique_name(&mut c, &up.parent.id, &up.name, false).await
+            }
+            .map_err(map)?;
+            up.existing = None;
+            crate::access::Expect::Absent
+        } else {
+            crate::access::Expect::Any
+        };
         let path = self.0.tmp_dir().join(format!("ftp-{}", crate::util::new_id()));
         let temporary = Temporary(path.clone());
-        let stream = futures_util::stream::unfold((input, actor.clone(), self.0.clone()), |(mut input, actor, st)| async move {
+        let state = (input, actor.clone(), self.0.clone(), Recheck::new());
+        let stream = futures_util::stream::unfold(state, |(mut input, actor, st, mut recheck)| async move {
             let mut bytes = vec![0; 64 * 1024];
             let result = tokio::time::timeout(Duration::from_secs(30), async {
                 let read = input.read(&mut bytes);
@@ -225,8 +244,8 @@ impl StorageBackend<Device> for Files {
                 loop {
                     tokio::select! {
                         result = &mut read => break result,
-                        _ = tokio::time::sleep(Duration::from_millis(200)) => {
-                            if super::credentials::access(&st,&actor,false,false).await.is_err() {
+                        _ = tokio::time::sleep(Duration::from_millis(500)) => {
+                            if recheck.due(&st, &actor, false, false).await.is_err() {
                                 break Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied,"FTP receive folder is no longer active"));
                             }
                         }
@@ -237,14 +256,14 @@ impl StorageBackend<Device> for Files {
             match result {
                 Ok(Ok(0)) => None,
                 Ok(Ok(n)) => {
-                    let alive = super::credentials::access(&st, &actor, false, false).await;
+                    let alive = recheck.due(&st, &actor, false, false).await;
                     let item = alive.map(|_| {
                         bytes.truncate(n);
                         bytes::Bytes::from(bytes)
                     });
-                    Some((item, (input, actor, st)))
+                    Some((item, (input, actor, st, recheck)))
                 }
-                _ => Some((Err(AppError::bad_request("FTP upload interrupted")), (input, actor, st))),
+                _ => Some((Err(AppError::bad_request("FTP upload interrupted")), (input, actor, st, recheck))),
             }
         });
         let replaced = up.existing.as_ref().map_or(0, |n| n.size);
@@ -262,7 +281,7 @@ impl StorageBackend<Device> for Files {
                 up.parent,
                 up.name,
                 crate::content::Received { path, size, hash, md5: None },
-                crate::access::ScopedWrite { root, mtime: None, expect: Default::default() },
+                crate::access::ScopedWrite { root, mtime: None, expect },
             )
             .await;
             drop(temporary);
@@ -292,6 +311,28 @@ impl StorageBackend<Device> for Files {
         let node = self.resolve(&actor, path.as_ref(), Need::Read).await.map_err(map)?;
         if !node.is_folder() {
             return Err(refused());
+        }
+        Ok(())
+    }
+}
+
+/// How often a transfer checks its receive folder again (`credentials::access`): a folder stopped, deleted or changed
+/// meanwhile ends the transfer within that, without ten queries for every chunk
+const RECHECK: Duration = Duration::from_secs(2);
+
+/// When a transfer last checked its receive folder
+struct Recheck(tokio::time::Instant);
+
+impl Recheck {
+    fn new() -> Self {
+        Self(tokio::time::Instant::now())
+    }
+
+    /// Checks again when `RECHECK` has passed since the last time
+    async fn due(&mut self, st: &crate::state::AppState, actor: &crate::auth::User, listing: bool, reading: bool) -> crate::error::AppResult<()> {
+        if self.0.elapsed() >= RECHECK {
+            super::credentials::access(st, actor, listing, reading).await?;
+            self.0 = tokio::time::Instant::now();
         }
         Ok(())
     }
