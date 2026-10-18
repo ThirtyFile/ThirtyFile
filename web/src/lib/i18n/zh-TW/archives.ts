@@ -18,6 +18,7 @@ export default {
   "Moving…": "正在移動…",
   "Copying…": "正在複製…",
   "Deleting permanently…": "正在永久刪除…",
+  "Restoring…": "正在還原…",
   "Emptying the trash…": "正在清空垃圾桶…",
   "Checking the folder for changes…": "正在檢查資料夾的變更…",
   "Deleting the user…": "正在刪除使用者…",

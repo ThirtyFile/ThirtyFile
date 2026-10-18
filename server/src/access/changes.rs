@@ -42,9 +42,12 @@ pub async fn trash(st: &AppState, user: &User, id: &str) -> AppResult<()> {
     nodes::trash(State(st.clone()), user.clone(), json_req(json!({ "ids": [id] }))?).await.map(|_| ())
 }
 
-/// Takes an item back out of the trash, where it was
+/// Takes an item back out of the trash, where it was: the call waits for all of it (a folder merged into one of its
+/// name included)
 pub async fn restore(st: &AppState, user: &User, id: &str) -> AppResult<()> {
-    nodes::restore(State(st.clone()), user.clone(), json_req(json!({ "ids": [id] }))?).await.map(|_| ())
+    let Json(req) = json_req(json!({ "ids": [id] }))?;
+    let merging = nodes::restore_items(st, user, &req).await?;
+    nodes::finish_merges(st, user, merging, &Default::default()).await
 }
 
 /// Moves an item into `dest` as `name`: a rename, a move, or both (in the order the names allow). When the second step

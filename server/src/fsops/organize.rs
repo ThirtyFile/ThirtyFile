@@ -178,6 +178,58 @@ pub async fn restore(conn: &mut SqliteConnection, locks: &SpaceLocks, node: &Nod
     Ok(())
 }
 
+/// Moves what the folder `from` (in the trash) still holds on disk into `dest`, each item under a name free there:
+/// what the index doesn't have, such as names scans skip, links and other special files, and names that aren't text.
+/// A folder in the trash merged into another (nodes/trash.rs) would otherwise leave it in its trash folder, removed
+/// with it later. Should the change fail, it is put back (a name that isn't text stays in `dest`, as found there).
+pub async fn move_unindexed(conn: &mut SqliteConnection, locks: &SpaceLocks, from: &Node, dest: &Node) -> AppResult<()> {
+    let dir = from.clone();
+    let found: Vec<(std::ffi::OsString, bool)> = on_disk(from.drive(), disk_wait(), move || {
+        let dir = match abs(&dir).and_then(|p| p.dir().map_err(gone_or_disk_error)) {
+            Ok(dir) => dir,
+            // Gone from the disk already: nothing is left in it
+            Err(e) if e.status == StatusCode::NOT_FOUND => return Ok(Vec::new()),
+            Err(e) => return Err(e),
+        };
+        let read = std::fs::read_dir(dir.as_path()).map_err(disk_error)?;
+        Ok(read.flatten().map(|e| (e.file_name(), e.file_type().is_ok_and(|t| t.is_dir()))).collect())
+    })
+    .await?;
+    for (name, is_dir) in found {
+        let free = match name.to_str() {
+            Some(text) => Some(free_name(conn, dest, text, is_dir).await?),
+            None => None,
+        };
+        let (src, dst) = (from.clone(), dest.clone());
+        let moved = on_disk(from.drive(), disk_wait(), move || {
+            let (from_dir, to_dir) = (abs(&src)?.dir().map_err(gone_or_disk_error)?, abs(&dst)?.dir().map_err(gone_or_disk_error)?);
+            if let (Some(text), Some(free)) = (name.to_str(), free) {
+                let (was, now) = (from_dir.join(text).map_err(disk_error)?, to_dir.join(&free).map_err(disk_error)?);
+                rename_new(was.as_path(), now.as_path()).map_err(disk_error)?;
+                return Ok(Some((now, was)));
+            }
+            // A name that isn't text: kept, or with a number at its end, whichever is free
+            for n in 0..10_000u32 {
+                let mut to = name.clone();
+                if n > 0 {
+                    to.push(format!(" ({n})"));
+                }
+                match rename_new(&from_dir.as_path().join(&name), &to_dir.as_path().join(&to)) {
+                    Ok(()) => return Ok(None),
+                    Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+                    Err(e) => return Err(disk_error(e)),
+                }
+            }
+            Err(AppError::conflict("Too many items with the same name"))
+        })
+        .await?;
+        if let Some((now, was)) = moved {
+            locks.note(now, was, None);
+        }
+    }
+    Ok(())
+}
+
 /// The folder holding a trashed item of a folder space, removed from disk when the item is deleted for good
 pub fn trash_folder(n: &Node) -> Option<crate::folders::Below> {
     let mut parts = n.fs_path.as_deref()?.split('/');

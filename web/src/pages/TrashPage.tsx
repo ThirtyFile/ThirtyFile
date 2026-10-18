@@ -23,7 +23,7 @@ import { FileList } from "@/components/FileList";
 import { Frame, ToolButton } from "@/components/Frame";
 import { useMe } from "@/lib/session";
 import { locale, t } from "@/lib/i18n";
-import { followJob } from "@/lib/jobs";
+import { followJob, waitForJob } from "@/lib/jobs";
 import { useAllPages } from "@/lib/pages";
 import { refreshFiles, type FileChange } from "@/lib/queries";
 import { trashHint, errorMessage, formatList } from "@/lib/utils";
@@ -61,7 +61,8 @@ export function TrashPage() {
       // Every item skipped: nothing was restored, and the selection stays
       if (!sent.length) return void toast.info(t("Nothing was restored: every item was skipped"));
       try {
-        await api.restore(sent, resolutions);
+        // A folder merged into one of its name goes on as a task, its progress shown at the bottom
+        await waitForJob(await api.restore(sent, resolutions));
       } finally {
         // Also what was restored before it failed
         void restored(sent);

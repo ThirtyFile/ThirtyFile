@@ -54,7 +54,8 @@ export const filesApi = {
   /** With mine, only the items the person deleted */
   trashPage: (limit: number, after?: string, mine?: boolean, signal?: AbortSignal) =>
     get<CursorPage<Located>>(`/trash${qs({ limit: String(limit), after, mine: mine ? "true" : undefined })}`, signal).then((p) => ({ ...p, items: p.items.map(localizeLocated) })),
-  restore: (ids: string[], resolutions?: Record<string, Resolution>) => post("/trash/restore", { ids, resolutions }),
+  /** A folder restored where a folder has its name now is merged into it: a task the page follows when it holds many items */
+  restore: (ids: string[], resolutions?: Record<string, Resolution>) => post<Job>("/trash/restore", { ids, resolutions }),
   /** Deleting for good and emptying the trash answer with a task (see lib/jobs) */
   deleteForever: (ids: string[]) => post<Job>("/trash/delete", { ids }),
   emptyTrash: () => post<Job>("/trash/empty"),

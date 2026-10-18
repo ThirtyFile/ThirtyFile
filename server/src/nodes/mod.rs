@@ -1525,6 +1525,171 @@ mod tests {
         assert_eq!((r.added, r.changed, r.removed), (0, 0, 0), "the index agrees with the disk: {r:?}");
     }
 
+    /// Where the folder space `drive` keeps the item `id` below its folder
+    async fn path_of(env: &testutil::TestEnv, id: &str) -> String {
+        let (path,): (String,) = sqlx::query_as("SELECT fs_path FROM nodes WHERE id = ?").bind(id).fetch_one(&env.st.db).await.unwrap();
+        path
+    }
+
+    #[tokio::test]
+    async fn a_merge_in_a_folder_space_keeps_what_only_the_disk_has() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        let admin = env.admin().await;
+        let st = || State(env.st.clone());
+        // In the folder deleted: files, what scans skip (a download not finished, an open document's lock file, the
+        // folder's settings in Windows), and a file whose name the folder in its place will have on disk only
+        for (name, body) in [("a.txt", "old a"), ("late.txt", "old late"), ("big.iso.part", "half"), ("~$Report.docx", "lock"), ("desktop.ini", "old ini")] {
+            testutil::write_old(&space.dir.join("D").join(name), body.as_bytes());
+        }
+        testutil::write_old(&space.dir.join("E/a.txt"), b"old a");
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        let (old, old_e) = (env.node_at(&space.drive, "D").await.unwrap().0, env.node_at(&space.drive, "E").await.unwrap().0);
+        let _ = trash(st(), admin.clone(), ids(&[&old, &old_e])).await.unwrap();
+        let in_trash = space.dir.join(path_of(&env, &old).await);
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("a.txt", in_trash.join("link")).unwrap();
+        for (name, body) in [("D/a.txt", "new a"), ("D/desktop.ini", "new ini"), ("E/a.txt", "new a")] {
+            testutil::write_old(&space.dir.join(name), body.as_bytes());
+        }
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        // Put there after the scan: the index doesn't have it yet
+        std::fs::write(space.dir.join("D/late.txt"), b"new late").unwrap();
+
+        // Keep both: what is on disk only comes along, numbered where its name is taken
+        let _ = restore(st(), admin.clone(), resolved(&[&old], None, Resolution::Keep)).await.unwrap();
+        tree::changes::settled(&env.st).await;
+        let read = |rel: &str| std::fs::read_to_string(space.dir.join(rel)).unwrap();
+        assert_eq!((read("D/a.txt"), read("D/a (1).txt")), ("new a".into(), "old a".into()));
+        assert_eq!((read("D/late.txt"), read("D/late (1).txt")), ("new late".into(), "old late".into()));
+        assert_eq!((read("D/big.iso.part"), read("D/~$Report.docx")), ("half".into(), "lock".into()));
+        assert_eq!((read("D/desktop.ini"), read("D/desktop (1).ini")), ("new ini".into(), "old ini".into()));
+        #[cfg(unix)]
+        assert!(std::fs::symlink_metadata(space.dir.join("D/link")).unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read_dir(&in_trash).map_or(0, |d| d.count()), 0, "nothing is left in the trash folder, which goes later");
+        assert!(tree::get_node(&mut env.st.db.acquire().await.unwrap(), &old).await.unwrap().is_none());
+
+        // Replace: the file from the trash takes the name, the one there goes to the trash
+        let _ = restore(st(), admin.clone(), resolved(&[&old_e], None, Resolution::Replace)).await.unwrap();
+        tree::changes::settled(&env.st).await;
+        assert_eq!(read("E/a.txt"), "old a");
+        let (replaced,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE name = 'a.txt' AND trash_root = 1").fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(replaced, 1);
+        let r = crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        assert_eq!((r.changed, r.removed), (0, 0), "the index agrees with the disk: {r:?}");
+    }
+
+    #[tokio::test]
+    async fn a_merge_goes_a_batch_at_a_time_and_a_batch_that_fails_leaves_those_before_it() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        let admin = env.admin().await;
+        let st = || State(env.st.clone());
+        let _small = tree::changes::small_batches(2);
+        for i in 0..6 {
+            testutil::write_old(&space.dir.join(format!("D/f{i}.txt")), b"old");
+        }
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        let old = env.node_at(&space.drive, "D").await.unwrap().0;
+        let _ = trash(st(), admin.clone(), ids(&[&old])).await.unwrap();
+        tree::changes::settled(&env.st).await;
+        testutil::write_old(&space.dir.join("D/keep.txt"), b"new");
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        let new = env.node_at(&space.drive, "D").await.unwrap().0;
+        // In the order the merge takes them; the fourth is gone from the disk meanwhile, so the second batch fails
+        let order: Vec<(String, String)> =
+            sqlx::query_as("SELECT id, name FROM nodes WHERE parent_id = ? ORDER BY rowid").bind(&old).fetch_all(&env.st.db).await.unwrap();
+        let gone = space.dir.join(path_of(&env, &order[3].0).await);
+        std::fs::rename(&gone, space.dir.join("aside.txt")).unwrap();
+
+        assert!(restore(st(), admin.clone(), ids(&[&old])).await.is_err());
+        tree::changes::settled(&env.st).await;
+        // The first batch is merged; the second is undone, its first file back in the trash folder
+        let mut merged = vec!["keep.txt".to_string(), order[0].1.clone(), order[1].1.clone()];
+        merged.sort();
+        assert_eq!(names_in(&env, &new).await, merged);
+        let left: Vec<(String,)> = sqlx::query_as("SELECT id FROM nodes WHERE parent_id = ? ORDER BY rowid").bind(&old).fetch_all(&env.st.db).await.unwrap();
+        assert_eq!(left.into_iter().map(|(id,)| id).collect::<Vec<_>>(), order[2..].iter().map(|(id, _)| id.clone()).collect::<Vec<_>>());
+        assert!(!space.dir.join("D").join(&order[2].1).exists());
+        assert!(space.dir.join(path_of(&env, &order[2].0).await).exists());
+        for name in &merged {
+            assert!(space.dir.join("D").join(name).exists(), "{name}");
+        }
+
+        // Back in place, restoring it again merges the rest
+        std::fs::rename(space.dir.join("aside.txt"), &gone).unwrap();
+        let _ = restore(st(), admin.clone(), ids(&[&old])).await.unwrap();
+        tree::changes::settled(&env.st).await;
+        assert_eq!(names_in(&env, &new).await.len(), 7);
+        assert!(tree::get_node(&mut env.st.db.acquire().await.unwrap(), &old).await.unwrap().is_none());
+        let r = crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        assert_eq!((r.added, r.changed, r.removed), (0, 0, 0), "the index agrees with the disk: {r:?}");
+    }
+
+    #[tokio::test]
+    async fn a_merge_brings_back_everything_and_what_people_put_on_its_folders() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let st = || State(env.st.clone());
+        let _small = tree::changes::small_batches(3);
+        let old = env.folder(&amy, amy.root(), "D").await;
+        for i in 0..8 {
+            env.file(&amy, &old, &format!("f{i}.txt")).await;
+        }
+        let sub_old = env.folder(&amy, &old, "Sub").await;
+        for i in 0..4 {
+            env.file(&amy, &sub_old, &format!("s{i}.txt")).await;
+        }
+        // A folder the other D doesn't have comes back whole, what is in it too
+        let only = env.folder(&amy, &old, "Only").await;
+        for i in 0..5 {
+            env.file(&amy, &only, &format!("o{i}.txt")).await;
+        }
+        // Amy's favorite and tag on Sub go to the Sub it is merged into; a folder with a share link keeps it, and comes
+        // back beside the folder of its name, with a number
+        sqlx::query("INSERT INTO favorites (user_id, node_id, created_at) VALUES (?, ?, 0)").bind(amy.id).bind(&sub_old).execute(&env.st.db).await.unwrap();
+        let (tag,): (i64,) = sqlx::query_as("INSERT INTO tags (owner_id, name, color, created_at) VALUES (?, 'Work', 'blue', 0) RETURNING id")
+            .bind(amy.id)
+            .fetch_one(&env.st.db)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO tagged (node_id, tag_id, owner_id, created_at) VALUES (?, ?, ?, 0)")
+            .bind(&sub_old)
+            .bind(tag)
+            .bind(amy.id)
+            .execute(&env.st.db)
+            .await
+            .unwrap();
+        let linked = env.folder(&amy, &old, "Linked").await;
+        sqlx::query("INSERT INTO shares (id, node_id, owner_id, created_at) VALUES ('link', ?, ?, 0)").bind(&linked).bind(amy.id).execute(&env.st.db).await.unwrap();
+        let _ = trash(st(), amy.clone(), ids(&[&old])).await.unwrap();
+        tree::changes::settled(&env.st).await;
+        let new = env.folder(&amy, amy.root(), "D").await;
+        let sub_new = env.folder(&amy, &new, "Sub").await;
+        let _ = env.folder(&amy, &new, "Linked").await;
+
+        let Json(job) = restore(st(), amy.clone(), ids(&[&old])).await.unwrap();
+        assert_eq!(job.kind, "restore");
+        tree::changes::settled(&env.st).await;
+        let mut names = names_in(&env, &new).await;
+        names.sort();
+        let mut want: Vec<String> = ["Linked", "Linked (1)", "Only", "Sub"].map(String::from).into();
+        want.extend((0..8).map(|i| format!("f{i}.txt")));
+        want.sort();
+        assert_eq!(names, want);
+        assert_eq!((names_in(&env, &only).await.len(), names_in(&env, &sub_new).await.len()), (5, 4));
+        assert_eq!(child(&env, &new, "Linked (1)").await, linked);
+        let (link,): (String,) = sqlx::query_as("SELECT node_id FROM shares WHERE id = 'link'").fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(link, linked);
+        let (fav,): (String,) = sqlx::query_as("SELECT node_id FROM favorites WHERE user_id = ?").bind(amy.id).fetch_one(&env.st.db).await.unwrap();
+        let (tagged,): (String,) = sqlx::query_as("SELECT node_id FROM tagged WHERE tag_id = ?").bind(tag).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!((fav, tagged), (sub_new.clone(), sub_new));
+        let mut c = env.st.db.acquire().await.unwrap();
+        assert!(tree::get_node(&mut c, &old).await.unwrap().is_none() && tree::get_node(&mut c, &sub_old).await.unwrap().is_none());
+        let (left,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE trashed_at IS NOT NULL OR trash_id IS NOT NULL").fetch_one(&mut *c).await.unwrap();
+        assert_eq!(left, 0);
+    }
+
     #[tokio::test]
     async fn a_contributors_folder_with_unindexed_files_on_disk_cant_be_moved_or_trashed() {
         let env = testutil::env().await;
