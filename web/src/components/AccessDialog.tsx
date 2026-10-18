@@ -208,7 +208,15 @@ function GrantRow(props: {
         </Button>
       )}
       {props.editable && props.onExpiry && (
-        <GrantExpiry key={`${g.id}-${g.expires_at}`} expiry={g.expires_at} guest={g.guest} maxDays={props.maxDays ?? 90} pending={!!props.pending} onSave={props.onExpiry} />
+        <GrantExpiry
+          key={`${g.id}-${g.expires_at}`}
+          expiry={g.expires_at}
+          guest={g.guest}
+          maxDays={props.maxDays ?? 90}
+          pending={!!props.pending}
+          name={principalName(g)}
+          onSave={props.onExpiry}
+        />
       )}
     </div>
   );
@@ -222,13 +230,13 @@ function GrantRow(props: {
 export function LinkMakersSetting({ driveId, value, canChoose }: { driveId: string; value: LinkMakers; canChoose: boolean }) {
   const qc = useQueryClient();
   const id = useId();
-  const stopping = useQuery({ queryKey: ["links-stopping", driveId], queryFn: () => api.linksStopping(driveId), enabled: canChoose });
+  const stopping = useQuery({ queryKey: keys.linksStopping(driveId), queryFn: () => api.linksStopping(driveId), enabled: canChoose });
   const [ask, question] = useConfirm();
   const save = useMutation({
     mutationFn: (makers: LinkMakers) => api.updateDrive(driveId, { link_makers: makers }),
     onSuccess: () => {
       // The space's links, and what the items in it offer (Create share link)
-      void invalidate(qc, ...affected.space(), ["node"], ["access"], ["links-stopping", driveId]);
+      void invalidate(qc, ...affected.space(), ["node"], ["access"], keys.linksStopping(driveId));
       toast.success(t("Saved"));
     },
     onError: (e) => toast.error(e.message),
@@ -285,13 +293,23 @@ export function AccessDialog({ nodeId, onClose }: { nodeId: string; onClose(): v
     void refreshFiles(qc, { access: [nodeId] });
   };
 
+  type GrantReq = { principal_type: PrincipalType; principal_id: number; role: Role; expires_at: number | null };
   const add = useMutation({
-    mutationFn: (req: { principal_type: PrincipalType; principal_id: number; role: Role; expires_at: number | null }) => api.grant(nodeId, req),
+    mutationFn: (req: GrantReq) => api.grant(nodeId, req),
     onSuccess: () => {
       setPrincipal(null);
       refresh();
       toast.success(t("Access updated"));
     },
+  });
+  // A row's role or end date: its own request, which leaves the person being added as they are
+  const change = useMutation({
+    mutationFn: (req: GrantReq) => api.grant(nodeId, req),
+    onSuccess: () => {
+      refresh();
+      toast.success(t("Access updated"));
+    },
+    onError: (e) => toast.error(e.message),
   });
   const remove = useMutation({
     mutationFn: (id: number) => api.revoke(id),
@@ -424,10 +442,10 @@ export function AccessDialog({ nodeId, onClose }: { nodeId: string; onClose(): v
                       g={g}
                       roles={g.guest ? guestRoles : roles}
                       editable={info.can_manage}
-                      onRole={(r) => add.mutate({ principal_type: g.principal_type, principal_id: g.principal_id, role: r, expires_at: g.expires_at })}
-                      onExpiry={(expiry) => add.mutate({ principal_type: g.principal_type, principal_id: g.principal_id, role: g.role, expires_at: expiry })}
+                      onRole={(r) => change.mutate({ principal_type: g.principal_type, principal_id: g.principal_id, role: r, expires_at: g.expires_at })}
+                      onExpiry={(expiry) => change.mutate({ principal_type: g.principal_type, principal_id: g.principal_id, role: g.role, expires_at: expiry })}
                       maxDays={maxDays}
-                      pending={add.isPending}
+                      pending={change.isPending}
                       onRemove={info.can_manage || canLeave ? () => confirmRemove(g, self) : undefined}
                       removeLabel={canLeave && !info.can_manage ? t("Leave") : t("Remove")}
                     />
@@ -477,7 +495,8 @@ function FolderRestriction({ nodeId, name, restricted, canChoose }: { nodeId: st
   const choose = async () => {
     const current = await preview.refetch();
     if (!current.data || current.error) return;
-    const names = current.data.inherited.map((g) => `${g.principal_type === "everyone" ? t("Everyone") : tServer(g.name)} (${ROLE_LABEL[g.role]})`).join(", ");
+    // Names as they are: a group called "Editor" isn't the role
+    const names = current.data.inherited.map((g) => `${g.principal_type === "everyone" ? t("Everyone") : g.name} (${ROLE_LABEL[g.role]})`).join(", ");
     const description = restricted
       ? t("Access from parent folders will apply again: {people}. Direct grants remain. Confirm who should have access before continuing.", { people: names || t("No inherited grants") })
       : t(

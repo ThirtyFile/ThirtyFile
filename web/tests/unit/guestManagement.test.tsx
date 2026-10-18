@@ -280,20 +280,28 @@ describe("access end dates", () => {
   test("guest access needs a future end date inside policy, including the exact maximum day", async () => {
     vi.spyOn(Date, "now").mockReturnValue(now);
     const save = vi.fn<(expiry: number | null) => void>();
-    await show(<GrantExpiry expiry={null} guest maxDays={7} pending={false} onSave={save} />);
-    const field = container.querySelector<HTMLInputElement>('input[aria-label="Access end date"]')!;
+    await show(<GrantExpiry expiry={null} guest maxDays={7} pending={false} name="Ann" onSave={save} />);
+    // Each row's field says whose end date it is
+    const field = container.querySelector<HTMLInputElement>('input[aria-label="Access end date for Ann"]')!;
     expect(field.required).toBe(true);
     expect(field.max).toBe(dateText(7));
     expect(button("Save end date").disabled).toBe(true);
-    for (const days of [-1, 0, 8]) {
-      await input('input[aria-label="Access end date"]', dateText(days));
+    for (const [days, why] of [
+      [-1, "Choose a time in the future"],
+      [0, "Choose a time in the future"],
+      [8, "Choose an end within 7 days"],
+    ] as const) {
+      await input('input[aria-label="Access end date for Ann"]', dateText(days));
       expect(field.getAttribute("aria-invalid")).toBe("true");
+      // Why it can't be saved, read with the field
+      expect(document.getElementById(field.getAttribute("aria-describedby")!)?.textContent).toBe(why);
       expect(button("Save end date").disabled).toBe(true);
       await click(button("Save end date"));
     }
     expect(save).not.toHaveBeenCalled();
-    await input('input[aria-label="Access end date"]', dateText(7));
+    await input('input[aria-label="Access end date for Ann"]', dateText(7));
     expect(field.getAttribute("aria-invalid")).toBe("false");
+    expect(field.hasAttribute("aria-describedby")).toBe(false);
     await click(button("Save end date"));
     expect(save).toHaveBeenCalledExactlyOnceWith(seconds(7));
   });
@@ -301,7 +309,7 @@ describe("access end dates", () => {
   test("standard access may remove its end date and is not limited by the guest policy", async () => {
     vi.spyOn(Date, "now").mockReturnValue(now);
     const save = vi.fn<(expiry: number | null) => void>();
-    await show(<GrantExpiry expiry={seconds(1)} guest={false} maxDays={7} pending={false} onSave={save} />);
+    await show(<GrantExpiry expiry={seconds(1)} guest={false} maxDays={7} pending={false} name="Ann" onSave={save} />);
     expect(button("Save end date").disabled).toBe(true);
     const field = container.querySelector<HTMLInputElement>("input")!;
     expect(field.required).toBe(false);
@@ -317,8 +325,23 @@ describe("access end dates", () => {
   test("a pending end-date update cannot submit a second change", async () => {
     vi.spyOn(Date, "now").mockReturnValue(now);
     const save = vi.fn<(expiry: number | null) => void>();
-    await show(<GrantExpiry expiry={seconds(1)} guest maxDays={7} pending onSave={save} />);
+    await show(<GrantExpiry expiry={seconds(1)} guest maxDays={7} pending name="Ann" onSave={save} />);
     await input("input", dateText(2));
+    expect(button("Save end date").disabled).toBe(true);
+    await click(button("Save end date"));
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  test("an end date shown as it was can't be saved again, and an end date already past isn't marked wrong until changed", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    const save = vi.fn<(expiry: number | null) => void>();
+    await show(<GrantExpiry expiry={seconds(-1)} guest maxDays={7} pending={false} name="Ann" onSave={save} />);
+    const field = container.querySelector<HTMLInputElement>("input")!;
+    expect(field.getAttribute("aria-invalid")).toBe("false");
+    expect(button("Save end date").disabled).toBe(true);
+    await input("input", dateText(2));
+    expect(button("Save end date").disabled).toBe(false);
+    await input("input", dateText(-1));
     expect(button("Save end date").disabled).toBe(true);
     await click(button("Save end date"));
     expect(save).not.toHaveBeenCalled();

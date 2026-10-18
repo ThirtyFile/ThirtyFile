@@ -35,6 +35,15 @@ test("an owner previews restricted access and a manager needs a direct folder gr
   expect((await changed).ok()).toBe(true);
   await expect(access.getByText("Restricted folder", { exact: true })).toBeVisible();
   await expect(access.getByRole("button", { name: "Restore inherited access", exact: true })).toBeEnabled();
+  // Marked where the folder is listed
+  await page.keyboard.press("Escape");
+  await expect(access).toBeHidden();
+  await expect(
+    page
+      .locator("[data-node-id]")
+      .filter({ has: page.getByText("HR", { exact: true }) })
+      .getByRole("img", { name: "Restricted folder", exact: true }),
+  ).toBeVisible();
 
   const memberContext = await browser.newContext({ baseURL, locale: "en-US" });
   const manager = await memberContext.newPage();

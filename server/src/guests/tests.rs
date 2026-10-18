@@ -101,6 +101,17 @@ async fn guest_end_dates_and_roles_apply_to_admins_and_group_membership_cannot_b
     for (role, expiry) in [("manager", Some(now() + 86400)), ("owner", Some(now() + 86400)), ("editor", None), ("viewer", Some(now() + 91 * 86400))] {
         assert!(grant(&env, &admin, &folder, "user", outside.id, role, expiry).await.is_err());
     }
+    // The longest access picked on a computer whose clock is a little ahead: taken, and stored as the longest access
+    let _ = grant(&env, &admin, &folder, "user", outside.id, "editor", Some(now() + 90 * 86400 + 600)).await.unwrap();
+    let (end,): (Option<i64>,) = sqlx::query_as("SELECT expires_at FROM grants WHERE node_id=? AND principal_type='user' AND principal_id=?")
+        .bind(&folder)
+        .bind(outside.id)
+        .fetch_one(&env.st.db)
+        .await
+        .unwrap();
+    assert!(end.is_some_and(|t| t <= now() + 90 * 86400 && t > now() + 90 * 86400 - 60), "{end:?}");
+    // More than that is still refused
+    assert!(grant(&env, &admin, &folder, "user", outside.id, "editor", Some(now() + 90 * 86400 + 2 * 3600)).await.is_err());
     let _ = grant(&env, &admin, &folder, "user", outside.id, "editor", Some(now() + 86400)).await.unwrap();
     let g = group(&env, &admin, "Guests", &[member.id, outside.id]).await;
     assert!(grant(&env, &admin, &folder, "group", g, "manager", Some(now() + 86400)).await.is_err());

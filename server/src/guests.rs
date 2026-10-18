@@ -37,7 +37,13 @@ pub async fn target_has_guests(conn: &mut SqliteConnection, kind: PrincipalType,
     Ok(guest)
 }
 
-pub async fn validate_grant(conn: &mut SqliteConnection, actor: &User, kind: PrincipalType, id: i64, role: Role, expiry: Option<i64>) -> AppResult<()> {
+/// How far past a guest's longest access an end date may be and still be taken (at the longest): the clock of the
+/// computer asking may be a little ahead of the server's
+const GUEST_SLACK: i64 = 3600;
+
+/// Checks a grant, and gives the end date to store: a guest's end date a little past the longest access is that
+/// longest access
+pub async fn validate_grant(conn: &mut SqliteConnection, actor: &User, kind: PrincipalType, id: i64, role: Role, expiry: Option<i64>) -> AppResult<Option<i64>> {
     if actor.guest {
         return Err(AppError::forbidden("Guests can't give people access"));
     }
@@ -67,11 +73,13 @@ pub async fn validate_grant(conn: &mut SqliteConnection, actor: &User, kind: Pri
             return Err(AppError::bad_request("Guests can't be managers or owners, including through a group"));
         }
         let days = max_days(conn).await?;
-        if expiry.is_none_or(|t| t <= now() || t > now() + days * 86400) {
+        let latest = now() + days * 86400;
+        if expiry.is_none_or(|t| t <= now() || t > latest + GUEST_SLACK) {
             return Err(AppError::bad_request(format!("Access given to guests needs an end date within {days} days")));
         }
+        return Ok(expiry.map(|t| t.min(latest)));
     }
-    Ok(())
+    Ok(expiry)
 }
 
 #[derive(Serialize, sqlx::FromRow)]
