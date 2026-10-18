@@ -9,7 +9,16 @@ use crate::{
     util::new_id,
 };
 use russh_sftp::protocol::{Attrs, Data, File, FileAttributes, Handle, Name, OpenFlags, Status, StatusCode};
-use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+
+/// How long the checks of a session (the account, its app password or key, SFTP's settings) and of a file being
+/// written (its size against the limits, the quota and the disk's room) are taken as still true: a transfer isn't
+/// checked again for every 32 KiB packet. Closing a file checks everything again before it is stored.
+const RECHECK: Duration = Duration::from_secs(3);
+
+/// How much a file being written may grow before its size is checked again within `RECHECK` (what is stored is
+/// checked against the quota in full anyway)
+const SIZE_SLACK: u64 = 8 << 20;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 pub(super) struct Files {
@@ -18,6 +27,8 @@ pub(super) struct Files {
     login: Login,
     handles: HashMap<String, Opened>,
     _permit: Arc<Permit>,
+    /// The account as checked last, when, and whether for writing (`RECHECK`)
+    checked: crate::sync::Mutex<Option<(tokio::time::Instant, bool, User)>>,
 }
 enum Opened {
     Read { id: String },
@@ -32,6 +43,10 @@ struct Staged {
     readable: bool,
     failed: bool,
     create_only: bool,
+    /// When its size was checked last, and up to what size that holds (`RECHECK`, `SIZE_SLACK`)
+    checked: Option<(tokio::time::Instant, u64)>,
+    /// A modification time the client set while writing it (`fsetstat`), kept once it is stored
+    mtime: Option<u32>,
 }
 impl Drop for Staged {
     fn drop(&mut self) {
@@ -65,9 +80,36 @@ async fn file_attrs(st: &AppState, node: &Node) -> Result<FileAttributes, Status
     let mut attributes = attrs(Some(node));
     if !node.is_folder() {
         let source = crate::files::Source::resolve(st, node).await.map_err(code)?;
-        attributes.size = Some(source.describe(node.size as u64).await.map_err(code)?.0);
+        let (size, version) = source.describe(node.size as u64).await.map_err(code)?;
+        attributes.size = Some(size);
+        // The time a client set for this content (`keep_mtime`), else when it changed in ThirtyFile
+        if let Some(seconds) = crate::s3::metadata::read(st, &node.id, &version).await.ok().flatten().and_then(|t| t.split('.').next()?.parse::<i64>().ok()) {
+            let seconds = seconds.clamp(0, i64::from(u32::MAX)) as u32;
+            (attributes.mtime, attributes.atime) = (Some(seconds), Some(seconds));
+        }
     }
     Ok(attributes)
+}
+
+/// Keeps a file's modification time as a client set it, with the content's version: rclone and WinSCP sync by size and
+/// time, as SFTP gives them no hash here. It is the column S3 keeps `x-amz-meta-mtime` in, so both tell the same time;
+/// a change of the content from elsewhere drops it.
+async fn keep_mtime(st: &AppState, node: &Node, mtime: u32) -> Result<(), StatusCode> {
+    if node.is_folder() {
+        return Ok(());
+    }
+    let source = crate::files::Source::resolve(st, node).await.map_err(code)?;
+    // A disk that doesn't answer: the time isn't kept, as when nothing set it
+    let Some(version) = source.version_within(node.drive()).await else { return Ok(()) };
+    let _w = st.write_lock.lock().await;
+    sqlx::query("UPDATE nodes SET s3_mtime = ?, s3_mtime_version = ? WHERE id = ?")
+        .bind(mtime.to_string())
+        .bind(version)
+        .bind(&node.id)
+        .execute(&st.db)
+        .await
+        .map_err(|_| StatusCode::Failure)?;
+    Ok(())
 }
 fn segments(path: &str) -> Result<Vec<String>, StatusCode> {
     if path.len() > 4096 || path.contains(['\0', '\\']) {
@@ -90,10 +132,23 @@ fn segments(path: &str) -> Result<Vec<String>, StatusCode> {
 
 impl Files {
     pub(super) fn new(st: AppState, peer: SocketAddr, login: Login, permit: Arc<Permit>) -> Self {
-        Self { st, peer, login, handles: HashMap::new(), _permit: permit }
+        Self { st, peer, login, handles: HashMap::new(), _permit: permit, checked: Default::default() }
     }
+    /// The account, as checked within `RECHECK` (for writing when `write`), else checked again
     async fn user(&self, write: bool) -> Result<User, StatusCode> {
-        self.login.user(&self.st, self.peer, write).await.map_err(code)
+        if let Some((at, for_writing, user)) = self.checked.lock().as_ref()
+            && at.elapsed() < RECHECK
+            && (*for_writing || !write)
+        {
+            return Ok(user.clone());
+        }
+        self.user_now(write).await
+    }
+    /// The account, checked now
+    async fn user_now(&self, write: bool) -> Result<User, StatusCode> {
+        let user = self.login.user(&self.st, self.peer, write).await.map_err(code)?;
+        *self.checked.lock() = Some((tokio::time::Instant::now(), write, user.clone()));
+        Ok(user)
     }
     fn insert(&mut self, id: u32, opened: Opened) -> Result<Handle, StatusCode> {
         if self.handles.len() >= 32 {
@@ -144,6 +199,8 @@ impl Files {
             readable: flags.contains(OpenFlags::READ),
             failed: false,
             create_only: flags.contains(OpenFlags::EXCLUDE),
+            checked: None,
+            mtime: None,
         };
         if !flags.contains(OpenFlags::TRUNCATE)
             && let Some(node) = &stage.up.existing
@@ -183,13 +240,10 @@ async fn stage_size(st: &AppState, user: &User, stage: &Staged, size: u64) -> Re
     Ok(())
 }
 
-fn metadata_supported(a: &FileAttributes, directory: bool) -> Result<(), StatusCode> {
-    if a.uid.is_some()
-        || a.gid.is_some()
-        || a.user.is_some()
-        || a.group.is_some()
-        || a.permissions.is_some_and(|mode| mode & 0o7777 != if directory { 0o755 } else { 0o644 })
-    {
+/// Refuses what can't be kept: owners. Permissions are accepted and left as they are (`scp -p` and WinSCP set them
+/// after an upload, and showed an error when refused); times are kept (`keep_mtime`).
+fn metadata_supported(a: &FileAttributes) -> Result<(), StatusCode> {
+    if a.uid.is_some() || a.gid.is_some() || a.user.is_some() || a.group.is_some() {
         return Err(StatusCode::OpUnsupported);
     }
     Ok(())
@@ -227,7 +281,8 @@ impl russh_sftp::server::Handler for Files {
     async fn close(&mut self, id: u32, handle: String) -> Result<Status, StatusCode> {
         let opened = self.handles.remove(&handle).ok_or(StatusCode::NoSuchFile)?;
         if let Opened::Write(mut stage) = opened {
-            let user = self.user(true).await?;
+            // In full before it is stored, whatever was checked while it was written
+            let user = self.user_now(true).await?;
             if stage.failed {
                 return Err(StatusCode::Failure);
             }
@@ -238,7 +293,14 @@ impl russh_sftp::server::Handler for Files {
             if stage.create_only {
                 access::store_new(self.st.clone(), user, stage.up.parent.clone(), stage.up.name.clone(), stage.path.clone(), size).await.map_err(code)?;
             } else {
-                access::store(self.st.clone(), user, stage.up.parent.clone(), stage.up.name.clone(), stage.path.clone(), size, None).await.map_err(code)?;
+                access::store(self.st.clone(), user.clone(), stage.up.parent.clone(), stage.up.name.clone(), stage.path.clone(), size, None).await.map_err(code)?;
+            }
+            if let Some(mtime) = stage.mtime {
+                let mut c = self.st.db.acquire().await.map_err(|_| StatusCode::Failure)?;
+                if let Some(node) = crate::paths::child_named(&mut c, &stage.up.parent.id, &stage.up.name).await.map_err(code)? {
+                    drop(c);
+                    keep_mtime(&self.st, &node, mtime).await?;
+                }
             }
         } else {
             self.user(false).await?;
@@ -278,7 +340,11 @@ impl russh_sftp::server::Handler for Files {
             let before = s.file.metadata().await.map_err(|_| StatusCode::Failure)?.len();
             let offset = if s.append { before } else { offset };
             let size = before.max(offset.checked_add(data.len() as u64).ok_or(StatusCode::Failure)?);
-            stage_size(&self.st, &user, s, size).await?;
+            access::check_size(&self.st, size).map_err(code)?;
+            if !s.checked.is_some_and(|(at, upto)| at.elapsed() < RECHECK && size <= upto) {
+                stage_size(&self.st, &user, s, size).await?;
+                s.checked = Some((tokio::time::Instant::now(), size.saturating_add(SIZE_SLACK)));
+            }
             s.file.seek(std::io::SeekFrom::Start(offset)).await.map_err(|_| StatusCode::Failure)?;
             s.file.write_all(&data).await.map_err(|_| StatusCode::Failure)
         }
@@ -324,10 +390,13 @@ impl russh_sftp::server::Handler for Files {
     async fn setstat(&mut self, id: u32, path: String, a: FileAttributes) -> Result<Status, StatusCode> {
         let user = self.user(true).await?;
         let node = self.node(&user, &segments(&path)?).await?;
-        metadata_supported(&a, node.is_folder())?;
+        metadata_supported(&a)?;
         crate::tree::node_for(&mut *self.st.db.acquire().await.map_err(|_| StatusCode::Failure)?, &user, &node.id, crate::tree::Need::Write).await.map_err(code)?;
         if a.size.is_some_and(|n| n != node.size as u64) {
             return Err(StatusCode::OpUnsupported);
+        }
+        if let Some(mtime) = a.mtime {
+            keep_mtime(&self.st, &node, mtime).await?;
         }
         Ok(okay(id))
     }
@@ -336,7 +405,10 @@ impl russh_sftp::server::Handler for Files {
         let Some(Opened::Write(s)) = self.handles.get_mut(&handle) else {
             return Err(StatusCode::PermissionDenied);
         };
-        metadata_supported(&a, false)?;
+        metadata_supported(&a)?;
+        if a.mtime.is_some() {
+            s.mtime = a.mtime;
+        }
         if let Some(size) = a.size {
             let change = async {
                 stage_size(&self.st, &user, s, size).await?;

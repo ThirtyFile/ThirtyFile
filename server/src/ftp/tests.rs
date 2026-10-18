@@ -33,7 +33,7 @@ async fn fixture(folders: bool) -> (TestEnv, User, manage::Created, Listener) {
         admin.clone(),
         Json(manage::Create {
             node_id: node.id,
-            change: manage::Change { name: "Scanner".into(), enabled: true, allow_list: false, allow_read: false, expires_at: None },
+            change: manage::Change { name: "Scanner".into(), enabled: true, allow_list: false, allow_read: false, replace_existing: true, expires_at: None },
             password: Some(testutil::password().into()),
             code: None,
         }),
@@ -431,7 +431,14 @@ async fn only_the_publisher_or_an_administrator_rotates_or_opens_up_a_receive_fo
     let folder = env.folder(&admin, &env.st.shared_root().unwrap(), "Scans").await;
     env.grant(&folder, &manager, "manager").await;
     let password = || Some(crate::testutil::password().to_string());
-    let change = |enabled: bool, read: bool| manage::Change { name: "Office printer".into(), enabled, allow_list: false, allow_read: read, expires_at: None };
+    let change = |enabled: bool, read: bool| manage::Change {
+        name: "Office printer".into(),
+        enabled,
+        allow_list: false,
+        allow_read: read,
+        replace_existing: true,
+        expires_at: None,
+    };
     let Json(created) =
         manage::create(st(), admin.clone(), Json(manage::Create { node_id: folder.clone(), change: change(true, false), password: password(), code: None }))
             .await
@@ -454,4 +461,70 @@ async fn only_the_publisher_or_an_administrator_rotates_or_opens_up_a_receive_fo
     // The entries name the receive folder
     let (named,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM activity WHERE detail LIKE '%Office printer%'").fetch_one(&env.st.db).await.unwrap();
     assert!(named >= 3, "{named}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_receive_folder_that_keeps_both_numbers_a_new_file_with_a_taken_name() {
+    let (env, admin, created, server) = fixture(false).await;
+    let change = manage::Change { name: "Scanner".into(), enabled: true, allow_list: true, allow_read: false, replace_existing: false, expires_at: None };
+    let edit = Json(manage::Edit { change, password: Some(testutil::password().into()), code: None });
+    let _ = manage::update(State(env.st.clone()), admin, axum::extract::Path(created.folder.id.clone()), edit).await.unwrap();
+    let mut ftp = client(&env, &created).await;
+    ftp.put_file("scan.pdf", &mut std::io::Cursor::new(b"first")).await.unwrap();
+    ftp.put_file("scan.pdf", &mut std::io::Cursor::new(b"second")).await.unwrap();
+    let mut names = ftp.nlst(None).await.unwrap();
+    names.sort();
+    assert_eq!(names, ["scan (1).pdf", "scan.pdf"]);
+    assert_eq!(bytes(&env, &created.folder.node_id, "scan.pdf").await, b"first");
+    assert_eq!(bytes(&env, &created.folder.node_id, "scan (1).pdf").await, b"second");
+    let _ = ftp.quit().await;
+    drop(ftp);
+    server.finish().await;
+    env.st.db.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_upload_checks_its_receive_folder_every_few_seconds_not_for_every_chunk() {
+    let (env, _, created, server) = fixture(false).await;
+    let mut ftp = client(&env, &created).await;
+    let checks = || super::credentials::CHECKS.lock().get(&created.folder.id).copied().unwrap_or(0);
+    let before = checks();
+    ftp.put_file("big.bin", &mut std::io::Cursor::new(vec![7u8; 4 << 20])).await.unwrap();
+    let made = checks() - before;
+    assert!(made < 8, "the receive folder was checked {made} times for one upload of 64 chunks");
+    assert_eq!(bytes(&env, &created.folder.node_id, "big.bin").await.len(), 256 * 1024, "read back in part");
+    let _ = ftp.quit().await;
+    drop(ftp);
+    server.finish().await;
+    env.st.db.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_refusal_after_the_right_password_isnt_a_failed_sign_in() {
+    let (env, _, created, server) = fixture(false).await;
+    let address = env.st.part::<Memory>().status.read().address.clone();
+    // Five sessions already: a sixth with the right password is refused, many times, without using up the address
+    let mut held = Vec::new();
+    for _ in 0..5 {
+        held.push(client(&env, &created).await);
+    }
+    for _ in 0..40 {
+        let mut ftp = AsyncRustlsFtpStream::connect(&address).await.unwrap();
+        assert!(ftp.login(&created.folder.username, &created.password).await.is_err());
+    }
+    drop(held.pop());
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let mut ftp = AsyncRustlsFtpStream::connect(&address).await.unwrap();
+            if ftp.login(&created.folder.username, &created.password).await.is_ok() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("signs in once a session is free");
+    drop(held);
+    server.finish().await;
+    env.st.db.close().await;
 }

@@ -7,7 +7,7 @@ pub(crate) mod credentials;
 pub(crate) mod etag;
 mod listing;
 pub mod manage;
-mod metadata;
+pub(crate) mod metadata;
 mod multipart;
 mod objects;
 mod temp;

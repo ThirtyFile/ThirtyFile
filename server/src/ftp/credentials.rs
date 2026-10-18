@@ -33,6 +33,8 @@ pub struct Folder {
     pub enabled: bool,
     pub allow_list: bool,
     pub allow_read: bool,
+    /// An upload replaces a file of the same name (its earlier version kept); else it gets a number
+    pub replace_existing: bool,
     pub expires_at: Option<i64>,
     pub created_at: i64,
     pub last_used_at: Option<i64>,
@@ -93,7 +95,15 @@ pub async fn actor_in_transaction(conn: &mut sqlx::SqliteConnection, actor: &Use
     Ok(current)
 }
 
+/// Tests: how many times each receive folder was checked (`access`), by its id
+#[cfg(test)]
+pub(crate) static CHECKS: crate::sync::Mutex<std::collections::BTreeMap<String, usize>> = crate::sync::Mutex::new(std::collections::BTreeMap::new());
+
 pub async fn access(st: &crate::state::AppState, actor: &User, listing: bool, reading: bool) -> AppResult<User> {
+    #[cfg(test)]
+    if let Some(c) = &actor.ftp_credential {
+        *CHECKS.lock().entry(c.id.clone()).or_default() += 1;
+    }
     let mut conn = st.db.acquire().await?;
     let user = actor_in_transaction(&mut conn, actor, Need::Read).await?;
     let row: Folder = sqlx::query_as("SELECT * FROM ftp_receive_folders WHERE id=?")

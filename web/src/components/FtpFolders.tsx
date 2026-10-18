@@ -22,7 +22,7 @@ function EditDialog({ nodeId, folder, action = "edit", close }: { nodeId: string
   const id = useId();
   const identity = useConfirmIdentity(id);
   const qc = useQueryClient();
-  const [draft, setDraft] = useState<FtpChange>(folder ?? { name: "", enabled: true, allow_list: false, allow_read: false, expires_at: null });
+  const [draft, setDraft] = useState<FtpChange>(folder ?? { name: "", enabled: true, allow_list: false, allow_read: false, replace_existing: true, expires_at: null });
   const [expiry, setExpiry] = useState(() => {
     if (!folder?.expires_at) return "";
     const d = new Date(folder.expires_at * 1000);
@@ -114,7 +114,14 @@ function EditDialog({ nodeId, folder, action = "edit", close }: { nodeId: string
                   <input type="checkbox" checked={draft.allow_read} onChange={(e) => setDraft({ ...draft, allow_read: e.target.checked })} />
                   {t("Allow device to download files")}
                 </Label>
-                <p className="text-xs text-muted-foreground">{t("Uploads are always allowed while the receive folder is active. Devices cannot delete, move or rename files.")}</p>
+                <Label className="flex gap-2">
+                  <input type="checkbox" checked={draft.replace_existing} onChange={(e) => setDraft({ ...draft, replace_existing: e.target.checked })} />
+                  {t("Replace files with the same name (earlier versions are kept)")}
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  {t("Uploads are always allowed while the receive folder is active. Devices cannot delete, move or rename files.")}{" "}
+                  {t("Without replacing, a new file whose name is taken gets a number.")}
+                </p>
                 <Label className="grid gap-2">
                   {t("End date")}
                   <Input type="datetime-local" value={expiry} onChange={(e) => setExpiry(e.target.value)} />
@@ -153,7 +160,8 @@ export function FtpFolderCard({ folder }: { folder: FtpFolder }) {
         {t("Device username")}: <code>{folder.username}</code>
       </p>
       <p className="text-xs">
-        {folder.allow_list ? t("Listing allowed") : t("Listing blocked")} · {folder.allow_read ? t("Downloads allowed") : t("Downloads blocked")}
+        {folder.allow_list ? t("Listing allowed") : t("Listing blocked")} · {folder.allow_read ? t("Downloads allowed") : t("Downloads blocked")} ·{" "}
+        {folder.replace_existing ? t("Replaces files with the same name") : t("Keeps both files with the same name")}
       </p>
       <p className="text-xs">
         {t("End date")}: {folder.expires_at ? formatDateTime(folder.expires_at) : t("No end date")} · {t("Last used")}:{" "}
@@ -182,7 +190,7 @@ export function FtpFolderDialog({ nodeId, onClose }: { nodeId: string; onClose()
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{t("FTP receive folders")}</DialogTitle>
-          <DialogDescription>{t("Give each device its own credentials for this folder. Uploads replace files with the same name and keep earlier versions.")}</DialogDescription>
+          <DialogDescription>{t("Give each device its own credentials for this folder.")}</DialogDescription>
         </DialogHeader>
         {q.error ? (
           <ErrorState message={q.error.message} onRetry={() => q.refetch()} />

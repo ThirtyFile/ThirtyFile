@@ -73,8 +73,16 @@ pub struct Change {
     pub enabled: bool,
     pub allow_list: bool,
     pub allow_read: bool,
+    /// An upload replaces a file of the same name; without it, the new file gets a number
+    #[serde(default = "replaces")]
+    pub replace_existing: bool,
     pub expires_at: Option<i64>,
 }
+
+fn replaces() -> bool {
+    true
+}
+
 impl Change {
     fn validate(&self) -> AppResult<()> {
         if self.name.trim().is_empty() || self.name.chars().count() > 80 || self.name.chars().any(char::is_control) {
@@ -132,12 +140,13 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
         enabled: req.change.enabled,
         allow_list: req.change.allow_list,
         allow_read: req.change.allow_read,
+        replace_existing: req.change.replace_existing,
         expires_at: req.change.expires_at,
         created_at: now(),
         last_used_at: None,
     };
-    sqlx::query("INSERT INTO ftp_receive_folders(id,node_id,creator_id,name,username,password_hash,enabled,allow_list,allow_read,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
-        .bind(&folder.id).bind(&folder.node_id).bind(folder.creator_id).bind(&folder.name).bind(&folder.username).bind(&folder.password_hash).bind(folder.enabled).bind(folder.allow_list).bind(folder.allow_read).bind(folder.expires_at).bind(folder.created_at).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO ftp_receive_folders(id,node_id,creator_id,name,username,password_hash,enabled,allow_list,allow_read,replace_existing,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)")
+        .bind(&folder.id).bind(&folder.node_id).bind(folder.creator_id).bind(&folder.name).bind(&folder.username).bind(&folder.password_hash).bind(folder.enabled).bind(folder.allow_list).bind(folder.allow_read).bind(folder.replace_existing).bind(folder.expires_at).bind(folder.created_at).execute(&mut *tx).await?;
     crate::logs::record_activity(&mut tx, &user, None, "settings", &format!("Created FTP receive folder {}", folder.name)).await?;
     tx.commit().await?;
     Ok(Json(Created { folder, password }))
@@ -174,19 +183,22 @@ pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<Strin
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     let folder = managed(&mut tx, &user, &id).await?;
-    // Turning it on, letting the device see or read more, or giving it longer: only who published it, or an administrator
+    // Turning it on, letting the device see, read or replace more, or giving it longer: only who published it, or an
+    // administrator
     let widens = (req.enabled && !folder.enabled)
         || (req.allow_list && !folder.allow_list)
         || (req.allow_read && !folder.allow_read)
+        || (req.replace_existing && !folder.replace_existing)
         || folder.expires_at.is_some_and(|was| req.expires_at.is_none_or(|now| now > was));
     if widens {
         crate::tokens::may_hand_out(&crate::auth::current_user(&mut tx, &user).await?, folder.creator_id)?;
     }
-    sqlx::query("UPDATE ftp_receive_folders SET name=?,enabled=?,allow_list=?,allow_read=?,expires_at=?,generation=generation+1 WHERE id=?")
+    sqlx::query("UPDATE ftp_receive_folders SET name=?,enabled=?,allow_list=?,allow_read=?,replace_existing=?,expires_at=?,generation=generation+1 WHERE id=?")
         .bind(req.name.trim())
         .bind(req.enabled)
         .bind(req.allow_list)
         .bind(req.allow_read)
+        .bind(req.replace_existing)
         .bind(req.expires_at)
         .bind(id)
         .execute(&mut *tx)

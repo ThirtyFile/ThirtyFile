@@ -130,6 +130,7 @@
     "name": "",
     "node_id": "",
     "password": "",
+    "replace_existing": false,
     "username": ""
   },
   "FtpFolder": {
@@ -146,6 +147,7 @@
     "last_used_at": null,
     "name": "",
     "node_id": "",
+    "replace_existing": false,
     "username": ""
   },
   "FtpStatus": {
