@@ -450,6 +450,9 @@ pub async fn trash(State(st): State<AppState>, user: User, Json(req): Json<Batch
     trash_ids(&st, &user, &ids, false).await
 }
 
+/// Why `trash_empty_folder` refused: something is in the folder (in the index, or on disk only)
+pub const NOT_EMPTY: &str = "The folder isn't empty";
+
 /// File protocols remove only empty directories; the web's recursive trash keeps its usual behavior.
 pub async fn trash_empty_folder(st: &AppState, user: &User, id: &str) -> AppResult<()> {
     trash_ids(st, user, &[id.to_string()], true).await.map(|_| ())
@@ -472,7 +475,7 @@ async fn trash_ids(st: &AppState, user: &User, ids: &[String], empty_only: bool)
             let (has_children,): (bool,) =
                 sqlx::query_as("SELECT EXISTS(SELECT 1 FROM nodes WHERE parent_id = ? AND trashed_at IS NULL)").bind(&node.id).fetch_one(&mut *conn).await?;
             if has_children {
-                return Err(AppError::conflict("The folder isn't empty"));
+                return Err(AppError::conflict(NOT_EMPTY));
             }
             empty_on_disk(&node).await?;
         }
@@ -495,10 +498,10 @@ async fn empty_on_disk(node: &Node) -> AppResult<()> {
     }
     let n = node.clone();
     fsops::on_disk(node.drive(), std::time::Duration::from_secs(5), move || {
-        let path = n.fs_pinned().and_then(|p| p.dir()).map_err(|_| AppError::conflict("The folder isn't empty"))?;
-        let mut entries = std::fs::read_dir(path.as_path()).map_err(|_| AppError::conflict("The folder isn't empty"))?;
+        let path = n.fs_pinned().and_then(|p| p.dir()).map_err(|_| AppError::conflict(NOT_EMPTY))?;
+        let mut entries = std::fs::read_dir(path.as_path()).map_err(|_| AppError::conflict(NOT_EMPTY))?;
         if entries.next().is_some() {
-            return Err(AppError::conflict("The folder isn't empty"));
+            return Err(AppError::conflict(NOT_EMPTY));
         }
         Ok(())
     })

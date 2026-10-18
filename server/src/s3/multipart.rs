@@ -14,7 +14,7 @@ use std::{
 };
 use tokio::io::AsyncWriteExt;
 
-fn lock(id: &str) -> Arc<tokio::sync::Mutex<()>> {
+pub(super) fn lock(id: &str) -> Arc<tokio::sync::Mutex<()>> {
     static LOCKS: OnceLock<crate::sync::Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>> = OnceLock::new();
     let mut locks = LOCKS.get_or_init(Default::default).lock();
     locks.retain(|_, l| l.strong_count() > 0);
@@ -113,8 +113,8 @@ async fn part_inner(st: AppState, mut req: S3Request<UploadPartInput>) -> S3Resu
     if !(1..=10000).contains(&req.input.part_number) {
         return Err(s3_error!(InvalidArgument));
     }
-    let turn = lock(&req.input.upload_id);
-    let _turn = turn.lock().await;
+    // Parts arrive in parallel (aws about 10 at once, rclone 4): each is received on its own, and the upload's lock
+    // is taken only to record it
     upload(&st, &identity, &req.input.upload_id, &req.input.key).await?;
     let (parent, name) = access::rooted_parent(&st, &identity.user, &identity.root.id, &req.input.key).await.map_err(super::map_error)?;
     let up = super::objects::prepare_upload(&st, &identity, &parent, name).await?;
@@ -135,7 +135,11 @@ async fn part_inner(st: AppState, mut req: S3Request<UploadPartInput>) -> S3Resu
     .await?;
     let file_id = new_id();
     let file = path(&st, &file_id);
+    let turn = lock(&req.input.upload_id);
+    let _turn = turn.lock().await;
     let result = async {
+        // Still there: completed or aborted while this part arrived, it takes no part
+        upload(&st, &identity, &req.input.upload_id, &req.input.key).await?;
         let (total,): (i64,) = sqlx::query_as("SELECT COALESCE(SUM(size),0) FROM s3_parts WHERE upload_id = ? AND number != ?").bind(&req.input.upload_id).bind(req.input.part_number).fetch_one(&st.db).await.map_err(super::internal)?;
         let total = (total as u64).checked_add(size).ok_or_else(|| s3_error!(EntityTooLarge))?;
         access::check_size(&st, total).map_err(super::map_error)?;
@@ -204,6 +208,7 @@ async fn complete_inner(st: AppState, req: S3Request<CompleteMultipartUploadInpu
     let turn = lock(&req.input.upload_id);
     let _turn = turn.lock().await;
     let upload = upload(&st, &identity, &req.input.upload_id, &req.input.key).await?;
+    let expect = super::objects::expected(&st, &identity, &req.input.key, &req.headers).await?;
     let selected = req.input.multipart_upload.and_then(|u| u.parts).ok_or_else(|| s3_error!(InvalidPart))?;
     if selected.is_empty() || selected.len() > 10000 {
         return Err(s3_error!(InvalidPart));
@@ -245,10 +250,24 @@ async fn complete_inner(st: AppState, req: S3Request<CompleteMultipartUploadInpu
     async {
         let mut disk = crate::util::DiskRoom::check(&st.tmp_dir(), size).await.map_err(super::map_error)?;
         let mut out = tokio::fs::File::create(assembled.path()).await.map_err(super::internal)?;
+        // The object's MD5 (its ETag) and SHA-256 (how the content store names it), worked out while the parts are
+        // copied: a large object is read once, not again for each
+        let (mut md5, mut sha) = (<md5::Md5 as md5::Digest>::new(), <sha2::Sha256 as sha2::Digest>::new());
+        let mut buf = vec![0u8; 1024 * 1024];
         for part in &parts {
             disk.before(part.size as u64).await.map_err(super::map_error)?;
             let mut source = tokio::fs::File::open(path(&st, &part.file_id)).await.map_err(super::internal)?;
-            let copied = tokio::io::copy(&mut source, &mut out).await.map_err(super::internal)?;
+            let mut copied = 0u64;
+            loop {
+                let n = tokio::io::AsyncReadExt::read(&mut source, &mut buf).await.map_err(super::internal)?;
+                if n == 0 {
+                    break;
+                }
+                md5::Digest::update(&mut md5, &buf[..n]);
+                sha2::Digest::update(&mut sha, &buf[..n]);
+                out.write_all(&buf[..n]).await.map_err(super::internal)?;
+                copied += n as u64;
+            }
             if copied != part.size as u64 {
                 return Err(s3_error!(InvalidPart));
             }
@@ -256,15 +275,16 @@ async fn complete_inner(st: AppState, req: S3Request<CompleteMultipartUploadInpu
         out.flush().await.map_err(super::internal)?;
         out.sync_data().await.map_err(super::internal)?;
         drop(out);
-        let etag = ETag::Strong(super::etag::reader(tokio::fs::File::open(assembled.path()).await.map_err(super::internal)?).await.map_err(super::map_error)?);
+        let md5 = hex::encode(md5::Digest::finalize(md5));
+        let etag = ETag::Strong(md5.clone());
         let latest = super::credentials::identity(&st, &identity.key.access_key, true).await?;
         super::objects::commit(
             st.clone(),
             latest.user,
             parent,
             name,
-            (assembled, size, None),
-            access::ScopedWrite { root: identity.root.id.clone(), mtime: upload.mtime },
+            (assembled, size, Some(hex::encode(sha2::Digest::finalize(sha))), Some(md5)),
+            access::ScopedWrite { root: identity.root.id.clone(), mtime: upload.mtime, expect },
         )
         .await?;
         remove(&st, &req.input.upload_id).await?;
@@ -278,8 +298,9 @@ pub async fn list_parts(st: &AppState, req: S3Request<ListPartsInput>) -> S3Resu
     let turn = lock(&req.input.upload_id);
     let _turn = turn.lock().await;
     upload(st, &identity, &req.input.upload_id, &req.input.key).await?;
-    let limit = req.input.max_parts.unwrap_or(1000);
-    if !(0..=1000).contains(&limit) {
+    // As AWS does: more than 1000 at once is 1000
+    let limit = req.input.max_parts.unwrap_or(1000).min(1000);
+    if limit < 0 {
         return Err(s3_error!(InvalidArgument));
     }
     let marker = req.input.part_number_marker.unwrap_or(0);
@@ -318,8 +339,9 @@ pub async fn list_parts(st: &AppState, req: S3Request<ListPartsInput>) -> S3Resu
 
 pub async fn list_uploads(st: &AppState, req: S3Request<ListMultipartUploadsInput>) -> S3Result<S3Response<ListMultipartUploadsOutput>> {
     let identity = request_identity(st, &req, Some(&req.input.bucket), false).await?;
-    let limit = req.input.max_uploads.unwrap_or(1000);
-    if !(0..=1000).contains(&limit) {
+    // As AWS does: more than 1000 at once is 1000
+    let limit = req.input.max_uploads.unwrap_or(1000).min(1000);
+    if limit < 0 {
         return Err(s3_error!(InvalidArgument));
     }
     let prefix = req.input.prefix.as_deref().unwrap_or_default();

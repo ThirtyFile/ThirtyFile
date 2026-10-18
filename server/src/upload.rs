@@ -613,7 +613,7 @@ async fn finalize(st: &AppState, up: &Uploader, upload: Upload) -> AppResult<Str
     let hash = saved_hasher(&upload).filter(|_| upload.offset == upload.size).map(|h| hex::encode(h.finalize()));
     // Stored first, without holding the write lock (S3 may take a while). Should that fail, the temporary file is
     // still there and finishing is tried again (`head_as`)
-    let staged = content::stage(st, &parent, content::Received { path, size, hash }).await?;
+    let staged = content::stage(st, &parent, content::Received { path, size, hash, md5: None }).await?;
     let mut turn = staged.turn(st).await;
     let _w = st.write_lock.lock().await;
     let result = async {

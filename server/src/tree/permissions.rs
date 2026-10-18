@@ -387,8 +387,16 @@ pub async fn node_with_role(conn: &mut SqliteConnection, user: &User, id: &str) 
     Err(AppError::not_found("Item not found"))
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Tests: how many times `node_for` ran on this thread, to bound what a request does per item
+    pub static NODE_FOR_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Gets a node and checks the required capability
 pub async fn node_for(conn: &mut SqliteConnection, user: &User, id: &str, need: Need) -> AppResult<Node> {
+    #[cfg(test)]
+    NODE_FOR_CALLS.with(|n| n.set(n.get() + 1));
     let current = if user.ftp_credential.is_some() {
         Some(crate::ftp::credentials::actor_in_transaction(conn, user, need).await?)
     } else if user.protocol_key.is_some() {

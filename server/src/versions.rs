@@ -526,7 +526,7 @@ async fn restore_version(st: &AppState, user: &User, id: &str, version: &str) ->
         }
     }
     // Then in like an upload that replaces the file (content.rs)
-    let staged = match content::stage(st, &node, content::Received { path: tmp.clone(), size, hash: stored }).await {
+    let staged = match content::stage(st, &node, content::Received { path: tmp.clone(), size, hash: stored, md5: None }).await {
         Ok(s) => s,
         Err(e) => {
             let _ = tokio::fs::remove_file(&tmp).await;

@@ -3,7 +3,7 @@
 use super::credentials::{Identity, request_identity};
 use crate::{
     state::AppState,
-    tree::{self, Need, Node},
+    tree::{self, Node},
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use hmac::{Hmac, KeyInit, Mac};
@@ -52,6 +52,36 @@ struct Frame {
     scanned: bool,
 }
 
+/// Items a page looks at, at most: a delimiter other than `/` groups names within a folder, and skipping a group would
+/// otherwise go through all of a large folder in one request. The page then ends early, with a cursor where it stopped.
+const PAGE_BUDGET: usize = 10_000;
+
+#[cfg(test)]
+thread_local! {
+    static TEST_BUDGET: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+fn budget() -> usize {
+    #[cfg(test)]
+    if let Some(b) = TEST_BUDGET.with(|b| b.get()) {
+        return b;
+    }
+    PAGE_BUDGET
+}
+
+/// Tests: pages look at `n` items at most until the guard is dropped
+#[cfg(test)]
+pub(super) fn small_budget(n: usize) -> impl Drop {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            TEST_BUDGET.with(|b| b.set(None));
+        }
+    }
+    TEST_BUDGET.with(|b| b.set(Some(n)));
+    Reset
+}
+
 struct Walk<'a> {
     st: &'a AppState,
     identity: &'a Identity,
@@ -59,6 +89,11 @@ struct Walk<'a> {
     prefix: &'a str,
     after: &'a str,
     skip_group: bool,
+    /// Items looked at so far, of `PAGE_BUDGET`
+    looked_at: usize,
+    /// The last key looked at, and whether the walk stopped there for its budget
+    last_key: String,
+    stopped: bool,
 }
 
 impl<'a> Walk<'a> {
@@ -70,17 +105,24 @@ impl<'a> Walk<'a> {
             prefix,
             after,
             skip_group,
+            looked_at: 0,
+            last_key: String::new(),
+            stopped: false,
         }
     }
 
     async fn next(&mut self) -> S3Result<Option<(String, Node)>> {
         while let Some(frame) = self.frames.last_mut() {
-            // A stopped key or publisher must fail the page; never turn it into a successful partial listing.
-            super::credentials::identity(self.st, &self.identity.key.access_key, false).await?;
+            if self.looked_at >= budget() {
+                self.stopped = true;
+                return Ok(None);
+            }
             if frame.rows.is_empty() {
+                // A stopped key or publisher must fail the page; never turn it into a successful partial listing
+                super::credentials::identity(self.st, &self.identity.key.access_key, false).await?;
                 if !frame.scanned {
                     if frame.folder.in_folder_space() {
-                        crate::folders::sync_folder(self.st, &frame.folder).await;
+                        crate::folders::sync_opened(self.st, &frame.folder).await;
                     }
                     frame.scanned = true;
                 }
@@ -93,9 +135,12 @@ impl<'a> Walk<'a> {
                     })
                     .max()
                     .unwrap_or_default();
+                // Only what the bucket's key may read, in SQL rather than item by item: what its creator sees, and not a
+                // restricted folder below the published one (`tree::within_publication`)
                 let sql = format!(
-                    "SELECT {} FROM nodes n WHERE n.parent_id = ?1 AND n.trashed_at IS NULL AND (n.name || CASE WHEN n.kind = 'folder' THEN '/' ELSE '' END) COLLATE BINARY > ?2 AND (n.name || CASE WHEN n.kind = 'folder' THEN '/' ELSE '' END) COLLATE BINARY >= ?3 ORDER BY (n.name || CASE WHEN n.kind = 'folder' THEN '/' ELSE '' END) COLLATE BINARY LIMIT 64",
-                    tree::NODE_COLS
+                    "SELECT {} FROM nodes n WHERE n.parent_id = ?1 AND n.trashed_at IS NULL AND NOT n.restricted AND {} AND (n.name || CASE WHEN n.kind = 'folder' THEN '/' ELSE '' END) COLLATE BINARY > ?2 AND (n.name || CASE WHEN n.kind = 'folder' THEN '/' ELSE '' END) COLLATE BINARY >= ?3 ORDER BY (n.name || CASE WHEN n.kind = 'folder' THEN '/' ELSE '' END) COLLATE BINARY LIMIT 64",
+                    tree::NODE_COLS,
+                    tree::visible_sql(&self.identity.user, "n.id")
                 );
                 let rows: Vec<Node> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
                     .bind(&frame.folder.id)
@@ -114,6 +159,8 @@ impl<'a> Walk<'a> {
             let name = format!("{}{}", node.name, if node.is_folder() { "/" } else { "" });
             frame.after = name.clone();
             let key = format!("{}{name}", frame.prefix);
+            self.looked_at += 1;
+            self.last_key = key.clone();
             if key.len() > 1024 {
                 continue;
             }
@@ -122,14 +169,6 @@ impl<'a> Walk<'a> {
                 && (self.prefix.starts_with(&key) || key.starts_with(self.prefix))
                 && !(key.as_bytes() < self.after.as_bytes() && !self.after.starts_with(&key))
                 && !(self.skip_group && key.starts_with(self.after));
-            let mut conn = self.st.db.acquire().await.map_err(super::internal)?;
-            let live = tree::node_for(&mut conn, &self.identity.user, &node.id, Need::Read).await;
-            drop(conn);
-            match live {
-                Ok(_) => (),
-                Err(error) if error.status == axum::http::StatusCode::NOT_FOUND => continue,
-                Err(error) => return Err(super::map_error(error)),
-            }
             if may_contain {
                 self.frames.push(Frame { folder: node.clone(), prefix: key.clone(), after: String::new(), rows: VecDeque::new(), scanned: false });
             }
@@ -169,7 +208,9 @@ struct Listing<'a> {
 
 async fn page(st: &AppState, identity: &Identity, query: Listing<'_>) -> S3Result<Page> {
     let Listing { prefix, delimiter, after, skip_group, limit, url } = query;
-    if prefix.len() > 1024 || delimiter.len() > 64 || after.len() > 1024 || !(0..=1000).contains(&limit) {
+    // As AWS does: more than 1000 at once is 1000
+    let limit = limit.min(1000);
+    if prefix.len() > 1024 || delimiter.len() > 64 || after.len() > 1024 || limit < 0 {
         return Err(s3_error!(InvalidArgument));
     }
     let mut page = Page { objects: vec![], groups: vec![], last: None, truncated: false };
@@ -206,6 +247,12 @@ async fn page(st: &AppState, identity: &Identity, query: Listing<'_>) -> S3Resul
             });
         }
     }
+    // Stopped for its budget: the next page goes on after the last item looked at (a group already listed is left
+    // out there, as it is before any cursor)
+    if walk.stopped && !page.truncated {
+        page.truncated = true;
+        page.last = Some((walk.last_key.clone(), false));
+    }
     Ok(page)
 }
 
@@ -216,7 +263,8 @@ pub async fn v2(st: &AppState, req: S3Request<ListObjectsV2Input>) -> S3Result<S
     let delimiter = i.delimiter.as_deref().unwrap_or_default();
     let cursor = i.continuation_token.as_ref().map(|t| decode(st, t, &identity.bucket.id, prefix, delimiter)).transpose()?;
     let after = cursor.as_ref().map(|c| c.key.as_str()).or(i.start_after.as_deref()).unwrap_or_default();
-    let limit = i.max_keys.unwrap_or(1000);
+    // As AWS does: more than 1000 at once is 1000
+    let limit = i.max_keys.unwrap_or(1000).min(1000);
     let url = i.encoding_type.is_some();
     let page = page(st, &identity, Listing { prefix, delimiter, after, skip_group: cursor.as_ref().is_some_and(|c| c.group), limit, url }).await?;
     let next = if page.truncated {
@@ -248,7 +296,8 @@ pub async fn v1(st: &AppState, req: S3Request<ListObjectsInput>) -> S3Result<S3R
     let prefix = i.prefix.as_deref().unwrap_or_default();
     let delimiter = i.delimiter.as_deref().unwrap_or_default();
     let after = i.marker.as_deref().unwrap_or_default();
-    let limit = i.max_keys.unwrap_or(1000);
+    // As AWS does: more than 1000 at once is 1000
+    let limit = i.max_keys.unwrap_or(1000).min(1000);
     let url = i.encoding_type.is_some();
     let page = page(st, &identity, Listing { prefix, delimiter, after, skip_group: !delimiter.is_empty() && after.ends_with(delimiter), limit, url }).await?;
     Ok(S3Response::new(ListObjectsOutput {

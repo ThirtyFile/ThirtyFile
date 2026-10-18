@@ -137,8 +137,8 @@ get report.csv</code></pre>
 aws configure set s3.addressing_style path --profile thirtyfile
 aws --profile thirtyfile --endpoint-url https://s3.files.example.com s3 ls s3://backups/
 aws --profile thirtyfile --endpoint-url https://s3.files.example.com s3 cp report.csv s3://backups/report.csv</code></pre>
-<p>rclone では <code>rclone config</code> を実行し、S3、プロバイダー Other を選び、キーを対話形式で入力します。エンドポイントとリージョンを指定し、force_path_style を有効にし、disable_checksum を true にして rclone の独自 MD5 メタデータを無効にします（S3 の Content-MD5 は転送を検証します）。ACL とサーバー側暗号化は未設定にします。<code>rclone copy</code> はファイルを追加しますが、<code>rclone sync</code> は宛先のファイルを削除する場合があります。</p>
-<p>ThirtyFile は rclone の <code>x-amz-meta-mtime</code> を現在のコンテンツバージョンに結び付けて保持し、同じキーへのコピーによる時刻の更新もサポートします。他のカスタムメタデータには対応しません。<code>no_system_metadata</code> ではこのタイムスタンプの送信を止められないため、無効のままにしてください。S3 以外のファイルの更新時刻は変わりません。</p>
+<p>rclone では <code>rclone config</code> を実行し、S3、プロバイダー Other を選び、キーを対話形式で入力します。エンドポイントとリージョンを指定し、force_path_style を有効にし、ACL とサーバー側暗号化は未設定にします。<code>rclone copy</code> はファイルを追加しますが、<code>rclone sync</code> は宛先のファイルを削除する場合があります。</p>
+<p>ThirtyFile は rclone の <code>x-amz-meta-mtime</code> を現在のコンテンツバージョンに結び付けて保持し、同じキーへのコピーによる時刻の更新もサポートします。他のカスタムメタデータ（rclone が大きなアップロードに付ける MD5 など）は受け付けますが保持しません。<code>no_system_metadata</code> ではこのタイムスタンプの送信を止められないため、無効のままにしてください。S3 以外のファイルの更新時刻は変わりません。</p>
 <h3 id="s3-backups">バックアップとその他の用途</h3>
 <p>restic を使う場合は <strong>Backups</strong> フォルダーを <code>backups</code> として公開し、読み書きキーを作成します。<code>AWS_ACCESS_KEY_ID</code> と <code>AWS_SECRET_ACCESS_KEY</code> は保護された認証情報ストアから読み込みます。リポジトリのパスワードは S3 キーとは別です。安全に保管し、専用の空のフォルダーだけを初期化してください。</p>
 <pre><code>restic -r s3:https://s3.files.example.com/backups -o s3.region=us-east-1 -o s3.bucket-lookup=path init
@@ -148,8 +148,8 @@ restic -r s3:https://s3.files.example.com/backups -o s3.region=us-east-1 -o s3.b
 <h3 id="s3-mapping">フォルダーへの対応と制限</h3>
 <p><code>a/b/c.txt</code> は入れ子のフォルダーとファイルに対応し、PUT は必要な親フォルダーを作成します。<code>/</code> で終わる空のオブジェクトはフォルダーです。一覧は UTF-8 のバイト順で、プレフィックス、区切り文字、件数を制限したページに対応します。親への移動、空のパス要素、不正な文字、前後の空白を含む名前は拒否します。大文字と小文字を区別しないスペースでは、大文字と小文字だけが異なる名前の競合を拒否します。</p>
 <p>DELETE はファイルとフォルダーをごみ箱へ移します。上書き時はスペースの方針に従って以前のバージョンを保存します。クォータとアップロードサイズの制限も適用されます。MD5 ETag はアップロードした内容を識別し、Content-MD5 と対応する AWS チェックサムヘッダーを検証します。マルチパートの部品は一日以内の一時保存で、未完了アップロードを中止すれば早く解放できます。未完了アップロードはキーごとに 32 件、バケットごとに 128 件、サーバー全体で 512 件までです。各アップロードは 10,000 パートまでです。</p>
-<p>対応する操作は ListBuckets（キーに対応するバケットのみ）、HeadBucket、GetBucketLocation、ListObjects/V2、HEAD、範囲と条件付き GET、PUT、同一バケット内の COPY、DELETE と一括削除、マルチパートの開始・パート送信・完了・中止・一覧、署名付き GET/PUT です。署名付き URL の有効期間は最大七日ですが、キーの期限切れや無効化で直ちに停止します。読み取り専用キーは署名付き URL でも PUT できません。</p>
-<p>ACL、S3 API によるバケット作成、バケットポリシー、ライフサイクル、Object Lock、S3 バージョニング、カスタムメタデータ、オブジェクトタグ、サーバー側暗号化設定、仮想ホスト形式の URL は提供しません。未対応の操作には NotImplemented を返します。時計はサーバーとのずれを 15 分以内にしてください。署名の失敗にはログインと共通の失敗回数制限を適用します。</p>
+<p>対応する操作は ListBuckets（キーに対応するバケットのみ）、HeadBucket、GetBucketLocation、ListObjects/V2、HEAD、範囲と条件付き GET、PUT、同一バケット内の COPY、DELETE と一括削除、マルチパートの開始・パート送信・完了・中止・一覧、署名付き GET/PUT です。PUT とマルチパートの完了は <code>If-None-Match: *</code>（そのキーにオブジェクトがない場合のみ。Terraform のロックファイルに必要です）と <code>If-Match</code>（その ETag の内容の場合のみ上書き）に対応します。条件は保存時にもう一度確認するため、同時に書き込む二者のうち成功するのは一方だけです。フォルダーのキー（<code>/</code> で終わるもの）を削除すると、空のフォルダーだけを削除します。S3 がフォルダーマーカーだけを削除するのと同じく、中のオブジェクトは残ります。1,000 件を超えるキー、パート、アップロードを求めた場合は、AWS と同じく 1,000 件を返します。署名付き URL の有効期間は最大七日ですが、キーの期限切れや無効化で直ちに停止します。読み取り専用キーは署名付き URL でも PUT できません。</p>
+<p>ACL、S3 API によるバケット作成、バケットポリシー、ライフサイクル、Object Lock、S3 バージョニング、オブジェクトタグ、サーバー側暗号化設定、仮想ホスト形式の URL は提供しません。未対応の操作には NotImplemented を返します。時計はサーバーとのずれを 15 分以内にしてください。署名の失敗にはログインと共通の失敗回数制限を適用します。</p>
 <h2 id="ftp">FTP 受信フォルダー</h2>
 <p>FTP 受信フォルダーでは、スキャナーなどの機器が専用の認証情報で一つのフォルダーへアップロードできます。既定では無効です。既存の FTP サーバーをストレージとして追加する機能とは異なり、機器にアカウントやアプリのパスワードを渡す必要はありません。</p>
 <h3 id="ftp-setup">FTP と明示的 FTPS を有効にする</h3>

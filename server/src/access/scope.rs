@@ -32,6 +32,8 @@ pub async fn inside(conn: &mut SqliteConnection, root: &str, node: &str) -> AppR
     Ok(found)
 }
 
+/// The item at `key` below `root`. A folder of a folder space on the way is checked for changes on disk at most every
+/// few seconds (`sync_opened`): every S3 request goes through here, for each folder of its key
 pub async fn rooted_item(st: &AppState, user: &User, root: &str, key: &str, need: Need) -> AppResult<Node> {
     let parts = relative_parts(key)?;
     let mut node = tree::folder_for(&mut *st.db.acquire().await?, user, root, Need::Read).await?;
@@ -41,7 +43,7 @@ pub async fn rooted_item(st: &AppState, user: &User, root: &str, key: &str, need
             return Err(AppError::not_found("Object not found"));
         }
         if node.in_folder_space() {
-            crate::folders::sync_folder(st, &node).await;
+            crate::folders::sync_opened(st, &node).await;
         }
         let mut conn = st.db.acquire().await?;
         node = child_named(&mut conn, &node.id, &part).await?.ok_or_else(|| AppError::not_found("Object not found"))?;
@@ -65,7 +67,7 @@ pub async fn rooted_parent(st: &AppState, user: &User, root: &str, key: &str) ->
     let mut folder = tree::folder_for(&mut *st.db.acquire().await?, user, root, Need::Add).await?;
     for part in parts {
         if folder.in_folder_space() {
-            crate::folders::sync_folder(st, &folder).await;
+            crate::folders::sync_opened(st, &folder).await;
         }
         let child = child_named(&mut *st.db.acquire().await?, &folder.id, &part).await?;
         if child.is_none()

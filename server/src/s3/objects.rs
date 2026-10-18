@@ -12,13 +12,14 @@ pub fn timestamp(seconds: i64) -> Timestamp {
     (std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds.max(0) as u64)).into()
 }
 
+/// Refuses settings a write can't keep. Custom metadata other than `mtime` is accepted and not kept, as clients add it
+/// on their own (rclone's `md5chksum` on large uploads): refusing it failed their uploads.
 pub fn unsupported(headers: &HeaderMap) -> S3Result<()> {
     for name in headers.keys() {
         let name = name.as_str();
         if name.starts_with("x-amz-grant-")
             || name.starts_with("x-amz-server-side-encryption")
             || name.starts_with("x-amz-object-lock")
-            || (name.starts_with("x-amz-meta-") && name != "x-amz-meta-mtime")
             || matches!(name, "x-amz-acl" | "x-amz-tagging" | "x-amz-tagging-directive" | "x-amz-website-redirect-location")
         {
             return Err(s3_error!(NotImplemented, "This S3 setting is not supported"));
@@ -191,9 +192,29 @@ where
     Ok((tmp, received, hash, etag))
 }
 
+/// What a write expects at `key` (`If-None-Match: *`, or `If-Match` with the ETag it has), checked again when it is
+/// stored, under the write lock: a lock file of Terraform's is made only once, and never over someone else's
+pub async fn expected(st: &AppState, identity: &Identity, key: &str, headers: &HeaderMap) -> S3Result<access::Expect> {
+    let text = |name| headers.get(name).and_then(|v| v.to_str().ok());
+    if let Some(none) = text("if-none-match") {
+        return if none.trim() == "*" { Ok(access::Expect::Absent) } else { Err(s3_error!(NotImplemented, "If-None-Match takes only *")) };
+    }
+    let Some(wanted) = text("if-match") else { return Ok(access::Expect::Any) };
+    let node = match access::rooted_item(st, &identity.user, &identity.root.id, key, Need::Read).await {
+        Ok(node) if !node.is_folder() => node,
+        Ok(_) => return Err(s3_error!(NoSuchKey)),
+        Err(e) => return Err(super::map_error(e)),
+    };
+    if !etag_matches(wanted, &super::etag::describe_node(st, &node).await?.etag) {
+        return Err(s3_error!(PreconditionFailed));
+    }
+    Ok(access::Expect::Same { id: node.id, blob_hash: node.blob_hash, size: node.size, updated_at: node.updated_at })
+}
+
 pub async fn put(st: &AppState, mut req: S3Request<PutObjectInput>) -> S3Result<S3Response<PutObjectOutput>> {
     let identity = request_identity(st, &req, Some(&req.input.bucket), true).await?;
     unsupported(&req.headers)?;
+    let expect = expected(st, &identity, &req.input.key, &req.headers).await?;
     let mtime = super::metadata::mtime(&req.headers)?;
     if req.input.key.ends_with('/') && mtime.is_some() {
         return Err(s3_error!(NotImplemented));
@@ -220,15 +241,22 @@ pub async fn put(st: &AppState, mut req: S3Request<PutObjectInput>) -> S3Result<
                 access::make_folder(st, &identity.user, &parent, &name).await.map_err(super::map_error)?;
             }
         } else {
-            commit(st.clone(), identity.user.clone(), parent, name, (tmp, size, hash), access::ScopedWrite { root: identity.root.id.clone(), mtime }).await?;
+            let scope = access::ScopedWrite { root: identity.root.id.clone(), mtime, expect };
+            commit(st.clone(), identity.user.clone(), parent, name, (tmp, size, hash, Some(etag.value().to_string())), scope).await?;
         }
         Ok(S3Response::new(PutObjectOutput { e_tag: Some(etag), ..Default::default() }))
     }
     .await
 }
 
+/// Deletes the object `key`. A folder key (`dir/`) is S3's folder marker: only an empty folder goes, as in S3, where
+/// deleting the marker leaves the objects below it; a folder with something in it stays as it is.
 pub async fn delete_key(st: &AppState, identity: &Identity, key: &str) -> S3Result<()> {
     match access::rooted_item(st, &identity.user, &identity.root.id, key, Need::Delete).await {
+        Ok(node) if node.is_folder() => match crate::nodes::trash_empty_folder(st, &identity.user, &node.id).await {
+            Err(e) if e.message == crate::nodes::NOT_EMPTY => Ok(()),
+            result => result.map_err(super::map_error),
+        },
         Ok(node) => access::trash(st, &identity.user, &node.id).await.map_err(super::map_error),
         Err(e) if e.status == StatusCode::NOT_FOUND => Ok(()),
         Err(e) => Err(super::map_error(e)),
@@ -299,24 +327,26 @@ pub async fn copy(st: &AppState, req: S3Request<CopyObjectInput>) -> S3Result<S3
     if received_etag != etag {
         return Err(s3_error!(PreconditionFailed));
     }
-    commit(st.clone(), identity.user, parent, name, (tmp, size, hash), access::ScopedWrite { root: identity.root.id, mtime }).await?;
+    let scope = access::ScopedWrite { root: identity.root.id, mtime, expect: Default::default() };
+    commit(st.clone(), identity.user, parent, name, (tmp, size, hash, Some(etag.value().to_string())), scope).await?;
     Ok(S3Response::new(CopyObjectOutput {
         copy_object_result: Some(CopyObjectResult { e_tag: Some(etag), last_modified: Some(timestamp(now())), ..Default::default() }),
         ..Default::default()
     }))
 }
 
-/// Once staging starts it finishes independently of the client connection, as web and WebDAV writes do.
+/// Once staging starts it finishes independently of the client connection, as web and WebDAV writes do. The content
+/// comes with its SHA-256 and MD5 when receiving it worked them out, so it isn't read again for them.
 pub async fn commit(
     st: AppState,
     user: crate::auth::User,
     parent: crate::tree::Node,
     name: String,
-    (tmp, size, hash): (super::temp::Temporary, u64, Option<String>),
+    (tmp, size, hash, md5): (super::temp::Temporary, u64, Option<String>, Option<String>),
     scope: access::ScopedWrite,
 ) -> S3Result<()> {
     tokio::spawn(async move {
-        access::store_in_scope(st, user, parent, name, crate::content::Received { path: tmp.path().to_path_buf(), size, hash }, scope)
+        access::store_in_scope(st, user, parent, name, crate::content::Received { path: tmp.path().to_path_buf(), size, hash, md5 }, scope)
             .await
             .map_err(super::map_error)?;
         drop(tmp);

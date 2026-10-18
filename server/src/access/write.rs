@@ -148,6 +148,25 @@ pub async fn store_new(st: AppState, user: User, parent: Node, name: String, tmp
 pub struct ScopedWrite {
     pub root: String,
     pub mtime: Option<String>,
+    /// What the write expects to find there, checked under the write lock (S3's conditional writes)
+    pub expect: Expect,
+}
+
+/// What a conditional write expects at its name
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum Expect {
+    /// Whatever is there
+    #[default]
+    Any,
+    /// Nothing: the write only creates (`If-None-Match: *`)
+    Absent,
+    /// This file, with this content (blob, size and change time): `If-Match` with its ETag
+    Same { id: String, blob_hash: Option<String>, size: i64, updated_at: i64 },
+}
+
+/// The refusal of a conditional write whose condition no longer holds
+fn precondition_failed() -> AppError {
+    AppError::new(StatusCode::PRECONDITION_FAILED, "The object changed since its condition was checked")
 }
 
 pub async fn store_in_scope(st: AppState, user: User, parent: Node, name: String, received: content::Received, scope: ScopedWrite) -> AppResult<bool> {
@@ -167,7 +186,7 @@ async fn store_file(
     size: u64,
     (hash, create_only, scope): (Option<String>, bool, Option<&ScopedWrite>),
 ) -> AppResult<bool> {
-    let staged = content::stage(st, parent, content::Received { path: tmp.to_path_buf(), size, hash }).await?;
+    let staged = content::stage(st, parent, content::Received { path: tmp.to_path_buf(), size, hash, md5: None }).await?;
     let size = size as i64;
     let mut turn = staged.turn(st).await;
     let _w = st.write_lock.lock().await;
@@ -183,7 +202,18 @@ async fn store_file(
                 return Err(AppError::forbidden("Object is outside the bucket"));
             }
         }
-        let (created, written) = match child_named(&mut tx, &folder.id, name).await? {
+        let existing = child_named(&mut tx, &folder.id, name).await?;
+        match (scope.map(|s| &s.expect), &existing) {
+            (Some(Expect::Absent), Some(_)) => return Err(precondition_failed()),
+            (Some(Expect::Same { .. }), None) => return Err(precondition_failed()),
+            (Some(Expect::Same { id, blob_hash, size, updated_at }), Some(n))
+                if (&n.id, &n.blob_hash, n.size, n.updated_at) != (id, blob_hash, *size, *updated_at) =>
+            {
+                return Err(precondition_failed());
+            }
+            _ => {}
+        }
+        let (created, written) = match existing {
             Some(_) if create_only => return Err(AppError::conflict(format!("\"{name}\" already exists"))),
             Some(n) if n.is_folder() => return Err(AppError::new(StatusCode::METHOD_NOT_ALLOWED, "A folder has this name")),
             Some(n) => {
