@@ -12,6 +12,7 @@ use crate::{
 };
 
 pub mod app_passwords;
+pub mod pending;
 pub mod sftp;
 
 pub const SESSION_COOKIE: &str = "tf_session";

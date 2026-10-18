@@ -144,12 +144,28 @@ pub async fn request_identity<T>(st: &AppState, req: &S3Request<T>, bucket: Opti
     Ok(identity)
 }
 
-pub struct Auth(pub AppState);
+/// `.1` is set when the Access Key exists but is refused (stopped, ended, its bucket or creator no longer allowed):
+/// that is no guess, and isn't counted as a failed sign-in
+pub struct Auth(pub AppState, pub std::sync::Arc<std::sync::atomic::AtomicBool>);
 
 #[async_trait::async_trait]
 impl S3Auth for Auth {
     async fn get_secret_key(&self, access_key: &str) -> S3Result<SecretKey> {
-        let identity = identity(&self.0, access_key, false).await?;
+        let identity = match identity(&self.0, access_key, false).await {
+            Ok(identity) => identity,
+            Err(e) => {
+                let mut conn = self.0.db.acquire().await.map_err(super::internal)?;
+                let (known,): (bool,) = sqlx::query_as("SELECT EXISTS(SELECT 1 FROM s3_keys WHERE access_key = ?)")
+                    .bind(access_key)
+                    .fetch_one(&mut *conn)
+                    .await
+                    .map_err(super::internal)?;
+                if known {
+                    self.1.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                return Err(e);
+            }
+        };
         crate::secrets::open(&format!("s3-key:{}", identity.key.id), &identity.key.secret).map(SecretKey::from).map_err(super::internal)
     }
 }

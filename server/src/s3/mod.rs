@@ -91,12 +91,14 @@ pub async fn dispatch(State(st): State<AppState>, mut req: Request, next: Next) 
     }
     let peer = req.extensions().get::<ConnectInfo<std::net::SocketAddr>>().map(|v| v.0).unwrap_or_else(|| ([127, 0, 0, 1], 0).into());
     let key = format!("ip:{}", auth::limit_key_ip(&auth::client_ip(&st, peer, req.headers())));
-    // Reserve first; concurrent signature failures cannot all pass the shared sign-in limit.
-    if !auth::begin_attempt(&st, &key, auth::IP_FAIL_LIMIT) {
-        return wire_error(StatusCode::TOO_MANY_REQUESTS, "SlowDown", "Too many failed sign-ins. Try again later.");
-    }
+    // A clock out of step is no guess at a key: refused before anything counts
     if !time_ok(&req) {
         return wire_error(StatusCode::FORBIDDEN, "RequestTimeTooSkewed", "The request time differs from the server by more than 15 minutes");
+    }
+    // Reserve first; concurrent signature failures cannot all pass the shared sign-in limit. The reservation is given
+    // back unless the request was a bad signature or an unknown key.
+    if !auth::begin_attempt(&st, &key, auth::IP_FAIL_LIMIT) {
+        return wire_error(StatusCode::TOO_MANY_REQUESTS, "SlowDown", "Too many failed sign-ins. Try again later.");
     }
     let mut config = S3Config::default();
     config.xml_max_body_size = 1024 * 1024;
@@ -105,14 +107,20 @@ pub async fn dispatch(State(st): State<AppState>, mut req: Request, next: Next) 
     config.sig_v4_allowed_services = vec!["s3".into()];
     config.put_object_max_size = Some(if st.max_upload > 0 { st.max_upload.min(5 * 1024 * 1024 * 1024) } else { 5 * 1024 * 1024 * 1024 });
     let mut builder = S3ServiceBuilder::new(Service(st.clone()));
-    builder.set_auth(credentials::Auth(st.clone()));
+    let refused = Arc::new(AtomicBool::new(false));
+    builder.set_auth(credentials::Auth(st.clone(), refused.clone()));
     builder.set_access(Access { st: st.clone(), rate_key: key.clone() });
     builder.set_config(Arc::new(StaticConfigProvider::new(Arc::new(config))));
     let verified = Verified(Arc::new(AtomicBool::new(false)));
     req.extensions_mut().insert(verified.clone());
     let (parts, body) = req.into_parts();
     let req = axum::http::Request::from_parts(parts, s3s::Body::http_body_unsync(body));
-    match builder.build().call(req).await {
+    let answer = builder.build().call(req).await;
+    // A known key refused for another reason, or a request that couldn't be read: no sign-in was tried
+    if !verified.0.load(Ordering::Relaxed) && (refused.load(Ordering::Relaxed) || answer.is_err()) {
+        auth::attempt_succeeded(&st, &key);
+    }
+    match answer {
         Ok(res) => {
             // Authenticated operation errors (missing objects, quota…) are not failed sign-ins.
 

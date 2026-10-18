@@ -104,17 +104,31 @@ where
     let reply = cmd.build_reply(&args, port).await?;
     if reply.is_positive() {
         setup_inter_loop_comms(args.session.clone(), args.tx_control_chan.clone()).await;
+        let expected = args.session.lock().await.source.ip();
+        let session = args.session.clone();
         // Open the data connection in a new task and process it.
         // We cannot await this since we first need to let the client know where to connect :-)
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             // Timeout if the client doesn't connect to the socket in a while, to avoid leaving the socket hanging open permanently.
-            let r = tokio::time::timeout(Duration::from_secs(15), listener.accept()).await;
-            match r {
-                Ok(Ok((socket, _socket_addr))) => datachan::spawn_processing(args.logger, args.session, socket).await,
-                Ok(Err(e)) => slog::error!(args.logger, "Error waiting for data connection: {}", e),
-                Err(_) => slog::warn!(args.logger, "Client did not connect to data port in time"),
+            // Connections from another address are closed, and the port keeps waiting for the client's own until then:
+            // someone else connecting first can't take the transfer, nor make it fail.
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+            loop {
+                match tokio::time::timeout_at(deadline, listener.accept()).await {
+                    Ok(Ok((socket, from))) if from.ip() == expected => break datachan::spawn_processing(args.logger, args.session, socket).await,
+                    Ok(Ok((socket, from))) => {
+                        slog::warn!(args.logger, "Closing a data connection from {} that isn't the client's address", from.ip());
+                        drop(socket);
+                    }
+                    Ok(Err(e)) => break slog::error!(args.logger, "Error waiting for data connection: {}", e),
+                    Err(_) => break slog::warn!(args.logger, "Client did not connect to data port in time"),
+                }
             }
         });
+        // One passive port per session: the one asked for before is closed
+        if let Some(earlier) = session.lock().await.passive_task.replace(task.abort_handle()) {
+            earlier.abort();
+        }
     }
 
     Ok(reply)

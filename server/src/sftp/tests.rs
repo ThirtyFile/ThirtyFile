@@ -479,3 +479,59 @@ async fn an_open_sftp_session_loses_personal_access_on_guest_conversion_but_can_
     ssh.disconnect(russh::Disconnect::ByApplication, "Test complete", "en").await.unwrap();
     server.finish().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unknown_ssh_keys_use_none_of_the_sign_in_limit_and_an_address_cant_hold_every_slot() {
+    let env = testutil::env().await;
+    let amy = env.user("amy", true).await;
+    let _server = on(&env).await;
+    let rate = format!("ip:{}", crate::auth::limit_key_ip("127.0.0.1"));
+    let make = || russh::keys::PrivateKey::from(russh::keys::ssh_key::private::Ed25519Keypair::from_seed(&rand::random()));
+    let known = make();
+    let public = known.public_key().clone();
+    sqlx::query("INSERT INTO sftp_keys(id,user_id,name,public_key,fingerprint,created_at) VALUES(?,?,?,?,?,?)")
+        .bind("known-key")
+        .bind(amy.id)
+        .bind("Laptop")
+        .bind(public.to_openssh().unwrap())
+        .bind(public.fingerprint(russh::keys::ssh_key::HashAlg::Sha256).to_string())
+        .bind(now())
+        .execute(&env.st.db)
+        .await
+        .unwrap();
+    // An SSH agent tries its other keys first
+    let mut ssh = connection(&env).await;
+    for _ in 0..3 {
+        let other = russh::keys::PrivateKeyWithHashAlg::new(Arc::new(make()), None);
+        assert!(!ssh.authenticate_publickey(&amy.username, other).await.unwrap().success());
+    }
+    let key = russh::keys::PrivateKeyWithHashAlg::new(Arc::new(known), None);
+    assert!(ssh.authenticate_publickey(&amy.username, key).await.unwrap().success());
+    assert!(!crate::auth::attempts_exhausted(&env.st, &rate, 1), "unknown keys aren't failed sign-ins");
+    drop(ssh);
+
+    // Connections that never sign in: an address holds a few, and the next is closed at once
+    let address = env.st.part::<super::Memory>().address.read().clone();
+    let mut idle = Vec::new();
+    for _ in 0..crate::auth::pending::PER_ADDRESS {
+        idle.push(tokio::net::TcpStream::connect(&address).await.unwrap());
+    }
+    // (give the listener a moment to take them all)
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let mut probe = tokio::net::TcpStream::connect(&address).await.unwrap();
+            let mut byte = [0u8; 1];
+            if tokio::time::timeout(std::time::Duration::from_millis(500), tokio::io::AsyncReadExt::read(&mut probe, &mut byte))
+                .await
+                .is_ok_and(|r| matches!(r, Ok(0) | Err(_)))
+            {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("a further connection from the same address is closed");
+    idle.clear();
+    // Once they're gone, the address connects again
+    let (_ssh, _sftp) = client(&env, &amy, &token(&env, &amy, "write").await).await;
+}
