@@ -54,5 +54,6 @@ pub async fn update(State(st): State<AppState>, Admin(user): Admin, Json(req): J
     crate::logs::record_activity(&mut tx, &user, None, "settings", "Updated SFTP settings").await?;
     tx.commit().await?;
     drop(_w);
+    st.part::<super::Memory>().changed.notify_one();
     get(State(st), Admin(user)).await
 }

@@ -397,6 +397,7 @@ async fn optional_listener_does_not_bind_until_enabled_and_retries_a_conflicting
     .unwrap();
     assert!(env.st.part::<super::Memory>().error.read().is_none(), "a disabled feature does not try to bind an occupied port");
     crate::db::set_setting(&mut env.st.db.acquire().await.unwrap(), "sftp_enabled", "1").await.unwrap();
+    env.st.part::<super::Memory>().changed.notify_one();
     tokio::time::timeout(std::time::Duration::from_secs(2), async {
         while env.st.part::<super::Memory>().error.read().is_none() {
             tokio::task::yield_now().await;
@@ -414,6 +415,7 @@ async fn optional_listener_does_not_bind_until_enabled_and_retries_a_conflicting
     .unwrap();
     assert!(tokio::net::TcpStream::connect(&address).await.is_ok());
     crate::db::set_setting(&mut env.st.db.acquire().await.unwrap(), "sftp_enabled", "0").await.unwrap();
+    env.st.part::<super::Memory>().changed.notify_one();
     tokio::time::timeout(std::time::Duration::from_secs(3), async {
         loop {
             if let Ok(listener) = tokio::net::TcpListener::bind(&address).await {

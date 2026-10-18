@@ -131,6 +131,9 @@ fn tls(settings: &Settings, private_plain: bool) -> AppResult<Option<Arc<rustls:
     Ok(Some(Arc::new(config)))
 }
 
+/// How often the settings are read again when nothing says they changed
+const IDLE: Duration = Duration::from_secs(5);
+
 pub fn supervise(st: AppState, settings: Settings) -> Listener {
     *st.part::<Memory>().status.write() =
         Status { address: settings.address.clone(), passive_ports: settings.passive.clone(), passive_host: settings.host.clone(), ..Default::default() };
@@ -139,9 +142,19 @@ pub fn supervise(st: AppState, settings: Settings) -> Listener {
         let mut active: Option<Listener> = None;
         let mut current = None;
         let mut retry = tokio::time::Instant::now();
-        let mut tick = tokio::time::interval(Duration::from_millis(500));
+        let mut first = true;
         loop {
-            tokio::select! {_=stopped.changed()=>break,_=tick.tick()=>(),_=st.part::<Memory>().changed.notified()=>()}
+            // The settings are read right away, then when they change (`changed`), or now and then: every half second
+            // while a start that failed waits to be tried again, else every few seconds
+            let failing = active.is_none() && current.as_ref().is_some_and(|c: &config::Config| c.enabled);
+            let wait = if std::mem::take(&mut first) {
+                Duration::ZERO
+            } else if failing {
+                Duration::from_millis(500)
+            } else {
+                IDLE
+            };
+            tokio::select! {_=stopped.changed()=>break,_=tokio::time::sleep(wait)=>(),_=st.part::<Memory>().changed.notified()=>()}
             let cfg = config::load(&st).await.unwrap_or_default();
             #[cfg(test)]
             let _looked = Looked(&st);

@@ -64,7 +64,7 @@ impl ZipPlan {
 
     /// What goes into the ZIP, one item at a time: what the plan measured
     pub fn walk(&self) -> ZipWalk {
-        ZipWalk { items: self.items.clone(), access: self.access.clone(), next: 0, lines: None }
+        ZipWalk { items: self.items.clone(), access: self.access.clone(), next: 0, lines: None, checked: Default::default() }
     }
 }
 
@@ -72,6 +72,9 @@ impl ZipPlan {
 #[derive(Clone, serde::Serialize, Deserialize)]
 struct Planned {
     id: String,
+    /// The folder it is in, when it came from listing a folder of the ZIP
+    #[serde(default)]
+    parent: Option<String>,
     path: String,
     size: u64,
     mtime: i64,
@@ -86,6 +89,27 @@ pub struct ZipAccess {
 }
 
 impl ZipAccess {
+    /// Whether an item in a folder checked already (`check`) is still there and still seen by the user (and its link
+    /// still works): one query, where `check` takes about ten. Its role needn't be worked out again: seeing an item is
+    /// reading it.
+    async fn check_in_checked(&self, st: &AppState, id: &str) -> AppResult<()> {
+        let sql = format!(
+            "SELECT EXISTS(SELECT 1 FROM nodes n WHERE n.id = ?1 AND n.trashed_at IS NULL AND {} {})
+               AND EXISTS(SELECT 1 FROM users WHERE id = ?2 AND disabled = 0)",
+            tree::visible_sql(&self.user, "n.id"),
+            if self.publication.is_some() { "AND NOT n.restricted" } else { "" }
+        );
+        let (seen,): (bool,) = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(id).bind(self.user.id).fetch_one(&st.db).await?;
+        if !seen {
+            return Err(AppError::not_found("Item not found"));
+        }
+        // A link stopped or deleted meanwhile ends the download at the next item, as it does with `check`
+        if let Some(token) = &self.share {
+            crate::shares::check_stream_access(st, token).await?;
+        }
+        Ok(())
+    }
+
     async fn check(&self, st: &AppState, id: &str) -> AppResult<()> {
         let mut c = st.db.acquire().await?;
         let user = crate::auth::current_user(&mut c, &self.user).await?;
@@ -200,6 +224,8 @@ pub struct ZipWalk {
     access: Option<ZipAccess>,
     next: usize,
     lines: Option<tokio::io::Lines<tokio::io::BufReader<tokio::fs::File>>>,
+    /// The folders checked in full so far (`ZipAccess::check`): what is in them takes one query each
+    checked: std::collections::HashSet<String>,
 }
 
 impl ZipWalk {
@@ -224,7 +250,16 @@ impl ZipWalk {
         };
         let Some(p) = planned else { return Ok(None) };
         if let Some(access) = &self.access {
-            access.check(st, &p.id).await?;
+            match &p.parent {
+                Some(parent) if self.checked.contains(parent) => access.check_in_checked(st, &p.id).await?,
+                _ => access.check(st, &p.id).await?,
+            }
+            if matches!(p.what, What::Folder) {
+                if self.checked.len() >= 10_000 {
+                    self.checked.clear();
+                }
+                self.checked.insert(p.id.clone());
+            }
         }
         let blob = match p.what {
             What::Folder => None,
@@ -247,8 +282,9 @@ impl ZipWalk {
 const ZIP_PAGE: i64 = 500;
 
 enum Todo {
-    /// An item and its path in the ZIP
-    Item(String, Box<Node>),
+    /// An item and its path in the ZIP, and whether it came from listing a folder (`children_page`, which checked the
+    /// folder and lists only what the user sees)
+    Item(String, Box<Node>, bool),
     /// The items of a folder after `after` (by id) still to list: the folder, its path in the ZIP
     Folder(Box<Node>, String, Option<String>),
 }
@@ -271,18 +307,21 @@ impl Lister {
                         self.todo.push(Todo::Folder(folder, path.clone(), page.last().map(|n| n.id.clone())));
                     }
                     for n in page.into_iter().rev() {
-                        self.todo.push(Todo::Item(format!("{path}/{}", n.name), Box::new(n)));
+                        self.todo.push(Todo::Item(format!("{path}/{}", n.name), Box::new(n), true));
                     }
                 }
-                Todo::Item(path, n) => {
-                    if let Some(access) = &self.access {
+                Todo::Item(path, n, listed) => {
+                    if let Some(access) = &self.access
+                        && !listed
+                    {
                         access.check(st, &n.id).await?;
                     }
+                    let parent = n.parent_id.clone().filter(|_| listed);
                     let mtime = n.updated_at + self.offset;
                     if n.is_folder() {
                         let id = n.id.clone();
                         self.todo.push(Todo::Folder(n, path.clone(), None));
-                        return Ok(Some(Planned { id, path, size: 0, mtime, what: What::Folder }));
+                        return Ok(Some(Planned { id, parent, path, size: 0, mtime, what: What::Folder }));
                     }
                     let Ok(blob) = Source::resolve(st, &n).await else { continue };
                     // The length of the ZIP is announced up front: a folder space's file is measured as it is now
@@ -299,7 +338,7 @@ impl Lister {
                         }
                         Source::Stored { hash, location } => (n.size as u64, What::Stored { hash, location }),
                     };
-                    return Ok(Some(Planned { id: n.id.clone(), path, size, mtime, what }));
+                    return Ok(Some(Planned { id: n.id.clone(), parent, path, size, mtime, what }));
                 }
             }
         }
@@ -416,7 +455,7 @@ pub async fn zip_plan_checked(st: &AppState, roots: Vec<Node>, offset: i64, acce
     // What goes in and its length, going through it once
     let mut len = crate::zip::Length::default();
     let mut bytes = 0;
-    let mut lister = Lister { offset, access: access.clone(), todo: named.into_iter().rev().map(|(n, name)| Todo::Item(name, Box::new(n))).collect() };
+    let mut lister = Lister { offset, access: access.clone(), todo: named.into_iter().rev().map(|(n, name)| Todo::Item(name, Box::new(n), false)).collect() };
     let mut recorder = Recorder { tmp: st.tmp_dir().join(format!("zip-plan-{}", crate::util::new_id())), memory: Vec::new(), file: None };
     while let Some(item) = lister.next(st).await? {
         if item.path.len() + 1 > u16::MAX as usize {
@@ -754,6 +793,25 @@ mod tests {
         }
         out.sort();
         out
+    }
+
+    #[tokio::test]
+    async fn a_zip_stops_at_the_first_item_after_access_to_its_folder_goes() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let ben = env.user("ben", true).await;
+        let docs = env.folder(&amy, amy.root(), "Docs").await;
+        env.stored_file(&amy, &docs, "a.txt", b"alpha").await;
+        env.stored_file(&amy, &docs, "b.txt", b"beta").await;
+        env.grant(&docs, &ben, "viewer").await;
+        let root = tree::get_node(&mut env.st.db.acquire().await.unwrap(), &docs).await.unwrap().unwrap();
+        let access = ZipAccess { user: ben.clone(), publication: None, share: None };
+        let plan = zip_plan_checked(&env.st, vec![root], 0, Some(access)).await.unwrap();
+        let mut walk = plan.walk();
+        assert_eq!(walk.next(&env.st).await.unwrap().unwrap().path, "Docs");
+        // Taken away while the ZIP is sent: the files of the folder checked already are refused too
+        sqlx::query("DELETE FROM grants WHERE node_id = ? AND principal_id = ?").bind(&docs).bind(ben.id).execute(&env.st.db).await.unwrap();
+        assert!(matches!(walk.next(&env.st).await, Err(e) if e.status == StatusCode::NOT_FOUND));
     }
 
     #[tokio::test]
