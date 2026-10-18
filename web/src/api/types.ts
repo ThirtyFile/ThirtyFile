@@ -1088,6 +1088,10 @@ export interface SharedItem extends Located {
 
 export interface Me {
   guest: boolean;
+  /** S3 buckets and FTP receive folders can be published now, and SSH keys sign in over SFTP */
+  s3_enabled: boolean;
+  ftp_enabled: boolean;
+  sftp_keys: boolean;
   id: number;
   /** An administrator chose the password: the person must choose their own before anything else */
   must_change_password: boolean;

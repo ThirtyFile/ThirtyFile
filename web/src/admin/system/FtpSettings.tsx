@@ -3,6 +3,7 @@ import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "@/api";
 import type { FtpStatus } from "@/api/ftp";
+import { keys } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { ErrorState } from "@/components/ErrorState";
@@ -14,8 +15,9 @@ function Form({ value }: { value: FtpStatus }) {
   const save = useMutation({
     mutationFn: () => api.saveFtpConfig({ enabled: config.enabled, managers_publish: config.managers_publish, allow_private_plaintext: config.allow_private_plaintext }),
     onSuccess: (data) => {
-      qc.setQueryData(["ftp-config"], data);
-      void qc.invalidateQueries({ queryKey: ["ftp-folders"] });
+      qc.setQueryData(keys.ftpConfig(), data);
+      void qc.invalidateQueries({ queryKey: keys.receiveFolderLists() });
+      void qc.invalidateQueries({ queryKey: keys.me() });
       toast.success(t("FTP settings updated"));
     },
     onError: (e) => toast.error(e.message),
@@ -31,15 +33,20 @@ function Form({ value }: { value: FtpStatus }) {
       <h3 className="font-medium">FTP / FTPS</h3>
       <p className="text-xs text-muted-foreground">{t("Let scanners and other devices upload to a receive folder with their own credentials. Public connections require explicit FTPS.")}</p>
       <Label className="flex gap-2">
-        <input type="checkbox" checked={config.enabled} onChange={(e) => setConfig({ ...config, enabled: e.target.checked })} />
+        <input type="checkbox" className="size-4 accent-brand" checked={config.enabled} onChange={(e) => setConfig({ ...config, enabled: e.target.checked })} />
         {t("Enable FTP receive folders")}
       </Label>
       <Label className="flex gap-2">
-        <input type="checkbox" checked={config.managers_publish} onChange={(e) => setConfig({ ...config, managers_publish: e.target.checked })} />
+        <input type="checkbox" className="size-4 accent-brand" checked={config.managers_publish} onChange={(e) => setConfig({ ...config, managers_publish: e.target.checked })} />
         {t("Space managers can publish receive folders")}
       </Label>
       <Label className="flex gap-2">
-        <input type="checkbox" checked={config.allow_private_plaintext} onChange={(e) => setConfig({ ...config, allow_private_plaintext: e.target.checked })} />
+        <input
+          type="checkbox"
+          className="size-4 accent-brand"
+          checked={config.allow_private_plaintext}
+          onChange={(e) => setConfig({ ...config, allow_private_plaintext: e.target.checked })}
+        />
         {t("Allow plaintext FTP from directly connected private networks")}
       </Label>
       <p className="text-xs text-muted-foreground">
@@ -55,7 +62,7 @@ function Form({ value }: { value: FtpStatus }) {
         <dt>{t("TLS certificate")}</dt>
         <dd>{value.tls_ready ? t("Ready") : t("Not configured")}</dd>
         <dt>{t("Listener")}</dt>
-        <dd>{value.listening ? t("Active") : t("Stopped")}</dd>
+        <dd>{value.listening ? t("Running") : t("Not running")}</dd>
       </dl>
       <p className="text-xs text-muted-foreground">{t("Mount the TLS certificate and key and publish the control and passive ports in Docker. See the protocol guide for NAT settings.")}</p>
       {value.error && (
@@ -70,7 +77,7 @@ function Form({ value }: { value: FtpStatus }) {
   );
 }
 export function FtpSettings() {
-  const q = useQuery({ queryKey: ["ftp-config"], queryFn: ({ signal }) => api.ftpConfig(signal), refetchInterval: 5000 });
+  const q = useQuery({ queryKey: keys.ftpConfig(), queryFn: ({ signal }) => api.ftpConfig(signal), refetchInterval: 5000 });
   return (
     <div className="border-t">
       {q.error ? (

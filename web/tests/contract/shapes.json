@@ -284,6 +284,7 @@
     "can_share": false,
     "can_write": false,
     "display_name": "",
+    "ftp_enabled": false,
     "guest": false,
     "id": 0,
     "lang": "",
@@ -295,6 +296,8 @@
     "quota_bytes": 0,
     "role": "",
     "root_id": "",
+    "s3_enabled": false,
+    "sftp_keys": false,
     "share_policy": {
       "max_days": 0,
       "password_required": false,

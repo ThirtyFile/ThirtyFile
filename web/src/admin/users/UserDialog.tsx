@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { api, type UserRow } from "@/api";
-import { affected, invalidate, queries } from "@/api/queryKeys";
+import { affected, invalidate, keys, queries } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -33,7 +33,7 @@ export function UserDialog({ user, self, onClose, onPersonal }: { user: UserRow 
   const [role, setRole] = useState<"admin" | "user">(user?.role ?? "user");
   const [guest, setGuest] = useState(user?.guest ?? false);
   const converting = !!user && guest && !user.guest;
-  const preview = useQuery({ queryKey: ["guest-conversion", user?.id], queryFn: () => api.guestConversion(user!.id), enabled: converting });
+  const preview = useQuery({ queryKey: keys.guestConversion(user?.id), queryFn: () => api.guestConversion(user!.id), enabled: converting });
   const [confirmedRevision, setConfirmedRevision] = useState<string | null>(null);
   const confirmed = !!preview.data && confirmedRevision === preview.data.revision;
   const blockedConversion = converting && (!preview.data || preview.data.owned_spaces.length > 0 || preview.data.unsafe_groups.length > 0 || !confirmed);

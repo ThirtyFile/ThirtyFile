@@ -22,23 +22,26 @@ test.afterAll(({ browser }, info) =>
 test("SFTP is disabled by default and administrators can enable access and SSH keys", async ({ page }) => {
   await signIn(page);
   await page.goto("/admin/general");
-  const access = page.getByRole("switch", { name: "Allow SFTP access", exact: true });
-  const keys = page.getByRole("switch", { name: "Allow SSH keys", exact: true });
+  const form = page.locator("form").filter({ has: page.getByRole("heading", { name: "SFTP", exact: true }) });
+  const access = form.getByRole("checkbox", { name: "Allow SFTP access", exact: true });
+  const keys = form.getByRole("checkbox", { name: "Allow SSH keys", exact: true });
   await expect(access).not.toBeChecked();
   await expect(keys).not.toBeChecked();
   await expect(page.getByText("Host key fingerprint", { exact: true })).toBeVisible();
   await expect(page.getByText(/^SHA256:/)).toBeVisible();
-  const enabled = answer(page, "PUT", "/api/admin/sftp");
-  await access.click();
-  expect((await enabled).ok()).toBe(true);
+  // Both saved together with Save, as S3's and FTP's options are
+  await access.check();
+  await keys.check();
+  const saved = answer(page, "PUT", "/api/admin/sftp");
+  await form.getByRole("button", { name: "Save", exact: true }).click();
+  expect((await saved).ok()).toBe(true);
   await expect(access).toBeChecked();
-  const keysEnabled = answer(page, "PUT", "/api/admin/sftp");
-  await keys.click();
-  expect((await keysEnabled).ok()).toBe(true);
   await expect(keys).toBeChecked();
 });
 
-test("ordinary users add and remove their SSH keys with identity confirmation on desktop and mobile", async ({ page }) => {
+test("ordinary users add and remove their SSH keys with identity confirmation on desktop and mobile", async ({ page, browser }, info) => {
+  // The account menu offers SSH keys only while SFTP and its keys are on: on here, also when this runs on its own
+  await asAdmin(browser, info, async (request) => expect((await request.put("/api/admin/sftp", { data: { enabled: true, keys_enabled: true } })).ok()).toBe(true));
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   const username = await signInAsNewUser(page, "sftp");
@@ -63,8 +66,11 @@ test("ordinary users add and remove their SSH keys with identity confirmation on
   await page.setViewportSize({ width: 375, height: 812 });
   await expect(dialog).toBeVisible();
   expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-  const removed = answer(page, "DELETE", /\/api\/auth\/sftp-keys\//);
+  // Asked first: programs signing in with the key lose access
   await dialog.getByRole("button", { name: `Remove SSH key ${name}` }).click();
+  const question = page.getByRole("alertdialog").or(page.getByRole("dialog", { name: `Remove the SSH key "${name}"?` }));
+  const removed = answer(page, "DELETE", /\/api\/auth\/sftp-keys\//);
+  await question.getByRole("button", { name: "Remove", exact: true }).click();
   expect((await removed).ok()).toBe(true);
   await expect(dialog.getByText("No SSH keys yet")).toBeVisible();
   expect((await page.request.get("/api/admin/sftp")).status()).toBe(403);

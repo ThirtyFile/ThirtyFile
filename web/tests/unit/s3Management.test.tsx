@@ -2,6 +2,7 @@
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { keys } from "@/api/queryKeys";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { toast } from "sonner";
 import type { S3Bucket, S3Config, S3Key } from "@/api/s3";
@@ -12,9 +13,11 @@ import { BucketCard, S3BucketDialog, S3FolderSection } from "@/components/S3Buck
 vi.mock("sonner", () => ({ toast: { error: vi.fn<(message: string) => void>(), success: vi.fn<(message: string) => void>() } }));
 // The frame's navigation is covered separately; keep the page's refresh action available.
 vi.mock("@/admin/SettingsFrame", () => ({
-  SettingsFrame: ({ children, onRefresh }: { children: ReactNode; onRefresh(): void }) => (
+  SettingsFrame: ({ children, onRefresh, searchPlaceholder, onSearch }: { children: ReactNode; onRefresh(): void; searchPlaceholder?: string; onSearch?(q: string): void }) => (
     <main>
       <button onClick={onRefresh}>Refresh</button>
+      {/* The frame's search box, when the page searches what it lists */}
+      {onSearch && <input placeholder={searchPlaceholder} onChange={(e) => onSearch(e.target.value)} />}
       {children}
     </main>
   ),
@@ -206,10 +209,10 @@ describe("folder buckets", () => {
   test("the properties section hides unavailable publication and opens management for an existing bucket", async () => {
     folderResponses([], false);
     mount(<S3FolderSection nodeId="folder-1" />);
-    await settle(() => expect(qc.getQueryState(["s3-buckets", "folder-1"])?.status).toBe("success"));
+    await settle(() => expect(qc.getQueryState(keys.buckets("folder-1"))?.status).toBe("success"));
     expect(document.body.textContent).toBe("");
     folderResponses([{ ...bucket, enabled: false, active: false, keys: [] }], false);
-    await act(async () => void (await qc.invalidateQueries({ queryKey: ["s3-buckets"] })));
+    await act(async () => void (await qc.invalidateQueries({ queryKey: keys.bucketLists() })));
     await settle(() => expect(document.body.textContent).toContain("client-backups · 0 Access Keys"));
     click("Manage buckets and keys");
     await settle(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("No Access Keys yet"));
@@ -364,10 +367,15 @@ describe("Access Keys", () => {
   });
 });
 
-test("the administrator's bucket list retries failed loads, filters by creator or folder and refreshes to an empty state", async () => {
+test("the administrator's bucket list retries failed loads, searches on the server from the page's search box and says when nothing matches", async () => {
   const load = deferred<Response>();
   let current = [bucket, { ...bucket, id: "bucket-2", name: "photos", creator: "ben", folder: "Travel", keys: [] }];
-  fetchMock.mockImplementationOnce(() => load.promise).mockImplementation(async () => json({ can_publish: true, buckets: current }));
+  // The server searches the bucket's name, its creator's and its folder's
+  const matching = (url: string) => {
+    const search = new URL(url, "http://files.example.com").searchParams.get("search")?.toLowerCase();
+    return search ? current.filter((b) => `${b.name} ${b.creator} ${b.folder}`.toLowerCase().includes(search)) : current;
+  };
+  fetchMock.mockImplementationOnce(() => load.promise).mockImplementation(async (url) => json({ can_publish: true, buckets: matching(String(url)) }));
   mount(<S3BucketsPage />);
   expect(document.querySelector('[role="status"]')?.textContent).toContain("Loading");
   await act(async () => load.resolve(json({ error: "Bucket list unavailable" }, 503)));
@@ -375,14 +383,27 @@ test("the administrator's bucket list retries failed loads, filters by creator o
   click("Try again");
   await settle(() => expect(document.querySelector('section[aria-label="client-backups"]')).not.toBeNull());
   expect(String(fetchMock.mock.calls[0][0])).toBe("/api/s3/buckets");
-  type("Filter buckets", "AMY");
-  expect(document.querySelector('section[aria-label="client-backups"]')).not.toBeNull();
-  expect(document.querySelector('section[aria-label="photos"]')).toBeNull();
-  type("Filter buckets", "travel");
-  expect(document.querySelector('section[aria-label="photos"]')).not.toBeNull();
+  // One search box, the page's own
+  const boxes = document.querySelectorAll<HTMLInputElement>('input[placeholder="Search buckets"]');
+  expect(boxes).toHaveLength(1);
+  const search = async (text: string) => {
+    await act(async () => {
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      set.call(boxes[0], text);
+      boxes[0].dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    // The page waits for a pause in typing before it asks the server
+    await act(async () => new Promise((r) => setTimeout(r, 300)));
+  };
+  await search("travel");
+  // Loading the new answer shows neither; then only what matches
+  await settle(() => expect(document.querySelector('section[aria-label="photos"]')).not.toBeNull());
   expect(document.querySelector('section[aria-label="client-backups"]')).toBeNull();
-  type("Filter buckets", "CLIENT-BACKUPS");
-  expect(document.querySelector('section[aria-label="client-backups"]')).not.toBeNull();
+  expect(fetchMock.mock.calls.some(([url]) => String(url).includes("search=travel"))).toBe(true);
+  await search("nothing-like-it");
+  await settle(() => expect(document.body.textContent).toContain('No buckets match "nothing-like-it"'));
+  await search("");
+  await settle(() => expect(document.querySelector('section[aria-label="photos"]')).not.toBeNull());
   current = [];
   click("Refresh");
   await settle(() => expect(document.body.textContent).toContain("No S3 buckets yet"));

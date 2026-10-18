@@ -17,6 +17,20 @@ export const keys = {
   devices: (user: number | "me") => ["devices", user],
   notifications: () => ["notifications"],
   notificationSettings: () => ["notification-settings"],
+  sftpKeys: () => ["sftp-keys"],
+
+  // Programs reaching files: S3 buckets and FTP receive folders (a folder's, or every one for administrators, by what
+  // was searched for), and the settings of the protocols
+  bucketLists: () => ["s3-buckets"],
+  buckets: (nodeId: string | null, search = "") => ["s3-buckets", nodeId, search],
+  receiveFolderLists: () => ["ftp-folders"],
+  receiveFolders: (nodeId: string | null, search = "") => ["ftp-folders", nodeId, search],
+  s3Options: () => ["s3-options"],
+  s3Config: () => ["s3-config"],
+  ftpConfig: () => ["ftp-config"],
+  sftpSettings: () => ["sftp-settings"],
+  linksStopping: (driveId: string) => ["links-stopping", driveId],
+  guestConversion: (userId: number | undefined) => ["guest-conversion", userId],
   // Before signing in
   branding: () => ["branding"],
   authOptions: () => ["auth-options"],

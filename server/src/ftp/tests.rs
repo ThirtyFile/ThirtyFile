@@ -528,3 +528,30 @@ async fn a_refusal_after_the_right_password_isnt_a_failed_sign_in() {
     server.finish().await;
     env.st.db.close().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_ended_receive_folder_can_be_renamed_with_its_end_date_kept_and_found_by_searching() {
+    let (env, admin, created, server) = fixture(false).await;
+    let ended = crate::util::now() - 3600;
+    sqlx::query("UPDATE ftp_receive_folders SET expires_at = ? WHERE id = ?").bind(ended).bind(&created.folder.id).execute(&env.st.db).await.unwrap();
+    let edit = |name: &str, expires_at: Option<i64>| {
+        let change = manage::Change { name: name.into(), enabled: false, allow_list: false, allow_read: false, replace_existing: true, expires_at };
+        Json(manage::Edit { change, password: Some(testutil::password().into()), code: None })
+    };
+    let update = async |name: &str, expires_at: Option<i64>| {
+        manage::update(State(env.st.clone()), admin.clone(), axum::extract::Path(created.folder.id.clone()), edit(name, expires_at)).await
+    };
+    // Renamed and stopped, its end left as it is although it has passed
+    let _ = update("Old scanner", Some(ended)).await.unwrap();
+    // A new end date must still be in the future
+    assert_eq!(update("Old scanner", Some(ended - 60)).await.unwrap_err().status, axum::http::StatusCode::BAD_REQUEST);
+    // Searched for on the server: by its name, its creator, its folder; nothing else
+    let search = async |text: &str| {
+        let q = axum::extract::Query(manage::ListQuery { node_id: None, search: Some(text.into()) });
+        let Json(list) = manage::admin_list(State(env.st.clone()), crate::auth::Admin(admin.clone()), q).await.unwrap();
+        list.folders.len()
+    };
+    assert_eq!((search("OLD").await, search(&admin.username).await, search("incoming").await, search("nothing like it").await), (1, 1, 1, 0));
+    server.finish().await;
+    env.st.db.close().await;
+}

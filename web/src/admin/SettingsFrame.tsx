@@ -32,7 +32,23 @@ export function Section({ title, children }: { title: string; children: React.Re
 }
 
 /** Settings page under the control panel: the address bar shows "Control panel › item", and going up returns to the control panel */
-export function SettingsFrame({ item, onRefresh, footer, children }: { item: ControlPanelKey; onRefresh(): void; footer?: React.ReactNode; children: React.ReactNode }) {
+/** A control panel page. Its header searches the settings, or what the page lists when it says what (`searchPlaceholder`
+ * and `onSearch`): one search box either way */
+export function SettingsFrame({
+  item,
+  onRefresh,
+  footer,
+  children,
+  searchPlaceholder,
+  onSearch,
+}: {
+  item: ControlPanelKey;
+  onRefresh(): void;
+  footer?: React.ReactNode;
+  children: React.ReactNode;
+  searchPlaceholder?: string;
+  onSearch?(query: string): void;
+}) {
   const { title, icon } = controlPanelItem(item);
   const searchSettings = useSettingsSearch();
   return (
@@ -41,8 +57,8 @@ export function SettingsFrame({ item, onRefresh, footer, children }: { item: Con
       crumbs={[{ label: t("Control panel"), to: "/admin" }, { label: title }]}
       icon={icon as LucideIcon}
       upTo="/admin"
-      searchPlaceholder={t("Search settings")}
-      onSearch={searchSettings}
+      searchPlaceholder={searchPlaceholder ?? t("Search settings")}
+      onSearch={onSearch ?? searchSettings}
       footer={footer ?? <span>{t("Only administrators can make changes")}</span>}
     >
       <div className="min-h-0 flex-1 overflow-auto">

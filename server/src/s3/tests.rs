@@ -1015,3 +1015,14 @@ fn request_times_come_from_x_amz_date_or_date() {
         .unwrap();
     assert!(super::time_ok(&form), "form uploads are refused by s3s, not called out of step here");
 }
+
+#[tokio::test]
+async fn administrators_find_buckets_by_their_name_creator_or_folder() {
+    let s = server(false).await;
+    let search = async |text: &str| {
+        let q = axum::extract::Query(super::manage::ListQuery { node_id: None, search: Some(text.into()) });
+        let Json(list) = super::manage::admin_list(State(s.env.st.clone()), crate::auth::Admin(s.admin.clone()), q).await.unwrap();
+        list.buckets.len()
+    };
+    assert_eq!((search("backups").await, search(&s.admin.username.to_uppercase()).await, search("published").await, search("nothing").await), (1, 1, 1, 0));
+}

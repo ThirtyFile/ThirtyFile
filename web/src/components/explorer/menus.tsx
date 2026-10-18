@@ -3,8 +3,6 @@
  * here, the same in every style; the style arranges them (`menu` in components/style): the Windows style as Windows 11
  * does, with submenus on empty space and a row of icon buttons on items.
  */
-import { PublishBucketMenu } from "@/components/S3Buckets";
-import { FtpFolderMenu } from "@/components/FtpFolders";
 import { Fragment, type ReactNode } from "react";
 import {
   ClipboardPasteIcon,
@@ -34,6 +32,8 @@ import type { ExplorerState } from "./state";
 import type { ExplorerActions } from "./actions";
 import { Kbd } from "./ui";
 import { TagSubmenu } from "@/components/tags";
+import { PublishBucketMenu } from "@/components/S3Buckets";
+import { FtpFolderMenu } from "@/components/FtpFolders";
 import { t } from "@/lib/i18n";
 import { isZip } from "@/components/FileIcon";
 
@@ -191,11 +191,12 @@ export function explorerMenus(p: ExplorerProps, s: ExplorerState, a: ExplorerAct
       <Share2Icon /> {t("Create share link")}
     </DropdownMenuItem>
   );
-  const publishBucket = single?.kind === "folder" && (
-    <>
-      <PublishBucketMenu key="s3" nodeId={single.id} onPublish={() => setDialog({ t: "s3", nodeId: single.id })} />
-      <FtpFolderMenu key="ftp" nodeId={single.id} onPublish={() => setDialog({ t: "ftp", nodeId: single.id })} />
-    </>
+  // Only while S3 or FTP is on: otherwise a right-click on a folder doesn't ask about it
+  const publishBucket = single?.kind === "folder" && (s.me.s3_enabled || s.me.ftp_enabled) && (
+    <Fragment key="publish">
+      {s.me.s3_enabled && <PublishBucketMenu nodeId={single.id} onPublish={() => setDialog({ t: "s3", nodeId: single.id })} />}
+      {s.me.ftp_enabled && <FtpFolderMenu nodeId={single.id} onPublish={() => setDialog({ t: "ftp", nodeId: single.id })} />}
+    </Fragment>
   );
   const favorite = (
     <DropdownMenuItem key="favorite" onClick={toggleFavorite}>
