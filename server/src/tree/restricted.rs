@@ -39,6 +39,44 @@ pub async fn within_publication(conn: &mut SqliteConnection, root: &str, id: &st
     Ok(inside)
 }
 
+/// Whether the space `drive` has a restricted folder. `restricted = 1`, as the partial index `nodes_restricted` is
+/// written, lets it answer without reading the space's items (`WHERE restricted` can't use the index)
+const HAS_RESTRICTED_SQL: &str = "SELECT EXISTS(SELECT 1 FROM nodes WHERE drive_id = ?1 AND restricted = 1)";
+
+/// Of the spaces in the JSON list ?1, those with a restricted folder (`HAS_RESTRICTED_SQL`)
+const RESTRICTED_DRIVES_SQL: &str = "SELECT DISTINCT drive_id FROM nodes WHERE restricted = 1 AND drive_id IN (SELECT value FROM json_each(?1))";
+
+/// Whether the space `drive` has a restricted folder
+pub async fn has_restricted(conn: &mut SqliteConnection, drive: &str) -> AppResult<bool> {
+    let (any,): (bool,) = sqlx::query_as(HAS_RESTRICTED_SQL).bind(drive).fetch_one(conn).await?;
+    Ok(any)
+}
+
+/// Of the spaces `drives`, those with a restricted folder
+pub async fn restricted_drives(conn: &mut SqliteConnection, drives: &[&str]) -> AppResult<std::collections::HashSet<String>> {
+    if drives.is_empty() {
+        return Ok(Default::default());
+    }
+    let rows: Vec<(String,)> = sqlx::query_as(RESTRICTED_DRIVES_SQL).bind(serde_json::to_string(drives).map_err(AppError::internal)?).fetch_all(conn).await?;
+    Ok(rows.into_iter().map(|(id,)| id).collect())
+}
+
+/// The bytes of the files in the space `drive` that `user` can't see, in folders restricted folders hide from them. A
+/// file is seen where its folder is, so only the folders in restricted folders are checked, each once: the space's
+/// size less this is what the user sees of it.
+pub async fn hidden_bytes(conn: &mut SqliteConnection, user: &User, drive: &str) -> AppResult<i64> {
+    let sql = format!(
+        "WITH RECURSIVE sub(id) AS (
+           SELECT id FROM nodes WHERE drive_id = ?1 AND restricted = 1
+           UNION SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id WHERE n.kind = 'folder'
+         ), hidden(id) AS MATERIALIZED (SELECT id FROM sub WHERE NOT {})
+         SELECT COALESCE(SUM(f.size), 0) FROM hidden JOIN nodes f ON f.parent_id = hidden.id AND f.kind = 'file'",
+        visible_sql(user, "sub.id")
+    );
+    let (bytes,): (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(drive).fetch_one(conn).await?;
+    Ok(bytes)
+}
+
 /// A SQL predicate for visibility on a node expression. Query values here are internal integer identities, never
 /// request text. Lists apply it before paging/counting, so hidden items cannot be inferred from offsets or totals.
 pub fn visible_sql(user: &User, node: &str) -> String {
@@ -48,8 +86,14 @@ pub fn visible_sql(user: &User, node: &str) -> String {
 pub fn visible_to_sql(id: i64, node: &str) -> String {
     let at = now();
     let principal = super::permissions::principal_sql(&id.to_string(), &at.to_string());
+    // A member of a space without restricted folders sees all of it: answered from two indexes, without going up
+    // from every item (the usual case). Otherwise, up from the item to the first grant that reaches it
     format!(
-        "EXISTS(WITH RECURSIVE visible_up(id, parent_id, restricted, inherited) AS (
+        "(CASE WHEN NOT EXISTS(SELECT 1 FROM nodes vs JOIN nodes vr ON vr.drive_id = vs.drive_id AND vr.restricted = 1 WHERE vs.id = {node})
+           AND EXISTS(SELECT 1 FROM nodes vs JOIN drives vd ON vd.id = vs.drive_id JOIN grants g ON g.node_id = vd.root_id AND {principal}
+             WHERE vs.id = {node} AND vd.disabled = 0
+               AND NOT (vd.kind = 'personal' AND vd.owner_id = {id} AND EXISTS(SELECT 1 FROM users WHERE id = {id} AND guest)))
+         THEN 1 ELSE EXISTS(WITH RECURSIVE visible_up(id, parent_id, restricted, inherited) AS (
            SELECT id, parent_id, restricted, 1 FROM nodes WHERE id = {node}
            UNION ALL SELECT p.id, p.parent_id, p.restricted, visible_up.inherited AND NOT visible_up.restricted
            FROM nodes p JOIN visible_up ON p.id = visible_up.parent_id
@@ -59,7 +103,7 @@ pub fn visible_to_sql(id: i64, node: &str) -> String {
              AND ((g.id IS NOT NULL AND (visible_up.inherited OR (visible_up.parent_id IS NULL AND g.role = 'owner')))
              OR (vd.kind = 'company' AND EXISTS(SELECT 1 FROM users WHERE id = {id} AND role = 'admin' AND NOT guest AND disabled = 0))
              OR (vd.kind <> 'personal' AND EXISTS(SELECT 1 FROM users WHERE id = {id} AND role = 'admin' AND NOT guest AND disabled = 0)
-                 AND EXISTS(SELECT 1 FROM visible_up WHERE restricted))))"
+                 AND EXISTS(SELECT 1 FROM visible_up WHERE restricted)))) END)"
     )
 }
 
@@ -103,22 +147,24 @@ pub async fn visible_path_start(conn: &mut SqliteConnection, user: &User, path: 
     Ok(path.iter().rposition(|c| hidden.iter().any(|(id,)| *id == c.id)).map_or(0, |index| index + 1))
 }
 
-/// A restriction also protects historical names, including older rows whose child was already deleted. Missing
-/// notification targets have no surviving space identity: conservatively protect them rather than guess a scope.
+/// A restriction also protects historical names: rows about what is in the folder, and rows about items already
+/// deleted from the same space (the activity log says which space an item was in, as it records deleting it). Rows
+/// about other spaces are left alone: their readers would lose their own records of unrelated items.
 pub async fn protect_saved(conn: &mut SqliteConnection, node: &Node) -> AppResult<()> {
     let scope = serde_json::json!({"id": node.id, "drive": node.drive()}).to_string();
-    for (table, space) in [("activity", "AND drive_id = ?3"), ("share_access", ""), ("notifications", "")] {
+    for (table, gone_here) in [
+        ("activity", "drive_id = ?3"),
+        ("share_access", "EXISTS(SELECT 1 FROM activity a WHERE a.node_id = share_access.node_id AND a.drive_id = ?3)"),
+        ("notifications", "EXISTS(SELECT 1 FROM activity a WHERE a.node_id = notifications.node_id AND a.drive_id = ?3)"),
+    ] {
         let sql = format!(
             "WITH RECURSIVE sub(id) AS (SELECT ?1 UNION ALL SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id)
           UPDATE {table} SET restricted_scopes = json_insert(restricted_scopes, '$[#]', json(?2))
-          WHERE node_id IS NOT NULL {space} AND (node_id IN (SELECT id FROM sub) OR NOT EXISTS(SELECT 1 FROM nodes WHERE id = node_id))
+          WHERE node_id IS NOT NULL
+          AND (node_id IN (SELECT id FROM sub) OR (NOT EXISTS(SELECT 1 FROM nodes WHERE id = node_id) AND {gone_here}))
           AND NOT EXISTS(SELECT 1 FROM json_each(restricted_scopes) WHERE json_extract(value, '$.id') = ?1)"
         );
-        let mut query = sqlx::query(sqlx::AssertSqlSafe(sql.as_str())).bind(&node.id).bind(&scope);
-        if !space.is_empty() {
-            query = query.bind(node.drive());
-        }
-        query.execute(&mut *conn).await?;
+        sqlx::query(sqlx::AssertSqlSafe(sql.as_str())).bind(&node.id).bind(&scope).bind(node.drive()).execute(&mut *conn).await?;
     }
     Ok(())
 }
@@ -132,6 +178,10 @@ const RESTRICTED_SUBTREE_SQL: &str = "WITH RECURSIVE sub(id, restricted) AS (
 /// Moving or deleting a parent must never carry along descendants the caller cannot act on. Refusal is generic:
 /// neither the name nor even the number of restricted descendants is disclosed.
 pub async fn require_subtree(conn: &mut SqliteConnection, user: &User, node: &Node, need: super::Need) -> AppResult<()> {
+    // Most spaces have no restricted folder: nothing to walk
+    if !has_restricted(conn, node.drive()).await? {
+        return Ok(());
+    }
     let mut after = String::new();
     loop {
         let ids: Vec<(String,)> = sqlx::query_as(RESTRICTED_SUBTREE_SQL).bind(&node.id).bind(&after).fetch_all(&mut *conn).await?;
@@ -154,6 +204,17 @@ pub async fn require_subtree(conn: &mut SqliteConnection, user: &User, node: &No
 mod tests {
     use super::*;
     use crate::{testutil, tree::Need};
+
+    #[tokio::test]
+    async fn whether_a_space_has_restricted_folders_is_answered_from_the_index() {
+        let env = testutil::env().await;
+        for sql in [HAS_RESTRICTED_SQL, RESTRICTED_DRIVES_SQL] {
+            let explain = format!("EXPLAIN QUERY PLAN {sql}");
+            let plan: Vec<(i64, i64, i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(explain.as_str())).bind("[]").fetch_all(&env.st.db).await.unwrap();
+            assert!(plan.iter().any(|(_, _, _, detail)| detail.contains("nodes_restricted")), "{sql}: {plan:?}");
+            assert!(plan.iter().all(|(_, _, _, detail)| !detail.starts_with("SCAN nodes")), "{sql}: {plan:?}");
+        }
+    }
 
     #[tokio::test]
     async fn checking_an_empty_subtree_does_not_scan_unrelated_nodes() {

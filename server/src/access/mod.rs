@@ -41,8 +41,7 @@ pub async fn space_room(
     }
     let q = match tree::get_drive(conn, drive_id).await? {
         Some(d) => {
-            let (restricted,): (bool,) =
-                sqlx::query_as("SELECT EXISTS(SELECT 1 FROM nodes WHERE drive_id = ? AND restricted)").bind(&d.id).fetch_one(&mut *conn).await?;
+            let restricted = tree::has_restricted(conn, &d.id).await?;
             let root = tree::get_node(conn, &d.root_id).await?;
             if restricted
                 && !match root {
