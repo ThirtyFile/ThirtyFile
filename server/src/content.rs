@@ -398,25 +398,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn touching_a_folder_runs_no_second_update_for_s3_validators() {
+    async fn s3_validators_are_cleared_only_when_the_content_changes() {
         let env = testutil::env().await;
         let amy = env.user("amy", true).await;
         let folder = env.folder(&amy, amy.root(), "Docs").await;
         let file = env.upload(&amy, amy.root(), "a.txt", b"hello").await;
-        sqlx::query("UPDATE nodes SET content_md5 = 'cached', md5_version = 'v' WHERE id = ?").bind(&file).execute(&env.st.db).await.unwrap();
         let plain = env.upload(&amy, amy.root(), "b.txt", b"other").await;
+        let cache = || sqlx::query("UPDATE nodes SET content_md5 = 'cached', md5_version = 'v' WHERE id = ?").bind(&file).execute(&env.st.db);
+        cache().await.unwrap();
         let mut c = env.st.db.acquire().await.unwrap();
         // total_changes() counts what triggers change too
-        let mut changes = async |id: &str| -> i64 {
+        let mut changes = async |sql: &str, id: &str| -> i64 {
             let (before,): (i64,) = sqlx::query_as("SELECT total_changes()").fetch_one(&mut *c).await.unwrap();
-            sqlx::query("UPDATE nodes SET updated_at = updated_at + 1 WHERE id = ?").bind(id).execute(&mut *c).await.unwrap();
+            sqlx::query(sqlx::AssertSqlSafe(sql)).bind(id).execute(&mut *c).await.unwrap();
             let (after,): (i64,) = sqlx::query_as("SELECT total_changes()").fetch_one(&mut *c).await.unwrap();
             after - before
         };
+        let touch = "UPDATE nodes SET updated_at = updated_at + 1 WHERE id = ?";
         // The update and what always comes with it (the backups' list of changes), against a file with nothing cached
-        let base = changes(&plain).await;
-        assert_eq!(changes(&folder).await, base);
-        assert_eq!(changes(&file).await, base + 1, "a file's cached validators are cleared");
+        let base = changes(touch, &plain).await;
+        assert_eq!(changes(touch, &folder).await, base, "touching a folder runs nothing more");
+        assert_eq!(changes(touch, &file).await, base, "a rename or touch keeps the digest: reads check it against the content's version");
+        assert_eq!(changes("UPDATE nodes SET size = size + 1 WHERE id = ?", &file).await, base + 1, "new content clears it");
         let (md5,): (Option<String>,) = sqlx::query_as("SELECT content_md5 FROM nodes WHERE id = ?").bind(&file).fetch_one(&mut *c).await.unwrap();
         assert_eq!(md5, None);
     }
