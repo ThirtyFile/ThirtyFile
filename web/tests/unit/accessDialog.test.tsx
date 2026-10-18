@@ -1,4 +1,5 @@
-// Share with…: a row's own changes are separate from adding someone
+// Share with…: a row's own changes are separate from adding someone, and restricting a folder asks with the grants
+// that stop as they are when it is chosen
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -14,6 +15,7 @@ const requests = vi.hoisted(() => ({
   grant: vi.fn<typeof import("@/api").api.grant>(),
   directory: vi.fn<typeof import("@/api").api.directory>(),
   restrictionPreview: vi.fn<typeof import("@/api").api.restrictionPreview>(),
+  setRestriction: vi.fn<typeof import("@/api").api.setRestriction>(),
 }));
 vi.mock("@/api", async (original) => {
   const actual = await original<typeof import("@/api")>();
@@ -52,9 +54,17 @@ let root: Root;
 beforeEach(() => {
   Object.values(requests).forEach((request) => request.mockReset());
   Element.prototype.scrollIntoView = () => {};
-  requests.access.mockResolvedValue(info);
   requests.grant.mockResolvedValue({} as never);
   requests.directory.mockResolvedValue([{ guest: false, principal_type: "user", principal_id: 13, name: "carol", detail: "User" }]);
+  requests.setRestriction.mockResolvedValue({} as never);
+});
+afterEach(async () => {
+  await act(async () => root.unmount());
+  document.body.replaceChildren();
+});
+
+function mount(given: AccessInfo = info) {
+  requests.access.mockResolvedValue(given);
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const host = document.createElement("div");
   document.body.append(host);
@@ -68,15 +78,14 @@ beforeEach(() => {
       </QueryClientProvider>,
     ),
   );
-});
-afterEach(async () => {
-  await act(async () => root.unmount());
-  document.body.replaceChildren();
-});
+}
 
 const settle = (check: () => void) => act(async () => vi.waitFor(check));
 
+const button = (name: string) => [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === name);
+
 test("changing a row's role leaves the person being added picked, and each row's end date says whose it is", async () => {
+  mount();
   await settle(() => expect(document.querySelector('input[aria-label="Access end date for ben"]')).not.toBeNull());
   const box = document.querySelector<HTMLInputElement>('input[role="combobox"]')!;
   await act(async () => {
@@ -100,4 +109,26 @@ test("changing a row's role leaves the person being added picked, and each row's
   await act(async () => new Promise((r) => setTimeout(r, 50)));
   expect(document.querySelector('[aria-label="Choose again"]')).not.toBeNull();
   expect(document.body.textContent).toContain("carol");
+});
+
+test("restricting a folder asks with the inherited grants as they are then, and changes nothing when they can't be read", async () => {
+  requests.restrictionPreview
+    .mockResolvedValueOnce({ restricted: false, inherited: [] })
+    .mockRejectedValueOnce(new Error("Couldn't load"))
+    .mockResolvedValue({ restricted: false, inherited: [{ principal_type: "group", principal_id: 3, name: "Editor", role: "viewer" }] });
+  mount({ ...info, can_restrict: true });
+  await settle(() => expect(button("Restrict folder")?.disabled).toBe(false));
+  // A list that can't be read: no question, nothing changed
+  await act(async () => button("Restrict folder")!.click());
+  await settle(() => expect(document.body.textContent).toContain("Couldn't load"));
+  expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+  // Read again when chosen: the group added since the dialog opened is named, by its own name
+  await act(async () => button("Restrict folder")!.click());
+  await settle(() => expect(document.body.textContent).toContain("These inherited grants will stop: Editor (Viewer)."));
+  await act(async () => button("Cancel")!.click());
+  expect(requests.setRestriction).not.toHaveBeenCalled();
+  await act(async () => button("Restrict folder")!.click());
+  await settle(() => expect(button("Change")).toBeDefined());
+  await act(async () => button("Change")!.click());
+  await settle(() => expect(requests.setRestriction).toHaveBeenCalledExactlyOnceWith(folder.id, true, false));
 });
