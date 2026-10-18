@@ -30,6 +30,8 @@ function EditDialog({ nodeId, folder, action = "edit", close }: { nodeId: string
   });
   const [created, setCreated] = useState<FtpCreated | null>(null);
   const save = useMutation({
+    // A new device password is in the answer: kept no longer than the dialog shows it
+    gcTime: 0,
     mutationFn: async () => {
       if (folder && action === "rotate") return api.rotateFtpPassword(folder.id, identity.values);
       if (folder && action === "delete") {

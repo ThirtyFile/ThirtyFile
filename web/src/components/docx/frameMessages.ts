@@ -6,7 +6,7 @@ import type { CaretFormat } from "@/ooxml/docx/editor";
 import type { Parts } from "./session";
 
 /** A part's path in the package: folders and a name ending in .xml or .rels, nothing that climbs out */
-const PART_PATH = /^(?!.*\.\.)[\w[\]. /-]+\.(xml|rels)$/;
+const PART_PATH = /^(?![/.])(?!.*\.\.)[\w[\]. /-]+\.(xml|rels)$/;
 
 /** The parts a message from the frame names, as text: anything else is left out */
 export function partsFrom(value: unknown): Parts {

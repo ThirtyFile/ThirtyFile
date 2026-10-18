@@ -28,6 +28,8 @@ function KeyForm({ bucket, close }: { bucket: S3Bucket; close(): void }) {
   const [created, setCreated] = useState<(S3Key & { secret_key: string }) | null>(null);
   const identity = useConfirmIdentity("s3-key");
   const make = useMutation({
+    // The Secret Key is in the answer: kept no longer than the dialog shows it
+    gcTime: 0,
     mutationFn: () => api.newS3Key(bucket.id, description.trim(), writable, expiry ? Math.floor(new Date(expiry).getTime() / 1000) : null, identity.values),
     onSuccess: (key) => {
       identity.clear();
