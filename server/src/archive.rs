@@ -297,7 +297,7 @@ async fn store_new_file(
     // Checked first, so a file that can't fit isn't stored at all
     tree::check_quota(&mut *st.db.acquire().await?, folder.drive(), size as i64).await?;
     // Takes the temporary file over (the caller removes it when it is left)
-    let staged = content::stage(st, &folder, content::Received { path: tmp.to_path_buf(), size, hash: None }).await?;
+    let staged = content::stage(st, &folder, content::Received { path: tmp.to_path_buf(), size, hash: None, md5: None }).await?;
     let mut turn = staged.turn(st).await;
     let _w = st.write_lock.lock().await;
     let result = async {
@@ -577,7 +577,7 @@ async fn extract_into(st: &AppState, user: &User, progress: &Tracker, zip: &Node
                     return Err(e);
                 }
             }
-            let received = content::Received { path: x.tmp, size: x.size, hash: Some(x.hash) };
+            let received = content::Received { path: x.tmp, size: x.size, hash: Some(x.hash), md5: None };
             staged.push((i, content::stage(st, &parent, received).await?));
         }
         let _w = st.write_lock.lock().await;

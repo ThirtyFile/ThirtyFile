@@ -594,7 +594,7 @@ async fn restore_into(r: &Restore<'_>, parent: &str, item: &Item<'_>, tmp: &std:
     let (cx, st, target) = (r.cx, r.cx.st, r.target);
     let (name, source, hash, size, modified) = (item.name, item.source, item.hash, item.size, item.modified);
     let folder = folder_node(st, parent).await?;
-    let received = || content::Received { path: tmp.to_path_buf(), size: size as u64, hash: Some(hash.to_string()) };
+    let received = || content::Received { path: tmp.to_path_buf(), size: size as u64, hash: Some(hash.to_string()), md5: None };
     let staged = match content::stage_restored(st, &folder, received()).await {
         Ok(s) => s,
         // Registered content is missing or damaged, or its last reference disappeared: fetch the backup and retry.

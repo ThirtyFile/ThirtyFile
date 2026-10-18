@@ -415,17 +415,6 @@ async fn rclone_mtime_survives_identical_put_and_copy_but_never_external_or_othe
         for invalid in ["NaN", "inf", "-9999999999999999", "1e999", " padded "] {
             assert!(s.client.put_object().bucket("backups").key("mtime.txt").metadata("mtime", invalid).body(ByteStream::from_static(b"bad")).send().await.is_err());
         }
-        assert!(
-            s.client
-                .put_object()
-                .bucket("backups")
-                .key("mtime.txt")
-                .metadata("arbitrary", "not-supported")
-                .body(ByteStream::from_static(b"bad"))
-                .send()
-                .await
-                .is_err()
-        );
         assert_eq!(read(&s, "mtime.txt").await.as_ref(), b"old");
         let identity = super::credentials::identity(&s.env.st, &s.key.key.access_key, true).await.unwrap();
         if folders {
@@ -836,4 +825,193 @@ async fn a_stopped_key_and_a_skewed_clock_use_none_of_the_sign_in_limit_but_unkn
     let unknown = client(&s.endpoint, "TF00000000000000000000", "not-the-secret");
     assert!(unknown.head_bucket().bucket("backups").send().await.is_err());
     assert!(crate::auth::attempts_exhausted(&s.env.st, &rate, 1));
+}
+
+#[tokio::test]
+async fn custom_metadata_such_as_rclones_md5_is_accepted_and_not_kept() {
+    let s = server(false).await;
+    s.client
+        .put_object()
+        .bucket("backups")
+        .key("big.bin")
+        .metadata("md5chksum", "XUFAKrxLKna5cZ2REBfFkg==")
+        .metadata("mtime", "1700000000")
+        .body(ByteStream::from_static(b"hello"))
+        .send()
+        .await
+        .unwrap();
+    let head = s.client.head_object().bucket("backups").key("big.bin").send().await.unwrap();
+    assert_eq!(head.metadata().unwrap().keys().collect::<Vec<_>>(), ["mtime"]);
+    // rclone sends it with large, multipart uploads
+    s.client.create_multipart_upload().bucket("backups").key("large.bin").metadata("md5chksum", "XUFAKrxLKna5cZ2REBfFkg==").send().await.unwrap();
+}
+
+#[tokio::test]
+async fn conditional_writes_create_only_once_and_replace_only_what_was_read() {
+    let s = server(false).await;
+    let put = |key: &'static str, body: &'static [u8]| s.client.put_object().bucket("backups").key(key).body(ByteStream::from_static(body));
+    // A Terraform lock: made once; two at the same time, one of them
+    let (a, b) = tokio::join!(put("terraform.tflock", b"a").if_none_match("*").send(), put("terraform.tflock", b"b").if_none_match("*").send());
+    assert_eq!([a.is_ok(), b.is_ok()].iter().filter(|ok| **ok).count(), 1, "{a:?} {b:?}");
+    let refused = put("terraform.tflock", b"c").if_none_match("*").send().await.unwrap_err();
+    assert_eq!(refused.raw_response().unwrap().status().as_u16(), 412);
+    // If-Match: only over the content of that ETag
+    put("state.json", b"one").send().await.unwrap();
+    let etag = s.client.head_object().bucket("backups").key("state.json").send().await.unwrap().e_tag().unwrap().to_string();
+    let stale = put("state.json", b"two").if_match("\"0123456789abcdef0123456789abcdef\"").send().await.unwrap_err();
+    assert_eq!(stale.raw_response().unwrap().status().as_u16(), 412);
+    put("state.json", b"two").if_match(&etag).send().await.unwrap();
+    assert_eq!(read(&s, "state.json").await.as_ref(), b"two");
+    assert_eq!(put("state.json", b"three").if_match(&etag).send().await.unwrap_err().raw_response().unwrap().status().as_u16(), 412);
+    assert_eq!(put("missing.json", b"x").if_match(&etag).send().await.unwrap_err().raw_response().unwrap().status().as_u16(), 404);
+    // Completing a multipart upload too
+    let upload = s.client.create_multipart_upload().bucket("backups").key("terraform.tflock").send().await.unwrap();
+    let id = upload.upload_id().unwrap();
+    let part =
+        s.client.upload_part().bucket("backups").key("terraform.tflock").upload_id(id).part_number(1).body(ByteStream::from_static(b"d")).send().await.unwrap();
+    let parts = CompletedMultipartUpload::builder().parts(CompletedPart::builder().part_number(1).e_tag(part.e_tag().unwrap()).build()).build();
+    let complete = s.client.complete_multipart_upload().bucket("backups").key("terraform.tflock").upload_id(id).multipart_upload(parts).if_none_match("*");
+    assert_eq!(complete.send().await.unwrap_err().raw_response().unwrap().status().as_u16(), 412);
+}
+
+#[tokio::test]
+async fn deleting_a_folder_marker_removes_only_an_empty_folder() {
+    let s = server(false).await;
+    put(&s, "dir/a.txt", b"keep").await;
+    s.client.delete_object().bucket("backups").key("dir/").send().await.unwrap();
+    assert_eq!(read(&s, "dir/a.txt").await.as_ref(), b"keep", "a folder with something in it stays");
+    s.client.delete_object().bucket("backups").key("dir/a.txt").send().await.unwrap();
+    s.client.delete_object().bucket("backups").key("dir/").send().await.unwrap();
+    assert!(s.client.head_object().bucket("backups").key("dir/").send().await.is_err(), "an empty one goes");
+}
+
+#[tokio::test]
+async fn pages_of_more_than_1000_are_1000_as_in_aws() {
+    let s = server(false).await;
+    put(&s, "a.txt", b"a").await;
+    let listed = s.client.list_objects_v2().bucket("backups").max_keys(5000).send().await.unwrap();
+    assert_eq!((listed.max_keys(), listed.key_count()), (Some(1000), Some(1)));
+}
+
+#[tokio::test]
+async fn a_listing_page_checks_access_per_request_not_per_object() {
+    let s = server(false).await;
+    let root = s.env.st.shared_root().unwrap();
+    let published = crate::paths::child_named(&mut s.env.st.db.acquire().await.unwrap(), &root, "Published").await.unwrap().unwrap().id;
+    for i in 0..300 {
+        s.env.stored_file(&s.admin, &published, &format!("f{i:03}.txt"), b"x").await;
+    }
+    crate::tree::NODE_FOR_CALLS.with(|n| n.set(0));
+    let listed = s.client.list_objects_v2().bucket("backups").send().await.unwrap();
+    assert_eq!(listed.key_count(), Some(300));
+    let calls = crate::tree::NODE_FOR_CALLS.with(|n| n.get());
+    assert!(calls < 30, "node_for ran {calls} times for one page");
+}
+
+#[tokio::test]
+async fn an_unusual_delimiter_lists_a_page_at_a_time_and_each_group_once() {
+    let s = server(false).await;
+    for i in 0..30 {
+        put(&s, Box::leak(format!("a-{i:02}").into_boxed_str()), b"x").await;
+    }
+    put(&s, "b.txt", b"x").await;
+    let _small = super::listing::small_budget(10);
+    let (mut prefixes, mut keys, mut pages, mut token) = (Vec::new(), Vec::new(), 0, None::<String>);
+    loop {
+        let page = s.client.list_objects_v2().bucket("backups").delimiter("-").set_continuation_token(token.clone()).send().await.unwrap();
+        pages += 1;
+        prefixes.extend(page.common_prefixes().iter().filter_map(|p| p.prefix().map(str::to_string)));
+        keys.extend(page.contents().iter().filter_map(|o| o.key().map(str::to_string)));
+        token = page.next_continuation_token().map(str::to_string);
+        if token.is_none() {
+            break;
+        }
+    }
+    assert_eq!((prefixes, keys), (vec!["a-".to_string()], vec!["b.txt".to_string()]));
+    assert!(pages >= 3, "one request went through all of them: {pages} pages");
+}
+
+#[tokio::test]
+async fn parts_are_received_while_another_part_of_the_upload_is_being_recorded() {
+    let s = server(false).await;
+    let upload = s.client.create_multipart_upload().bucket("backups").key("parallel.bin").send().await.unwrap();
+    let id = upload.upload_id().unwrap().to_string();
+    // Another part holds the upload's turn: this one still arrives, and waits only to be recorded
+    let turn = super::multipart::lock(&id);
+    let held = turn.lock().await;
+    let (client, key, upload_id) = (s.client.clone(), "parallel.bin", id.clone());
+    let sent = tokio::spawn(async move {
+        client.upload_part().bucket("backups").key(key).upload_id(upload_id).part_number(1).body(ByteStream::from_static(b"part one")).send().await
+    });
+    let tmp = s.env.st.tmp_dir();
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            let received = std::fs::read_dir(&tmp)
+                .unwrap()
+                .flatten()
+                .any(|e| e.file_name().to_string_lossy().starts_with("s3-receive-") && e.metadata().is_ok_and(|m| m.len() == b"part one".len() as u64));
+            if received {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the part is received while the upload's turn is held elsewhere");
+    assert!(!sent.is_finished());
+    drop(held);
+    sent.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn a_completed_upload_is_stored_with_the_digests_worked_out_while_its_parts_are_joined() {
+    use md5::Digest;
+    let s = server(false).await;
+    let first: &'static [u8] = Box::leak(vec![7u8; 5 * 1024 * 1024].into_boxed_slice());
+    let upload = s.client.create_multipart_upload().bucket("backups").key("joined.bin").send().await.unwrap();
+    let id = upload.upload_id().unwrap();
+    let mut done = Vec::new();
+    for (number, body) in [(1, first), (2, &b"tail"[..])] {
+        let part =
+            s.client.upload_part().bucket("backups").key("joined.bin").upload_id(id).part_number(number).body(ByteStream::from_static(body)).send().await.unwrap();
+        done.push(CompletedPart::builder().part_number(number).e_tag(part.e_tag().unwrap()).build());
+    }
+    let parts = CompletedMultipartUpload::builder().set_parts(Some(done)).build();
+    let out = s.client.complete_multipart_upload().bucket("backups").key("joined.bin").upload_id(id).multipart_upload(parts).send().await.unwrap();
+    let whole = [first, b"tail"].concat();
+    assert_eq!(out.e_tag().unwrap(), format!("\"{}\"", hex::encode(md5::Md5::digest(&whole))));
+    assert_eq!(read(&s, "joined.bin").await.as_ref(), whole.as_slice());
+    let root = s.env.st.shared_root().unwrap();
+    let published = crate::paths::child_named(&mut s.env.st.db.acquire().await.unwrap(), &root, "Published").await.unwrap().unwrap().id;
+    let node = crate::paths::child_named(&mut s.env.st.db.acquire().await.unwrap(), &published, "joined.bin").await.unwrap().unwrap();
+    assert_eq!(node.blob_hash.unwrap(), hex::encode(<sha2::Sha256 as sha2::Digest>::digest(&whole)));
+}
+
+#[tokio::test]
+async fn etags_missing_in_published_buckets_are_worked_out_ahead() {
+    let s = server(false).await;
+    put(&s, "a.txt", b"hello").await;
+    put(&s, "b.txt", b"world").await;
+    sqlx::query("UPDATE nodes SET content_md5 = NULL, md5_version = NULL WHERE kind = 'file'").execute(&s.env.st.db).await.unwrap();
+    assert_eq!(super::fill_digests(&s.env.st, 1 << 30).await.unwrap(), 2);
+    let (missing,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nodes WHERE kind = 'file' AND content_md5 IS NULL").fetch_one(&s.env.st.db).await.unwrap();
+    assert_eq!(missing, 0);
+}
+
+#[test]
+fn request_times_come_from_x_amz_date_or_date() {
+    let at = |name: &str, value: String| axum::http::Request::builder().uri("/backups/a.txt").header(name, value).body(axum::body::Body::empty()).unwrap();
+    let iso = |t: i64| jiff::Timestamp::from_second(t).unwrap().strftime("%Y%m%dT%H%M%SZ").to_string();
+    let http = |t: i64| httpdate::fmt_http_date(std::time::UNIX_EPOCH + std::time::Duration::from_secs(t as u64));
+    assert!(super::time_ok(&at("x-amz-date", iso(now()))));
+    assert!(super::time_ok(&at("date", http(now()))), "Date, for clients that sign it instead");
+    assert!(!super::time_ok(&at("x-amz-date", iso(now() - 3600))));
+    assert!(!super::time_ok(&at("date", http(now() - 3600))));
+    let form = axum::http::Request::builder()
+        .method("POST")
+        .uri("/backups")
+        .header("content-type", "multipart/form-data; boundary=x")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    assert!(super::time_ok(&form), "form uploads are refused by s3s, not called out of step here");
 }

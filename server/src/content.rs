@@ -33,6 +33,8 @@ pub struct Received {
     pub path: PathBuf,
     pub size: u64,
     pub hash: Option<String>,
+    /// Its MD5 (hex), when whoever received it worked it out on the way (S3 does, for the ETag)
+    pub md5: Option<String>,
 }
 
 /// Received content put where its space keeps content, ready to become a file
@@ -72,7 +74,9 @@ pub async fn stage_restored(st: &AppState, into: &Node, received: Received) -> A
 async fn stage_inner(st: &AppState, into: &Node, received: Received, restored: bool) -> AppResult<Staged> {
     // The S3 ETag, worked out while the content is at hand, only while S3 is on: otherwise nothing reads the content a
     // second time for it, and the first S3 read of the file works it out (s3/etag.rs)
-    let md5 = if !crate::s3::config::routing(st).await?.enabled {
+    let md5 = if received.md5.is_some() {
+        received.md5.clone()
+    } else if !crate::s3::config::routing(st).await?.enabled {
         None
     } else {
         match tokio::fs::File::open(&received.path).await {
@@ -380,7 +384,7 @@ mod tests {
     fn received(env: &TestEnv, body: &[u8]) -> Received {
         let path = env.st.tmp_dir().join(new_id());
         std::fs::write(&path, body).unwrap();
-        Received { path, size: body.len() as u64, hash: None }
+        Received { path, size: body.len() as u64, hash: None, md5: None }
     }
 
     #[tokio::test]

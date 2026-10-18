@@ -137,8 +137,8 @@ get report.csv</code></pre>
 aws configure set s3.addressing_style path --profile thirtyfile
 aws --profile thirtyfile --endpoint-url https://s3.files.example.com s3 ls s3://backups/
 aws --profile thirtyfile --endpoint-url https://s3.files.example.com s3 cp report.csv s3://backups/report.csv</code></pre>
-<p>使用 rclone 時執行 <code>rclone config</code>，選擇 S3、提供者 Other，互動輸入金鑰，設定端點與區域，啟用 force_path_style，將 disable_checksum 設為 true 以停用 rclone 自訂 MD5 中繼資料（S3 Content-MD5 仍會驗證傳輸），並將 ACL 與伺服器端加密留空。<code>rclone copy</code> 可增加檔案；<code>rclone sync</code> 可能移除目的地檔案。</p>
-<p>ThirtyFile 會將 rclone 的 <code>x-amz-meta-mtime</code> 與目前內容版本一起保存，也支援用同名複製更新時間。其他自訂中繼資料仍不支援。<code>no_system_metadata</code> 無法阻止 rclone 傳送這個時間戳記，請保持關閉。這不會變更 S3 以外的檔案修改時間。</p>
+<p>使用 rclone 時執行 <code>rclone config</code>，選擇 S3、提供者 Other，互動輸入金鑰，設定端點與區域，啟用 force_path_style，並將 ACL 與伺服器端加密留空。<code>rclone copy</code> 可增加檔案；<code>rclone sync</code> 可能移除目的地檔案。</p>
+<p>ThirtyFile 會將 rclone 的 <code>x-amz-meta-mtime</code> 與目前內容版本一起保存，也支援用同名複製更新時間。其他自訂中繼資料（例如 rclone 為大型上傳加上的 MD5）會被接受但不保存。<code>no_system_metadata</code> 無法阻止 rclone 傳送這個時間戳記，請保持關閉。這不會變更 S3 以外的檔案修改時間。</p>
 <h3 id="s3-backups">備份與其他用途</h3>
 <p>使用 restic 時，將<strong>備份</strong>資料夾發布為 <code>backups</code>，並建立讀寫金鑰。從受保護的憑證儲存區載入 <code>AWS_ACCESS_KEY_ID</code> 與 <code>AWS_SECRET_ACCESS_KEY</code>。Repository 密碼與 S3 金鑰不同，請妥善保管。只在專用的空資料夾內初始化。</p>
 <pre><code>restic -r s3:https://s3.files.example.com/backups -o s3.region=us-east-1 -o s3.bucket-lookup=path init
@@ -148,8 +148,8 @@ restic -r s3:https://s3.files.example.com/backups -o s3.region=us-east-1 -o s3.b
 <h3 id="s3-mapping">資料夾對應與限制</h3>
 <p><code>a/b/c.txt</code> 等 key 對應巢狀資料夾及檔案；PUT 會建立缺少的父資料夾。以 <code>/</code> 結尾的空物件代表資料夾。清單使用 UTF-8 位元組排序、前綴、分隔符號及有上限的分頁。路徑穿越、空白路徑元件、不合法字元或前後空白的名稱會被拒絕。不區分大小寫的空間會拒絕僅大小寫不同的名稱衝突。</p>
 <p>DELETE 會將檔案與資料夾移至垃圾桶。覆寫會依空間原則保存舊版本。空間配額與上傳大小限制均適用。MD5 ETag 識別上傳內容，伺服器會驗證 Content-MD5 與支援的 AWS 檢查碼標頭。分段上傳的片段在暫存區保留最多一天，可中止未完成上傳以提早釋放。每個金鑰最多 32 個、每個 bucket 最多 128 個待完成上傳（全伺服器 512 個），每次最多 10,000 個片段。</p>
-<p>支援操作包含 ListBuckets（僅該金鑰的 bucket）、HeadBucket、GetBucketLocation、ListObjects/V2、HEAD、範圍與條件式 GET、PUT、同 bucket 內的 COPY、DELETE 與批次刪除、分段建立／上傳／完成／中止／列出，以及預先簽署 GET/PUT。預先簽署網址最多有效七天，金鑰到期或停用後立即失效。唯讀金鑰即使使用預先簽署網址也不能 PUT。</p>
-<p>不提供 ACL、透過 S3 建立 bucket、bucket 原則、生命週期、Object Lock、S3 版本 API、自訂中繼資料、物件標籤、伺服器端加密設定或虛擬主機式網址。不支援的操作回應 NotImplemented。時鐘需與伺服器相差 15 分鐘內；錯誤簽章與登入共用失敗限制。</p>
+<p>支援操作包含 ListBuckets（僅該金鑰的 bucket）、HeadBucket、GetBucketLocation、ListObjects/V2、HEAD、範圍與條件式 GET、PUT、同 bucket 內的 COPY、DELETE 與批次刪除、分段建立／上傳／完成／中止／列出，以及預先簽署 GET/PUT。PUT 與完成分段上傳支援 <code>If-None-Match: *</code>（僅在該 key 尚無物件時寫入，Terraform 的鎖定檔需要此功能）與 <code>If-Match</code>（僅覆蓋該 ETag 的內容）；儲存物件時會再次檢查條件，因此兩個同時寫入者只有一個會成功。刪除資料夾 key（以 <code>/</code> 結尾）時，只有空資料夾會被刪除，如同 S3 只移除資料夾標記：其中的物件會保留。要求超過 1,000 個 key、分段或上傳時，和 AWS 一樣回傳 1,000 個。預先簽署網址最多有效七天，金鑰到期或停用後立即失效。唯讀金鑰即使使用預先簽署網址也不能 PUT。</p>
+<p>不提供 ACL、透過 S3 建立 bucket、bucket 原則、生命週期、Object Lock、S3 版本 API、物件標籤、伺服器端加密設定或虛擬主機式網址。不支援的操作回應 NotImplemented。時鐘需與伺服器相差 15 分鐘內；錯誤簽章與登入共用失敗限制。</p>
 <h2 id="ftp">FTP 接收資料夾</h2>
 <p>FTP 接收資料夾讓掃描器等裝置使用專用憑證上傳到單一資料夾。此功能預設關閉，與將既有 FTP 伺服器新增為儲存位置不同。裝置不使用你的帳號密碼或應用程式密碼。</p>
 <h3 id="ftp-setup">啟用 FTP 與明確 FTPS</h3>

@@ -62,6 +62,7 @@ pub fn internal(e: impl std::fmt::Display) -> S3Error {
 pub fn map_error(e: AppError) -> S3Error {
     let code = match e.status {
         StatusCode::NOT_FOUND => S3ErrorCode::NoSuchKey,
+        StatusCode::PRECONDITION_FAILED => S3ErrorCode::PreconditionFailed,
         StatusCode::FORBIDDEN | StatusCode::UNAUTHORIZED => S3ErrorCode::AccessDenied,
         StatusCode::PAYLOAD_TOO_LARGE => S3ErrorCode::EntityTooLarge,
         StatusCode::CONFLICT => S3ErrorCode::InvalidRequest,
@@ -105,6 +106,8 @@ pub async fn dispatch(State(st): State<AppState>, mut req: Request, next: Next) 
     config.aws_chunked_stream_max_chunk_size = 8 * 1024 * 1024;
     config.expected_region = cfg.region.parse().ok();
     config.sig_v4_allowed_services = vec!["s3".into()];
+    // Browser form uploads (POST policy) aren't offered: refused by s3s rather than left to its default
+    config.allow_post_signature = false;
     config.put_object_max_size = Some(if st.max_upload > 0 { st.max_upload.min(5 * 1024 * 1024 * 1024) } else { 5 * 1024 * 1024 * 1024 });
     let mut builder = S3ServiceBuilder::new(Service(st.clone()));
     let refused = Arc::new(AtomicBool::new(false));
@@ -131,18 +134,29 @@ pub async fn dispatch(State(st): State<AppState>, mut req: Request, next: Next) 
     }
 }
 
-/// s3s checks presigned expiry; signed headers additionally need an explicit replay window.
+/// Whether a request's clock is within 15 minutes of the server's. s3s checks this too, but only after the request
+/// took an attempt of the sign-in limit: a clock out of step is no guess at a key, so it is refused here first.
+/// Presigned URLs are checked by s3s (their expiry), and so are form uploads (refused).
 fn time_ok(req: &Request) -> bool {
     if req.uri().query().is_some_and(|q| form_urlencoded::parse(q.as_bytes()).any(|(k, _)| k == "X-Amz-Algorithm")) {
         return true;
     }
-    let Some(date) = req.headers().get("x-amz-date").and_then(|v| v.to_str().ok()) else { return false };
-    if date.len() != 16 || !date.is_ascii() {
-        return false;
+    let header = |name| req.headers().get(name).and_then(|v| v.to_str().ok());
+    if req.method() == axum::http::Method::POST && header("content-type").is_some_and(|t| t.starts_with("multipart/form-data")) {
+        return true;
     }
-    let iso = format!("{}-{}-{}T{}:{}:{}Z", &date[0..4], &date[4..6], &date[6..8], &date[9..11], &date[11..13], &date[13..15]);
-    let Ok(ts) = iso.parse::<jiff::Timestamp>() else { return false };
-    (crate::util::now() - ts.as_second()).unsigned_abs() <= 900
+    // x-amz-date, or the Date header when a client signs that instead
+    let at = match header("x-amz-date") {
+        Some(date) if date.len() == 16 && date.is_ascii() => {
+            let iso = format!("{}-{}-{}T{}:{}:{}Z", &date[0..4], &date[4..6], &date[6..8], &date[9..11], &date[11..13], &date[13..15]);
+            iso.parse::<jiff::Timestamp>().ok().map(|ts| ts.as_second())
+        }
+        Some(_) => None,
+        None => {
+            header("date").and_then(|d| httpdate::parse_http_date(d).ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64)
+        }
+    };
+    at.is_some_and(|at| (crate::util::now() - at).unsigned_abs() <= 900)
 }
 
 #[async_trait::async_trait]
@@ -227,9 +241,49 @@ pub async fn maintain(st: &AppState) {
     if let Err(e) = multipart::cleanup(st).await {
         tracing::warn!("S3 multipart cleanup failed: {e}");
     }
+    if let Err(e) = fill_digests(st, DIGEST_BYTES).await {
+        tracing::warn!("Couldn't work out S3 ETags ahead: {e}");
+    }
     if let Err(e) = expiry_notices(st).await {
         tracing::warn!("S3 expiry notification failed: {}", e.message);
     }
+}
+
+/// Bytes read per maintenance run to work out the ETags files in published buckets don't have yet
+const DIGEST_BYTES: i64 = 4 << 30;
+
+/// Works out the MD5 (the ETag) of files in published buckets that don't have it yet (made before S3 was turned on,
+/// or changed outside S3), up to about `budget` bytes: otherwise the first listing reads every one of them while its
+/// client waits. Returns how many it worked out.
+pub(crate) async fn fill_digests(st: &AppState, budget: i64) -> Result<usize, String> {
+    if !config::routing(st).await.map_err(|e| e.message)?.enabled {
+        return Ok(0);
+    }
+    let rows: Vec<crate::tree::Node> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "WITH RECURSIVE sub(id) AS (
+           SELECT node_id FROM s3_buckets WHERE enabled = 1
+           UNION SELECT c.id FROM nodes c JOIN sub ON c.parent_id = sub.id WHERE c.trashed_at IS NULL AND c.kind = 'folder'
+         )
+         SELECT {} FROM nodes n WHERE n.parent_id IN (SELECT id FROM sub) AND n.kind = 'file' AND n.trashed_at IS NULL
+           AND n.content_md5 IS NULL ORDER BY n.size LIMIT 1000",
+        crate::tree::NODE_COLS
+    )))
+    .fetch_all(&st.db)
+    .await
+    .map_err(|e| e.to_string())?;
+    let (mut read, mut filled) = (0i64, 0);
+    for node in rows {
+        if read >= budget {
+            break;
+        }
+        // One that can't be read now (changed meanwhile, its disk away) waits for the next run
+        if etag::describe_node(st, &node).await.is_ok() {
+            filled += 1;
+        }
+        read += node.size.max(1);
+        tokio::task::yield_now().await;
+    }
+    Ok(filled)
 }
 
 async fn expiry_notices(st: &AppState) -> crate::error::AppResult<()> {

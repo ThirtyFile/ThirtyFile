@@ -261,8 +261,8 @@ impl StorageBackend<Device> for Files {
                 actor,
                 up.parent,
                 up.name,
-                crate::content::Received { path, size, hash },
-                crate::access::ScopedWrite { root, mtime: None },
+                crate::content::Received { path, size, hash, md5: None },
+                crate::access::ScopedWrite { root, mtime: None, expect: Default::default() },
             )
             .await;
             drop(temporary);

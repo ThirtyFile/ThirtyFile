@@ -318,7 +318,7 @@ async fn store_content(st: AppState, user: User, before: Node, body: Bytes, hash
     let tmp = st.tmp_dir().join(new_id());
     let received = async {
         tokio::fs::write(&tmp, &body).await?;
-        content::stage(&st, &before, content::Received { path: tmp.clone(), size: body.len() as u64, hash }).await
+        content::stage(&st, &before, content::Received { path: tmp.clone(), size: body.len() as u64, hash, md5: None }).await
     }
     .await;
     let staged = match received {
