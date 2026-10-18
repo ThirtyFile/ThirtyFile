@@ -298,7 +298,7 @@ pub async fn move_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
         node.name = name;
         tree::touch(&mut tx, node.parent_id.as_deref().unwrap()).await?;
         let to = tree::place_name(&mut tx, &dest).await?;
-        logs::record_activity(&mut tx, &user, Some(&node), "move", &format!("→ {to}")).await?;
+        logs::record_activity_into(&mut tx, &user, Some(&node), Some(&dest.id), "move", &format!("→ {to}")).await?;
     }
     tree::touch(&mut tx, &dest.id).await?;
     tx.commit().await?;
@@ -436,7 +436,7 @@ pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
         // The copies get the copier's tags of the originals (each person's tags are their own)
         crate::tags::copy_tags(&mut tx, user.id, ids.iter().map(|(from, to)| (from.as_str(), to.as_str()))).await?;
         let to = tree::place_name(&mut tx, &dest).await?;
-        logs::record_activity(&mut tx, &user, Some(&nodes[0]), "copy", &format!("→ {to}")).await?;
+        logs::record_activity_into(&mut tx, &user, Some(&nodes[0]), Some(&dest.id), "copy", &format!("→ {to}")).await?;
     }
     tree::adjust_usage(&mut tx, dest.drive(), total).await?;
     tree::touch(&mut tx, &dest.id).await?;

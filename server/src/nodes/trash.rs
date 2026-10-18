@@ -204,7 +204,8 @@ async fn make_way(conn: &mut SqliteConnection, user: &User, locks: &fsops::Space
     let mut folder = place.folder.clone();
     for name in &place.missing {
         if let Some(f) = tree::find_child(conn, &folder, name).await?.filter(|f| f.is_folder()) {
-            folder = f.id;
+            // Gone into only where the person may add, as uploads do
+            folder = tree::folder_for(conn, user, &f.id, Need::Add).await?.id;
             continue;
         }
         let parent = tree::get_node(conn, &folder).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
@@ -241,6 +242,16 @@ async fn outer_first(conn: &mut SqliteConnection, ids: Vec<String>) -> AppResult
     Ok(by_depth.into_iter().map(|(_, id)| id).collect())
 }
 
+/// Whether a folder has access of its own, which merging it into another folder would take away: it is restricted, or
+/// has grants on it
+async fn has_own_access(conn: &mut SqliteConnection, folder: &Node) -> AppResult<bool> {
+    if folder.restricted {
+        return Ok(true);
+    }
+    let (granted,): (bool,) = sqlx::query_as("SELECT EXISTS(SELECT 1 FROM grants WHERE node_id = ?)").bind(&folder.id).fetch_one(&mut *conn).await?;
+    Ok(granted)
+}
+
 /// Merges the folder `from`, in the trash, into the folder `into` of the same name, as Windows does: what went to the
 /// trash with `from` goes into `into`, out of the trash (the folders it holds merged the same way into folders of the
 /// same name), then `from` itself goes. A file whose name `into` has already takes the place of the one there, which
@@ -259,7 +270,10 @@ fn merge<'a>(
         let items: Vec<Node> = sqlx::query_as(sqlx::AssertSqlSafe(sql)).bind(&from.id).fetch_all(&mut *conn).await?;
         for item in &items {
             let name = match tree::find_child(conn, &into.id, &item.name).await? {
-                Some(there) if there.is_folder() && item.is_folder() => {
+                // A folder with access of its own (restricted, or its own grants) keeps it: it comes back beside the
+                // folder of its name, with a number, rather than into it
+                Some(there) if there.is_folder() && item.is_folder() && !has_own_access(conn, item).await? => {
+                    let there = tree::folder_for(conn, user, &there.id, Need::Add).await?;
                     merge(conn, user, locks, item, &there, replace).await?;
                     continue;
                 }
@@ -302,8 +316,9 @@ pub async fn restore(State(st): State<AppState>, user: User, Json(req): Json<Bat
         let parent_id = make_way(&mut tx, &user, &locks, &place).await?;
         // Without an answer the item gets a number when its name is taken, as it always did
         if let Some(existing) = tree::find_child(&mut tx, &parent_id, &node.name).await? {
-            // A folder where a folder has its name now is merged into it, whatever the answer but Skip
-            if node.is_folder() && existing.is_folder() {
+            // A folder where a folder has its name now is merged into it, whatever the answer but Skip; unless it has
+            // access of its own, which it keeps: it then comes back with a number, as a file does
+            if node.is_folder() && existing.is_folder() && !has_own_access(&mut tx, &node).await? {
                 let resolution = req.resolution(&node.id);
                 if resolution == Some(Resolution::Skip) {
                     continue;

@@ -580,6 +580,15 @@ pub async fn access(State(st): State<AppState>, user: User, Path(id): Path<Strin
             inherited.retain(|g| visible.contains(g.node_id.as_str()));
         }
     }
+    // Nor the grants on a restricted folder above that the person can't see (they have access further down only):
+    // neither its name nor who can reach it
+    if !inherited.is_empty() {
+        let ids = serde_json::to_string(&inherited.iter().map(|g| &g.node_id).collect::<Vec<_>>()).map_err(AppError::internal)?;
+        let sql = format!("SELECT n.id FROM nodes n WHERE n.id IN (SELECT value FROM json_each(?1)) AND {}", tree::visible_sql(&user, "n.id"));
+        let seen: std::collections::HashSet<String> =
+            sqlx::query_as::<_, (String,)>(sqlx::AssertSqlSafe(sql.as_str())).bind(ids).fetch_all(&mut *c).await?.into_iter().map(|(id,)| id).collect();
+        inherited.retain(|g| seen.contains(&g.node_id));
+    }
     let is_drive_root = node.parent_id.is_none();
     let share_own_groups = crate::guests::own_groups(&mut c).await?;
     let guest_max_days = crate::guests::max_days(&mut c).await?;
