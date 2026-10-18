@@ -219,7 +219,7 @@ function GrantRow(props: {
  * Who may make share links of the space's items: chosen by its managers (and administrators), who are told first how
  * many links working now would stop; shown to everyone else
  */
-function LinkMakersSetting({ driveId, value, canChoose }: { driveId: string; value: LinkMakers; canChoose: boolean }) {
+export function LinkMakersSetting({ driveId, value, canChoose }: { driveId: string; value: LinkMakers; canChoose: boolean }) {
   const qc = useQueryClient();
   const id = useId();
   const stopping = useQuery({ queryKey: ["links-stopping", driveId], queryFn: () => api.linksStopping(driveId), enabled: canChoose });
@@ -234,7 +234,14 @@ function LinkMakersSetting({ driveId, value, canChoose }: { driveId: string; val
     onError: (e) => toast.error(e.message),
   });
   const choose = async (makers: LinkMakers) => {
-    const stops = makers === "editors" ? 0 : (stopping.data?.[makers] ?? 0);
+    let stops = 0;
+    if (makers !== "editors") {
+      // Counted now: what was loaded may not be there yet, may have failed, or be from before other changes. Without
+      // a count, nothing is changed: no link stops without the question
+      const counted = await stopping.refetch();
+      if (counted.error || !counted.data) return void toast.error(t("Couldn't count the share links that would stop. Try again."));
+      stops = counted.data[makers] ?? 0;
+    }
     if (
       stops > 0 &&
       !(await ask({

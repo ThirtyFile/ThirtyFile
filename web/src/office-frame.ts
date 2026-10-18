@@ -173,8 +173,19 @@ root.addEventListener(
   "beforeinput",
   (e) => {
     if (held === null) return;
+    // What an input method composes can't be held back (it isn't cancelable): it is taken when it ends, below
+    if (e.inputType === "insertCompositionText") return;
     e.preventDefault();
     if (e.inputType === "insertText" && e.data) held += e.data;
+  },
+  true,
+);
+// Zhuyin, Pinyin or Japanese ended while the view opens again: the text chosen goes into the new view too, as typed
+// text does (the old view, with what was composed in it, is replaced)
+root.addEventListener(
+  "compositionend",
+  (e) => {
+    if (held !== null && e.data) held += e.data;
   },
   true,
 );
@@ -196,6 +207,9 @@ async function openEditor(parts: Parts, caret: Caret | null | undefined, scroll:
   }
   e.base = parts;
   editor = opened;
+  // A new view: nothing typed in it yet, unless what was typed meanwhile goes in now (it marks it as typed, so Ctrl+Z
+  // undoes that text first, not the change before it)
+  e.typed = false;
   // What was typed meanwhile goes where the caret is now
   const typed = held;
   held = null;
@@ -268,11 +282,29 @@ function act(job: () => Promise<void>) {
     });
 }
 
+/**
+ * A change of the document's shape: `before` kept to undo it, `story` (the part the view shows) set, and the view
+ * opened again on `parts`. Should that fail, both are taken back: the next Ctrl+Z undoes what came before, rather
+ * than "undo" the change that didn't happen
+ */
+async function changeTo(before: ReturnType<typeof edited>, parts: Parts, caret: Caret | null, story = editing!.story) {
+  const e = editing!;
+  const entry = { parts: before.parts, caret: before.caret, story: e.story };
+  e.undo.push(entry);
+  e.story = story;
+  try {
+    await reopen(parts, caret);
+  } catch (err) {
+    if (e.undo.at(-1) === entry) e.undo.pop();
+    e.story = entry.story;
+    throw err;
+  }
+}
+
 /** The view opened again on a changed document, and the host told */
 async function reopen(parts: Parts, caret: Caret | null) {
   const scroll = root.scrollTop;
   await openEditor(parts, caret, scroll);
-  editing!.typed = false;
   reply({ type: "input" });
   sendChanged();
 }
@@ -323,8 +355,7 @@ async function changeTable(op: TableOp, change: TableChange) {
     reply({ type: "table-refused" });
     return;
   }
-  editing.undo.push({ parts: before.parts, caret: before.caret, story: editing.story });
-  await reopen({ ...before.parts, [editor.path]: changed.xml }, changed.cell !== null ? { block: -1, offset: 0, cell: changed.cell, pick: changed.pick } : before.caret);
+  await changeTo(before, { ...before.parts, [editor.path]: changed.xml }, changed.cell !== null ? { block: -1, offset: 0, cell: changed.cell, pick: changed.pick } : before.caret);
 }
 
 /** Formatting from the host's toolbar: the view's own commands right away; size, style and alignment by opening the view again */
@@ -370,8 +401,7 @@ function format(msg: FormatMessage) {
       reply({ type: "format-refused" });
       return;
     }
-    editing.undo.push({ parts: before.parts, caret: before.caret, story: editing.story });
-    await reopen({ ...before.parts, [editor.path]: changed.xml }, changed.caret);
+    await changeTo(before, { ...before.parts, [editor.path]: changed.xml }, changed.caret);
   });
 }
 
@@ -384,8 +414,7 @@ async function changeList(f: ListFormat) {
     reply({ type: "format-refused" });
     return;
   }
-  editing.undo.push({ parts: before.parts, caret: before.caret, story: editing.story });
-  await reopen({ ...before.parts, ...changed.parts }, changed.caret);
+  await changeTo(before, { ...before.parts, ...changed.parts }, changed.caret);
 }
 
 /** A field inserted at the caret, and the view opened again with the caret just after it */
@@ -397,8 +426,7 @@ async function addField(kind: FieldKind) {
     reply({ type: "field-refused" });
     return;
   }
-  editing.undo.push({ parts: before.parts, caret: before.caret, story: editing.story });
-  await reopen({ ...before.parts, [editor.path]: changed.xml }, changed.caret);
+  await changeTo(before, { ...before.parts, [editor.path]: changed.xml }, changed.caret);
 }
 
 /**
@@ -414,9 +442,7 @@ async function changeStory(msg: StoryMessage) {
       reply({ type: "story-refused" });
       return;
     }
-    editing.undo.push({ parts: before.parts, caret: before.caret, story: editing.story });
-    editing.story = added.path;
-    await reopen({ ...before.parts, ...added.parts }, null);
+    await changeTo(before, { ...before.parts, ...added.parts }, null, added.path);
     return;
   }
   if (typeof msg.firstPage === "boolean" || typeof msg.evenOdd === "boolean") {
@@ -425,10 +451,8 @@ async function changeStory(msg: StoryMessage) {
       reply({ type: "story-refused" });
       return;
     }
-    editing.undo.push({ parts: before.parts, caret: before.caret, story: editing.story });
     // A first-page or even-page one made opens; one turned off isn't listed any more, and the body opens instead
-    if (changed.open) editing.story = changed.open;
-    await reopen({ ...before.parts, ...changed.parts }, null);
+    await changeTo(before, { ...before.parts, ...changed.parts }, null, changed.open ?? editing.story);
     return;
   }
   const path = msg.path ?? null;
