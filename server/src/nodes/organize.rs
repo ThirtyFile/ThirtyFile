@@ -93,8 +93,7 @@ pub async fn rename(State(st): State<AppState>, user: User, Path(id): Path<Strin
         .await?;
     logs::record_activity(&mut tx, &user, Some(&node), "rename", &format!("→ {name}")).await?;
     let node = tree::get_node(&mut tx, &node.id).await?.unwrap();
-    tx.commit().await?;
-    locks.committed();
+    locks.commit(tx).await?;
     Ok(Json(node))
 }
 
@@ -301,8 +300,7 @@ pub async fn move_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
         logs::record_activity_into(&mut tx, &user, Some(&node), Some(&dest.id), "move", &format!("→ {to}")).await?;
     }
     tree::touch(&mut tx, &dest.id).await?;
-    tx.commit().await?;
-    locks.committed();
+    locks.commit(tx).await?;
     Ok(fsops::Across::new(dest, across, true).map(|a| a.replacing(replaced)))
 }
 
@@ -440,8 +438,7 @@ pub async fn copy_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
     }
     tree::adjust_usage(&mut tx, dest.drive(), total).await?;
     tree::touch(&mut tx, &dest.id).await?;
-    tx.commit().await?;
-    locks.committed();
+    locks.commit(tx).await?;
     Ok(fsops::Across::new(dest, across, false).map(|a| a.replacing(replaced)))
 }
 
@@ -487,8 +484,7 @@ async fn trash_ids(st: &AppState, user: &User, ids: &[String], empty_only: bool)
         }
     }
     drop(access);
-    tx.commit().await?;
-    locks.committed();
+    locks.commit(tx).await?;
     Ok(Json(json!({ "ok": true })))
 }
 

@@ -134,6 +134,10 @@ fn tls(settings: &Settings, private_plain: bool) -> AppResult<Option<Arc<rustls:
 /// How often the settings are read again when nothing says they changed
 const IDLE: Duration = Duration::from_secs(5);
 
+/// How long a signed-in FTP session may last. Idle ones end after two minutes (`idle_session_timeout`); this only ends
+/// one that never stops, and is long enough for a camera's slow upload of a whole day
+const SESSION_MAX: Duration = Duration::from_secs(12 * 3600);
+
 pub fn supervise(st: AppState, settings: Settings) -> Listener {
     *st.part::<Memory>().status.write() =
         Status { address: settings.address.clone(), passive_ports: settings.passive.clone(), passive_host: settings.host.clone(), ..Default::default() };
@@ -287,12 +291,12 @@ async fn connection(
         _=stopped.changed()=>(),
         _=signed_in.notified()=>{
             waiting.signed_in();
-            tokio::select!{_=&mut service=>finished=true,_=stopped.changed()=>(),_=tokio::time::sleep(Duration::from_secs(3600))=>()}
+            tokio::select!{_=&mut service=>finished=true,_=stopped.changed()=>(),_=tokio::time::sleep(SESSION_MAX)=>()}
         }
         _=&mut deadline=>{
             if authenticated.load(Ordering::Acquire){
                 waiting.signed_in();
-                tokio::select!{_=&mut service=>finished=true,_=stopped.changed()=>(),_=tokio::time::sleep(Duration::from_secs(3600))=>()}
+                tokio::select!{_=&mut service=>finished=true,_=stopped.changed()=>(),_=tokio::time::sleep(SESSION_MAX)=>()}
             }
         }
     }

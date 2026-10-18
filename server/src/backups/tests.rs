@@ -640,11 +640,39 @@ async fn a_copy_can_be_checked_and_what_is_missing_or_damaged_is_found() {
     assert_eq!(run_job(&env, &check).await, "failed");
     let (failures,): (String,) = sqlx::query_as("SELECT failures FROM backup_jobs WHERE id = ?").bind(&check).fetch_one(&env.st.db).await.unwrap();
     assert!(failures.contains("damaged") && failures.contains("missing"), "{failures}");
-    // Neither counts as held any more, and the damaged one is gone from the destination: the next snapshot stores both
-    // again, rather than taking them for stored
+    // Neither counts as held any more: the next snapshot stores both again, rather than taking them for stored. The
+    // damaged one stays where it is until then (earlier snapshots name it, should the read have been wrong)
     let (held,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM backup_objects WHERE set_id = ?").bind(&set).fetch_one(&env.st.db).await.unwrap();
     assert_eq!(held, 0);
-    assert!(!objects[0].exists());
+    assert!(objects[0].exists());
+}
+
+#[tokio::test]
+async fn a_check_reads_content_again_before_it_takes_it_for_damaged() {
+    let env = testutil::env().await;
+    let amy = env.user("amy", true).await;
+    env.upload(&amy, amy.root(), "a.txt", b"first").await;
+    let nas = add_nas(&env, "nas").await;
+    let (set, job) = copy_all(&env, "local", "nas").await;
+    assert_eq!(run_job(&env, &job).await, "done");
+    let admin = env.admin().await;
+    let check = async || {
+        let Json(v) = api::verify(State(env.st.clone()), Admin(admin.clone()), Path(set.clone())).await.unwrap();
+        run_job(&env, v["job_id"].as_str().unwrap()).await
+    };
+    let held = async || -> i64 { sqlx::query_scalar("SELECT COUNT(*) FROM backup_objects WHERE set_id = ?").bind(&set).fetch_one(&env.st.db).await.unwrap() };
+    // A transfer cut short once (the destination says the file ended): read again, it is whole
+    let hash = hex::encode(<sha2::Sha256 as sha2::Digest>::digest(b"first"));
+    super::tidy::SHORT_READS.with_borrow_mut(|r| *r = (hash.clone(), 1));
+    let first = check().await;
+    let (failures,): (String,) = sqlx::query_as("SELECT failures FROM backup_jobs ORDER BY rowid DESC LIMIT 1").fetch_one(&env.st.db).await.unwrap();
+    assert_eq!(first, "done", "{failures}");
+    assert_eq!(held().await, 1);
+    // Short twice: damaged, no longer counted as held, and still there
+    super::tidy::SHORT_READS.with_borrow_mut(|r| *r = (hash.clone(), 2));
+    assert_eq!(check().await, "failed");
+    assert_eq!(held().await, 0);
+    assert!(objects_in(&nas, &set)[0].exists());
 }
 
 #[tokio::test]

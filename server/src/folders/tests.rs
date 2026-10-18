@@ -3,6 +3,18 @@ use crate::testutil::{self, write_old};
 use axum::extract::{Path as UrlPath, Query, State};
 
 #[tokio::test]
+async fn a_scan_starts_no_reader_while_one_is_stuck_on_the_disk() {
+    let env = testutil::env().await;
+    let space = env.folder_space("Shared").await;
+    // The reader of an earlier scan, still waiting for a disk that stopped answering
+    let stuck = crate::util::claim(format!("scan-read:{}", space.drive)).unwrap();
+    let report = scan(&env.st, &space.drive).await.unwrap();
+    assert!(report.error.as_deref().is_some_and(|e| e.contains("doesn't answer")), "{report:?}");
+    drop(stuck);
+    assert_eq!(scan(&env.st, &space.drive).await.unwrap().error, None);
+}
+
+#[tokio::test]
 async fn fallback_scans_use_the_normal_interval_and_respect_disabled_scans() {
     let env = testutil::env().await;
     let at = now();

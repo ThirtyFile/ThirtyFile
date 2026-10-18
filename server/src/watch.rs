@@ -44,6 +44,11 @@ pub fn spaces_changed(st: &AppState) {
 /// What the watching thread is told: the folder spaces to watch now (id → folder)
 type Spaces = HashMap<String, PathBuf>;
 
+/// While the watch limit is reached, how long until watching every space is tried again, doubled each time it is
+/// reached again, up to `LIMITED_RETRY_MAX`
+const LIMITED_RETRY: Duration = Duration::from_secs(120);
+const LIMITED_RETRY_MAX: Duration = Duration::from_secs(3600);
+
 /// Whether every folder of the space is watched now: changes there show up by themselves, so the regular scan of it
 /// runs less often (folders/)
 pub fn is_watched(st: &AppState, drive_id: &str) -> bool {
@@ -135,6 +140,11 @@ struct Watcher {
     roots: HashMap<String, PathBuf>,
     /// Watches could not all be added: rely on full scans
     limited: bool,
+    /// The spaces of the last update, and when watching all of them is tried again while `limited` (`backoff` from
+    /// then on, doubled each time it is reached again)
+    wanted: Spaces,
+    retry_at: Option<std::time::Instant>,
+    backoff: Duration,
     /// Spaces using refresh-on-open and regular scans, with their paths (told in the log once)
     skipped: HashMap<String, PathBuf>,
     /// Where the fully watched spaces are told (`Memory::watched`)
@@ -187,6 +197,8 @@ impl Watcher {
         if wd < 0 {
             if std::io::Error::last_os_error().raw_os_error() == Some(libc::ENOSPC) && !self.limited {
                 self.limited = true;
+                self.retry_at = Some(std::time::Instant::now() + self.backoff);
+                self.backoff = (self.backoff * 2).min(LIMITED_RETRY_MAX);
                 self.publish();
                 tracing::warn!(
                     "Can't watch every folder of the folder spaces (the limit fs.inotify.max_user_watches is reached, at {}): changes there are found by the regular scan",
@@ -222,9 +234,23 @@ impl Watcher {
 
     /// Tests can model a mounted file system with no external events without changing the process's environment.
     fn update_with(&mut self, wanted: Spaces, fallback: impl Fn(&Path) -> Option<&'static str>) {
+        self.update_inner(wanted.clone(), fallback);
+        self.wanted = wanted;
+        if !self.limited {
+            self.retry_at = None;
+            self.backoff = LIMITED_RETRY;
+        }
+    }
+
+    fn update_inner(&mut self, wanted: Spaces, fallback: impl Fn(&Path) -> Option<&'static str>) {
         // The watch limit was reached: everything is watched again from the start, so spaces gone (or a limit raised
-        // meanwhile) let the others be watched in full again
+        // meanwhile) let the others be watched in full again. Not on every update (the list comes every minute): only
+        // when the spaces changed, or once the time to try again has come
         if self.limited {
+            let due = self.retry_at.is_none_or(|at| std::time::Instant::now() >= at);
+            if wanted == self.wanted && !due {
+                return;
+            }
             self.limited = false;
             for wd in self.dirs.keys() {
                 // SAFETY: a watch descriptor of this instance
@@ -339,6 +365,9 @@ fn watch(st: AppState, handle: tokio::runtime::Handle, rx: &std::sync::mpsc::Rec
         dirs: HashMap::new(),
         roots: HashMap::new(),
         limited: false,
+        wanted: Default::default(),
+        retry_at: None,
+        backoff: LIMITED_RETRY,
         skipped: HashMap::new(),
         published: st.part::<Memory>().watched.clone(),
         todo: Vec::new(),
@@ -462,7 +491,18 @@ mod tests {
         // SAFETY: plain system call
         let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
         assert!(fd >= 0);
-        Watcher { fd, dirs: HashMap::new(), roots: HashMap::new(), limited: false, skipped: HashMap::new(), published: Default::default(), todo: Vec::new() }
+        Watcher {
+            fd,
+            dirs: HashMap::new(),
+            roots: HashMap::new(),
+            limited: false,
+            wanted: Default::default(),
+            retry_at: None,
+            backoff: LIMITED_RETRY,
+            skipped: HashMap::new(),
+            published: Default::default(),
+            todo: Vec::new(),
+        }
     }
 
     fn paths(w: &Watcher) -> Vec<String> {
@@ -482,6 +522,36 @@ mod tests {
         }
         while w.drain(DRAIN_PER_PASS) {}
         changed
+    }
+
+    #[tokio::test]
+    async fn while_the_watch_limit_is_reached_spaces_are_watched_again_only_when_they_change_or_in_a_while() {
+        let env = crate::testutil::env().await;
+        let space = env.folder_space("Watched").await;
+        let other = env.folder_space("Other").await;
+        std::fs::create_dir_all(space.dir.join("a/b")).unwrap();
+        let mut w = watcher();
+        let wanted = HashMap::from([(space.drive.clone(), space.dir.clone())]);
+        w.update_with(wanted.clone(), |_| None);
+        assert_eq!(paths(&w), ["", "a", "a/b"]);
+        // As when the limit was reached on the way: the same spaces a minute later change nothing
+        w.limited = true;
+        w.retry_at = Some(std::time::Instant::now() + Duration::from_secs(600));
+        w.update_with(wanted.clone(), |_| None);
+        assert!(w.limited, "watched again from the start every minute");
+        // Once its time has come, everything is watched again
+        w.retry_at = Some(std::time::Instant::now() - Duration::from_secs(1));
+        w.update_with(wanted.clone(), |_| None);
+        assert!(!w.limited);
+        assert_eq!(paths(&w), ["", "a", "a/b"]);
+        // And at once when the spaces change
+        w.limited = true;
+        w.retry_at = Some(std::time::Instant::now() + Duration::from_secs(600));
+        let mut more = wanted.clone();
+        more.insert(other.drive.clone(), other.dir.clone());
+        w.update_with(more, |_| None);
+        assert!(!w.limited);
+        assert_eq!(paths(&w), ["", "", "a", "a/b"]);
     }
 
     #[test]

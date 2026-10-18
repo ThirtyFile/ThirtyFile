@@ -25,6 +25,8 @@ pub struct SpaceLocks {
     pub(super) made: crate::sync::Mutex<Vec<Pinned>>,
     pub(super) unfinished: crate::sync::Mutex<Vec<changes::Unfinished>>,
     pub(super) committed: std::sync::atomic::AtomicBool,
+    /// The change's commit is under way (`commit`): dropped then, it may be in the database or not
+    pub(super) committing: std::sync::atomic::AtomicBool,
 }
 
 impl SpaceLocks {
@@ -55,6 +57,29 @@ impl SpaceLocks {
         self.unfinished.lock().extend(unfinished);
     }
 
+    /// Commits `tx`, the change these locks hold, then `committed`. Dropped while the commit is under way (its request
+    /// given up, a timeout), the change may well be in the database: its renames then stay as they are, with their
+    /// entries in the journal, for the next scan to settle by what the index says (journal.rs), rather than be put
+    /// back under an index that has them.
+    pub async fn commit(&self, tx: sqlx::Transaction<'_, sqlx::Sqlite>) -> AppResult<()> {
+        self.commit_started();
+        match tx.commit().await {
+            Ok(()) => {
+                self.committed();
+                Ok(())
+            }
+            // Refused: rolled back, so its renames are put back as for any failed change
+            Err(e) => {
+                self.committing.store(false, std::sync::atomic::Ordering::SeqCst);
+                Err(e.into())
+            }
+        }
+    }
+
+    pub(super) fn commit_started(&self) {
+        self.committing.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
     /// The change is in the index: its renames stay, and what it left to finish is finished once the locks go
     pub fn committed(&self) {
         let renamed = std::mem::take(&mut *self.renamed.lock());
@@ -74,6 +99,11 @@ impl Drop for SpaceLocks {
         let renamed = std::mem::take(self.renamed.get_mut());
         let made = std::mem::take(self.made.get_mut());
         if renamed.is_empty() && made.is_empty() {
+            return;
+        }
+        // Dropped while committing: left for the journal (`commit`)
+        if !*self.committed.get_mut() && *self.committing.get_mut() {
+            tracing::warn!("A change to a folder space stopped while it was being committed: the next scan settles its {} rename(s)", renamed.len());
             return;
         }
         let undo = move || {
@@ -136,7 +166,15 @@ pub async fn lock(st: &AppState, user: &User, ids: &[&str]) -> AppResult<SpaceLo
     for (d, _) in &held {
         ready(st, d).await?;
     }
-    Ok(SpaceLocks { st: st.clone(), held, renamed: Default::default(), made: Default::default(), unfinished: Default::default(), committed: Default::default() })
+    Ok(SpaceLocks {
+        st: st.clone(),
+        held,
+        renamed: Default::default(),
+        made: Default::default(),
+        unfinished: Default::default(),
+        committed: Default::default(),
+        committing: Default::default(),
+    })
 }
 
 /// `lock`, for a request about these items: only the spaces where the user may see one of them. Holding a space's
@@ -214,6 +252,14 @@ mod tests {
         locks.committed();
         drop(locks);
         assert!(space.dir.join("d.txt").exists() && !space.dir.join("c.txt").exists());
+
+        // One dropped while its commit was under way may be in the index: its renames stay for the journal to settle
+        let locks = lock(&env.st, &admin, &[&space.root]).await.unwrap();
+        rename(&locks, &space.dir, "d.txt", "c.txt", None);
+        locks.commit_started();
+        drop(locks);
+        assert!(space.dir.join("c.txt").exists() && !space.dir.join("d.txt").exists());
+        std::fs::rename(space.dir.join("c.txt"), space.dir.join("d.txt")).unwrap();
 
         // The disk stops answering while a change holds the lock: the change fails, and the space counts as stuck
         let locks = lock(&env.st, &admin, &[&space.root]).await.unwrap();

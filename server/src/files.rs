@@ -88,6 +88,29 @@ impl Source {
         }
     }
 
+    /// `describe`'s version tag, for a change that holds the write lock: a folder space's file is looked at on disk with
+    /// the disk's time limit (`fsops::on_disk`), as every disk call there is. None when the disk doesn't answer or the
+    /// file isn't there: whoever asks then leaves out what it would have kept with the version.
+    pub async fn version_within(&self, drive: &str) -> Option<String> {
+        match self {
+            Source::Stored { hash, .. } => Some(hash.clone()),
+            Source::File(path) => {
+                let (path, _space) = (path.clone(), drive.to_string());
+                crate::fsops::on_disk(drive, crate::fsops::disk_wait(), move || {
+                    #[cfg(test)]
+                    crate::fsops::testing::disk_call(&_space);
+                    let meta = std::fs::symlink_metadata(path.as_path()).map_err(|_| AppError::not_found("File not found"))?;
+                    if !meta.is_file() {
+                        return Err(AppError::not_found("File not found"));
+                    }
+                    Ok(file_tag(&meta))
+                })
+                .await
+                .ok()
+            }
+        }
+    }
+
     /// The size and a version tag of the content as it is now. A stored content never changes; a file in a folder
     /// space may have changed since it was indexed, so it is looked at again
     pub async fn describe(&self, indexed_size: u64) -> AppResult<(u64, String)> {
@@ -376,6 +399,26 @@ async fn store_content(st: AppState, user: User, before: Node, body: Bytes, hash
             staged.abandon(&st).await;
             Err(e)
         }
+    }
+}
+
+#[cfg(test)]
+mod version_tests {
+    #[tokio::test]
+    async fn a_version_asked_for_inside_the_write_lock_waits_no_longer_than_the_disk_may() {
+        let env = crate::testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        crate::testutil::write_old(&space.dir.join("a.txt"), b"a");
+        crate::folders::scan(&env.st, &space.drive).await.unwrap();
+        let id = env.node_at(&space.drive, "a.txt").await.unwrap().0;
+        let node = crate::tree::get_node(&mut env.st.db.acquire().await.unwrap(), &id).await.unwrap().unwrap();
+        let source = super::Source::of(&node).unwrap();
+        assert!(source.version_within(node.drive()).await.is_some());
+        let _short = crate::fsops::testing::short_waits();
+        let _hung = crate::fsops::testing::hang(&space.drive, std::time::Duration::from_secs(5));
+        let started = std::time::Instant::now();
+        assert_eq!(source.version_within(node.drive()).await, None);
+        assert!(started.elapsed() < std::time::Duration::from_secs(4), "{:?}", started.elapsed());
     }
 }
 

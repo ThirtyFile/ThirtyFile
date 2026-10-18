@@ -171,6 +171,12 @@ impl Drop for Waiting {
     }
 }
 
+/// Claims `key` for work on a thread of its own that may not come back, held until what this returns is dropped; None
+/// while an earlier one still holds it (`blocking_within`'s turns, for work longer than one step)
+pub fn claim(key: String) -> Option<impl Drop + Send> {
+    Waiting::claim(key)
+}
+
 /// Waits for `key` until `deadline`: a call already waiting for the same thing (another request checking the same
 /// disk) goes first, and its thread isn't joined by another while it hasn't answered
 async fn claim_by(key: String, deadline: tokio::time::Instant) -> Option<Waiting> {

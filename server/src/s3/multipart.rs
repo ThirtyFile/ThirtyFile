@@ -420,7 +420,9 @@ pub async fn cleanup(st: &AppState) -> S3Result<()> {
             .fetch_one(&st.db)
             .await
             .map_err(super::internal)?;
-        if expired || super::credentials::identity(st, &key, true).await.is_err() {
+        // Its key stopped, ended or no longer allowed to write: a passing database error isn't that
+        let refused = matches!(super::credentials::identity(st, &key, true).await, Err(e) if *e.code() != s3s::S3ErrorCode::InternalError);
+        if expired || refused {
             remove(st, &id).await?;
         }
     }
