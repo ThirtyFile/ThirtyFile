@@ -1,6 +1,6 @@
 //! Reading the text of a file: plain text and code, web pages, and the Office documents (DOCX, XLSX, PPTX and the Open
 //! Document formats). The text is squashed to single spaces, so a phrase matches across line breaks, and cut off after
-//! `MAX_BYTES`. Pictures and scanned pages hold no text this reads, and PDFs are not read yet.
+//! `MAX_BYTES`, and the text layer of PDFs (pdf/). Pictures and scanned pages hold no text this reads.
 
 use quick_xml::{Reader, events::Event};
 
@@ -24,6 +24,8 @@ pub enum Kind {
     Pptx,
     /// OpenDocument text, spreadsheet and presentation
     Odf,
+    /// The text layer of a PDF
+    Pdf,
 }
 
 const TEXT_EXT: &[&str] = &[
@@ -135,6 +137,7 @@ pub fn kind_of(name: &str, mime: &str) -> Option<Kind> {
         Some("xlsx" | "xlsm" | "xltx") => return Some(Kind::Xlsx),
         Some("pptx" | "pptm" | "potx" | "ppsx") => return Some(Kind::Pptx),
         Some("odt" | "ods" | "odp") => return Some(Kind::Odf),
+        Some("pdf") => return Some(Kind::Pdf),
         Some(e) if MARKUP_EXT.contains(&e) => return Some(Kind::Markup),
         Some(e) if TEXT_EXT.contains(&e) => return Some(Kind::Text),
         _ => {}
@@ -143,6 +146,9 @@ pub fn kind_of(name: &str, mime: &str) -> Option<Kind> {
         return Some(Kind::Text);
     }
     let mime = mime.split(';').next().unwrap_or_default().trim().to_ascii_lowercase();
+    if mime == "application/pdf" {
+        return Some(Kind::Pdf);
+    }
     (mime.starts_with("text/") && mime != "text/html" && mime != "text/xml").then_some(Kind::Text)
 }
 
@@ -339,7 +345,7 @@ fn office(kind: Kind, data: &[u8]) -> Result<String, &'static str> {
             odf_text(&xml, &mut out);
             return Ok(out);
         }
-        Kind::Text | Kind::Markup => return Err("It is not a document that can be read"),
+        Kind::Text | Kind::Markup | Kind::Pdf => return Err("It is not a document that can be read"),
     };
     for entry in names {
         let xml = zip.read(entry, XML_CAP).ok_or("It could not be unpacked")?;
@@ -370,6 +376,12 @@ fn odf_text(xml: &[u8], out: &mut String) {
     }
 }
 
+/// Text in compatibility form (NFKC), which is how text is kept and how a term is looked for
+pub fn compatible(text: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    text.nfkc().collect()
+}
+
 /// The text of a file, squashed and cut to `MAX_BYTES`; the reason when there is none to read
 pub fn read(kind: Kind, data: &[u8]) -> Result<String, &'static str> {
     let mut text = match kind {
@@ -384,7 +396,10 @@ pub fn read(kind: Kind, data: &[u8]) -> Result<String, &'static str> {
             out
         }
         Kind::Docx | Kind::Xlsx | Kind::Pptx | Kind::Odf => office(kind, data)?,
+        Kind::Pdf => super::pdf::text(data)?,
     };
+    // In compatibility form (NFKC), as a term is looked for: the radical a PDF writes for 月 is 月, a full-width letter is a letter
+    text = compatible(&text);
     // Cut at a character, not in the middle of one
     while text.len() > MAX_BYTES {
         text.pop();

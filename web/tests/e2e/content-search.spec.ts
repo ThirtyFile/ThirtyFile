@@ -18,6 +18,31 @@ test("an administrator turns on searching inside files, and a file is found by i
     const folder = await makeFolder(page, "Minutes");
     await uploadFile(page, folder, "board-minutes.txt", `The board agreed that the ${word} programme starts in May.\n`);
     await uploadFile(page, folder, "picture.jpg", `${word} but not text`);
+    // A PDF is read by its text layer
+    const pdf = `%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 70 >>
+stream
+BT /F1 12 Tf 72 700 Td (Tender notice for ${word}) Tj ET
+endstream
+endobj
+trailer
+<< /Root 1 0 R >>
+%%EOF
+`;
+    await uploadFile(page, folder, "tender.pdf", pdf);
     // Read in the background: the page follows how far it has got
     await expect
       .poll(
@@ -28,7 +53,7 @@ test("an administrator turns on searching inside files, and a file is found by i
         },
         { timeout: 60_000 },
       )
-      .toMatchObject({ queued: 0, found: 1 });
+      .toMatchObject({ queued: 0, found: 2 });
 
     // The address bar's search looks at names; the option adds what is inside
     await page.goto(`/search?q=${word}`);
@@ -38,7 +63,8 @@ test("an administrator turns on searching inside files, and a file is found by i
     await expect(page.getByLabel("Also search inside files")).toBeChecked();
     await expect(page.getByRole("row", { name: /board-minutes\.txt/ })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Found in" })).toBeVisible();
-    await expect(page.locator("mark", { hasText: word })).toBeVisible();
+    await expect(page.locator("mark", { hasText: word })).toHaveCount(2);
+    await expect(page.getByRole("row", { name: /tender\.pdf/ })).toBeVisible();
     await expect(page.getByText(/agreed that the/)).toBeVisible();
     await expect(page).toHaveURL(/content=1/);
     // Not the picture, which holds the word but is not read

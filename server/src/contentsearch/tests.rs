@@ -34,9 +34,11 @@ fn the_kinds_of_file_that_are_read_are_told_by_name_and_type() {
     assert_eq!(k("Budget.xlsx", ""), Some(Kind::Xlsx));
     assert_eq!(k("Deck.pptx", ""), Some(Kind::Pptx));
     assert_eq!(k("letter.odt", ""), Some(Kind::Odf));
+    assert_eq!(k("Paper.PDF", ""), Some(Kind::Pdf));
+    assert_eq!(k("no-extension", "application/pdf"), Some(Kind::Pdf));
     assert_eq!(k("no-extension", "text/plain"), Some(Kind::Text));
-    // Not read: pictures, archives, PDFs (for now), what has no type
-    for name in ["photo.jpg", "backup.zip", "paper.pdf", "movie.mp4", "data.bin", "no-extension"] {
+    // Not read: pictures, archives, what has no type
+    for name in ["photo.jpg", "backup.zip", "movie.mp4", "data.bin", "no-extension"] {
         assert_eq!(k(name, ""), None, "{name}");
     }
 }
@@ -257,6 +259,35 @@ async fn a_saved_file_is_read_again_a_renamed_one_by_its_new_kind_and_the_trash_
     assert_eq!(state_of(&env, &doc).await, None);
     let (rows,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM content_fts").fetch_one(&env.st.db).await.unwrap();
     assert_eq!(rows, 0);
+}
+
+#[tokio::test]
+async fn a_pdf_is_read_with_the_other_files_and_one_that_cannot_be_is_left_alone() {
+    use super::pdf::tests::{HELVETICA, one_page};
+    let env = testutil::env().await;
+    let amy = env.user("amy", true).await;
+    turn_on(&env, Config::default()).await;
+    let tender = one_page(HELVETICA, "BT /F1 12 Tf (The kiosk tender closes on Friday) Tj ET");
+    let id = env.stored_file(&amy, amy.root(), "tender.pdf", &tender).await;
+    // A scan has no text, and an encrypted file can't be read: neither is searchable, and neither is tried again
+    let scan = one_page(HELVETICA, "q 600 0 0 800 0 0 cm /Im0 Do Q");
+    let scanned = env.stored_file(&amy, amy.root(), "scan.pdf", &scan).await;
+    let locked = env
+        .stored_file(
+            &amy,
+            amy.root(),
+            "locked.pdf",
+            b"%PDF-1.7
+trailer
+<< /Root 1 0 R /Encrypt 9 0 R >>",
+        )
+        .await;
+    read_all(&env).await;
+    assert_eq!(found(&env, "kiosk").await, ["tender.pdf"]);
+    assert_eq!(state_of(&env, &id).await.as_deref(), Some("indexed"));
+    assert_eq!(state_of(&env, &scanned).await.as_deref(), Some("skipped"));
+    assert_eq!(state_of(&env, &locked).await.as_deref(), Some("skipped"));
+    assert_eq!(queued(&env).await, 0);
 }
 
 #[tokio::test]

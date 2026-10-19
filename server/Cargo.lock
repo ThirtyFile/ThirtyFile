@@ -4596,6 +4596,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "unftp-core",
+ "unicode-normalization",
  "uuid",
  "x509-parser",
 ]

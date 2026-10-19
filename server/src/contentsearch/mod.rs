@@ -13,6 +13,7 @@
 
 mod extract;
 mod indexer;
+mod pdf;
 mod search;
 mod zipread;
 

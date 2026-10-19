@@ -207,7 +207,7 @@
 
         <h2 id="search-inside">搜尋檔案內容</h2>
         <p>一般的搜尋只看名稱。管理員在<strong>控制台 › 一般</strong>開啟<strong>搜尋檔案內容</strong>後，搜尋結果頁會出現<strong>也搜尋檔案內容</strong>選項：勾選後，就能依檔案裡的字詞找到檔案。依內容找到的檔案，會在<strong>找到的內容</strong>欄顯示一小段文字，並標出你搜尋的字詞。檔案只要包含你輸入的所有字詞（不論位置、不分大小寫）就會被找到，字詞的任何一部分也算。搜尋檔案內容的字詞至少要有三個字元（中文或日文兩個字太短）；更短的字詞只會比對名稱。網址列的搜尋框永遠只看名稱。<a href="#smart-folders">智慧型資料夾</a>也可以用<strong>也搜尋檔案內容</strong>搜尋檔案內容。</p>
-        <p>會讀取的內容：純文字、Markdown、CSV 和程式碼檔案、網頁，以及 Word（<code>.docx</code>）、Excel（<code>.xlsx</code>）、PowerPoint（<code>.pptx</code>）和 OpenDocument（<code>.odt</code>、<code>.ods</code>、<code>.odp</code>）檔案的文字。PDF、圖片和較舊的 Office 格式（<code>.doc</code>、<code>.xls</code>、<code>.ppt</code>）不會讀取，掃描的頁面也不會辨識。超過管理員所設上限的檔案（起初為 25 MB）不會讀取，單一檔案最多保留 3 MB 的文字。檔案被儲存、重新命名、從垃圾桶還原，或在伺服器上的資料夾中被更改後，會重新讀取。</p>
+        <p>會讀取的內容：純文字、Markdown、CSV 和程式碼檔案、網頁、PDF，以及 Word（<code>.docx</code>）、Excel（<code>.xlsx</code>）、PowerPoint（<code>.pptx</code>）和 OpenDocument（<code>.odt</code>、<code>.ods</code>、<code>.odp</code>）檔案的文字。PDF 讀取的是它的文字層，依頁面順序；加密的 PDF 不會讀取。圖片和較舊的 Office 格式（<code>.doc</code>、<code>.xls</code>、<code>.ppt</code>）不會讀取，掃描的頁面也不會辨識，不論是否包在 PDF 裡（掃描器或文字辨識程式已加上文字層的掃描檔，會像一般 PDF 一樣被找到）。超過管理員所設上限的檔案（起初為 25 MB）不會讀取，單一檔案最多保留 3 MB 的文字。檔案被儲存、重新命名、從垃圾桶還原，或在伺服器上的資料夾中被更改後，會重新讀取。</p>
         <p>誰能找到什麼：和名稱一樣，只能找到你能開啟的檔案。限制給其他人的資料夾、別人的個人空間或垃圾桶裡的內容不會出現，它們的文字片段也不會。給管理員：開啟此功能後，會在背景一個一個讀取所有檔案，檔案很多時需要一段時間，也會用到處理器和磁碟。<strong>控制台 › 一般 › 搜尋檔案內容</strong>會顯示進度，並可暫停、設定上限（保留的文字總量也有上限，起初為 500 MB，搜尋索引在磁碟上約佔其三倍）或重新建立索引。關閉此功能會刪除已讀取的文字。和標籤一樣，這些文字存放在資料庫：<a href="backup.html#backup"><code>data</code> 資料夾的備份</a>會包含，<a href="backup.html#file-backups">檔案備份</a>則不會。</p>
 
         <h2 id="tags">標籤</h2>

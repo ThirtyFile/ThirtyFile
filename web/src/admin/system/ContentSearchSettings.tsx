@@ -53,7 +53,7 @@ export function ContentSearchSettings() {
           <div className="font-medium">{t("Find files by what is inside them")}</div>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
             {t(
-              "Reads the text of plain text, Markdown, CSV and code files, web pages, and Word, Excel, PowerPoint and OpenDocument files, so searches can find words inside them. The text is kept on this server's disk, and people find only what they can open. PDFs and pictures are not read yet.",
+              "Reads the text of plain text, Markdown, CSV and code files, web pages, PDFs, and Word, Excel, PowerPoint and OpenDocument files, so searches can find words inside them. The text is kept on this server's disk, and people find only what they can open. Pictures and scanned pages are not read.",
             )}
           </p>
           {info?.enabled && (

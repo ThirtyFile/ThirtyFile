@@ -80,6 +80,9 @@ libunftp = { version = "=0.23.1", path = "vendor/libunftp", default-features = f
 unftp-core = "=0.1.0"
 # Reading when a certificate ends (already built for unftp-core)
 x509-parser = { version = "0.18", default-features = false }
+# Text read from files is kept in compatibility form (NFKC): the Chinese and Japanese characters that Chrome's PDFs write
+# as radicals and full-width letters become the ones people type (contentsearch/)
+unicode-normalization = "0.1"
 md-5 = "0.11"
 http-body-util = "0.1"
 
