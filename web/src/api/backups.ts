@@ -1,13 +1,30 @@
 import { request, get, post, enc, qs } from "@/api/client";
 import { driveName, locationName } from "@/api/names";
 import { tMadeName } from "@/lib/i18n";
-import type { BackupSchedule, BackupPolicySettings, BackupsOverview, CopyPreview, RestorePreview, RestoreRequest, SnapshotItem, BackupJob } from "@/api/types";
+import type {
+  BackupSchedule,
+  BackupPolicySettings,
+  BackupsOverview,
+  CopyPreview,
+  DatabaseBackup,
+  DatabaseBackupSettings,
+  DatabaseCopy,
+  RestorePreview,
+  RestoreRequest,
+  SnapshotItem,
+  BackupJob,
+} from "@/api/types";
 
 /** Whether a backup job isn't over */
 export const backupJobActive = (j: BackupJob) => j.state === "queued" || j.state === "running" || j.state === "paused" || j.state === "waiting" || j.state === "failed";
 
 /** Backups and copies of storage locations, and restoring from them (administrators) */
 export const backupsApi = {
+  databaseBackup: (signal?: AbortSignal) => get<DatabaseBackup>("/admin/backups/database", signal),
+  /** `passphrase`: a new one; the one saved stays when left out */
+  saveDatabaseBackup: (settings: DatabaseBackupSettings & { passphrase?: string }) => request<DatabaseBackup>("PUT", "/admin/backups/database", settings),
+  runDatabaseBackup: () => post<DatabaseBackup>("/admin/backups/database/run"),
+  databaseCopies: (signal?: AbortSignal) => get<DatabaseCopy[]>("/admin/backups/database/copies", signal),
   backups: () =>
     get<BackupsOverview>("/admin/backups").then((o) => ({
       ...o,

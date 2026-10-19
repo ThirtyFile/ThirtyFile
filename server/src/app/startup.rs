@@ -233,6 +233,7 @@ pub fn parts(l: Loaded) -> Parts {
         .with(twofactor::Memory::default())
         .with(moves::Memory::default())
         .with(backups::Memory::default())
+        .with(backups::database::Memory::default())
         .with(replicas::Memory::default())
         .with(upload::Memory::default())
         .with(downloads::Memory::default())

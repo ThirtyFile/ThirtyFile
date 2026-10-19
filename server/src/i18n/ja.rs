@@ -43,6 +43,7 @@ pub(super) const TEXTS: &[(Text, &str)] = &[
     (BackupOkSubject, "バックアップ「{backup}」が復旧しました"),
     (BackupOkBody, "「{backup}」が再び完全なスナップショットを作成しました。\n"),
     (BackupNewest, "\n最新の完全なスナップショット：{since}。\n"),
+    (DatabaseBackup, "データベース"),
     (BackupSee, "\n「コントロールパネル › バックアップ」を確認してください。\n"),
     // Replicas
     (ReplicaDegradedSubject, "ミラー「{policy}」の一部が保持されていません"),

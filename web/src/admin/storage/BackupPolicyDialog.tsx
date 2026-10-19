@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangleIcon, Loader2Icon } from "lucide-react";
 import { toast } from "sonner";
-import { api, type BackupPolicySettings, type BackupSchedule, type BackupSet } from "@/api";
+import { api, type BackupPolicySettings, type BackupSet } from "@/api";
+import { ScheduleFields, localZone, useSchedule } from "@/admin/storage/ScheduleFields";
 import { keys, queries } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -13,42 +14,11 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { ErrorText } from "@/components/dialogs";
 import { locationLabel } from "@/components/LocationSelect";
 import { DRIVE_ICON } from "@/lib/drives";
-import { locale, t, tServer } from "@/lib/i18n";
-import { cn, errorMessage, formatDateTime } from "@/lib/utils";
+import { t, tServer } from "@/lib/i18n";
+import { errorMessage } from "@/lib/utils";
 import { useSubmit } from "@/lib/useSubmit";
 
-/** The browser's time zone, the default of a new policy */
-export const localZone = () => {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  } catch {
-    return "UTC";
-  }
-};
-
-/** Every time zone the browser knows */
-export const zones = (): string[] => {
-  try {
-    return (Intl as unknown as { supportedValuesOf(k: string): string[] }).supportedValuesOf("timeZone");
-  } catch {
-    return ["UTC"];
-  }
-};
-
-/** A time in a time zone, as the settings show the next snapshots; in the browser's own zone when that one is unknown */
-export function zonedTime(t: number, tz: string) {
-  try {
-    return formatDateTime(t, tz);
-  } catch {
-    return formatDateTime(t);
-  }
-}
-
-const DAYS = [1, 2, 3, 4, 5, 6, 7];
-/** Monday is 1: named in the interface's language (1 January 2024 was a Monday) */
-const dayName = (d: number) => new Intl.DateTimeFormat(locale, { weekday: "short" }).format(new Date(2024, 0, d));
-
-type Kind = "every" | "daily" | "weekly";
+export { localZone, zonedTime, zones } from "@/admin/storage/ScheduleFields";
 
 /**
  * A backup policy: the spaces of a location, backed up to another location soon after changes, on a schedule, or
@@ -63,12 +33,7 @@ export function BackupPolicyDialog({ set, source: preset, onClose, onDone }: { s
   const [allSpaces, setAllSpaces] = useState(p?.all_spaces ?? true);
   const [spaces, setSpaces] = useState<string[]>(p?.spaces ?? []);
   const [mode, setMode] = useState<BackupPolicySettings["mode"]>(p?.mode ?? "both");
-  const initial = p?.schedule ?? { daily: "03:00" };
-  const [kind, setKind] = useState<Kind>("every" in initial ? "every" : "weekly" in initial ? "weekly" : "daily");
-  const [every, setEvery] = useState("every" in initial ? initial.every : 60);
-  const [time, setTime] = useState("daily" in initial ? initial.daily : "weekly" in initial ? initial.weekly : "03:00");
-  const [days, setDays] = useState<number[]>("weekly" in initial ? initial.days : [1, 2, 3, 4, 5]);
-  const [tz, setTz] = useState(p?.tz ?? localZone());
+  const when = useSchedule(p?.schedule ?? { daily: "03:00" }, p?.tz ?? localZone());
   const [versions, setVersions] = useState(p?.versions ?? true);
   const [trash, setTrash] = useState(p?.trash ?? true);
   const [keepDays, setKeepDays] = useState(p?.keep_days ?? 30);
@@ -82,23 +47,15 @@ export function BackupPolicyDialog({ set, source: preset, onClose, onDone }: { s
   const sourceName = list.find((l) => l.id === source)?.name ?? set?.source_name ?? "";
   const on = useQuery({ ...queries.storageLocationSpaces(source), enabled: !!source });
   const preview = useQuery({ queryKey: keys.copyPreview(source, dest), queryFn: () => api.copyPreview(source, dest), enabled: !set && !!source && !!dest, retry: false });
-  const schedule: BackupSchedule = kind === "every" ? { every } : kind === "daily" ? { daily: time } : { weekly: time, days };
-  const next = useQuery({
-    queryKey: keys.backupNextRuns(JSON.stringify(schedule), tz),
-    queryFn: () => api.backupNextRuns(schedule, tz),
-    enabled: mode !== "realtime" && (kind !== "weekly" || days.length > 0),
-    retry: false,
-  });
-  const allZones = useMemo(() => zones(), []);
   const defaultName = sourceName ? t("Backup of {name}", { name: sourceName }) : "";
   const pv = preview.data;
-  const ready = !!source && !!dest && (allSpaces || spaces.length > 0) && (mode === "realtime" || kind !== "weekly" || days.length > 0);
+  const ready = !!source && !!dest && (allSpaces || spaces.length > 0) && (mode === "realtime" || when.valid);
   const { busy, error, run } = useSubmit(async () => {
     if (!ready) return;
     const settings: Partial<BackupPolicySettings> = {
       mode,
-      schedule,
-      tz,
+      schedule: when.schedule,
+      tz: when.tz,
       all_spaces: allSpaces,
       spaces,
       versions,
@@ -227,56 +184,11 @@ export function BackupPolicyDialog({ set, source: preset, onClose, onDone }: { s
               </p>
             )}
             {mode !== "realtime" && (
-              <div className="grid gap-2">
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <NativeSelect aria-label={t("Schedule")} value={kind} onChange={(e) => setKind(e.target.value as Kind)}>
-                    <option value="every">{t("Every")}</option>
-                    <option value="daily">{t("Every day at")}</option>
-                    <option value="weekly">{t("On these days at")}</option>
-                  </NativeSelect>
-                  {kind === "every" ? (
-                    <NativeSelect aria-label={t("How often")} value={every} onChange={(e) => setEvery(Number(e.target.value))}>
-                      {[15, 30, 60, 120, 240, 360, 720].map((m) => (
-                        <option key={m} value={m}>
-                          {m < 60 ? t("{n} minutes", { n: m }) : t("{n} hour|{n} hours", { n: m / 60 })}
-                        </option>
-                      ))}
-                    </NativeSelect>
-                  ) : (
-                    <Input type="time" aria-label={t("Time")} className="w-32" value={time} onChange={(e) => setTime(e.target.value)} />
-                  )}
-                </div>
-                {kind === "weekly" && (
-                  <div className="flex flex-wrap gap-1">
-                    {DAYS.map((d) => (
-                      <button
-                        key={d}
-                        type="button"
-                        aria-pressed={days.includes(d)}
-                        className={cn("rounded-md border px-2 py-1 text-xs", days.includes(d) ? "border-brand bg-brand/10 text-brand" : "text-muted-foreground")}
-                        onClick={() => setDays((cur) => (cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d].sort()))}
-                      >
-                        {dayName(d)}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <div className="grid gap-1">
-                  <Label htmlFor="backup-tz">{t("Time zone")}</Label>
-                  <NativeSelect id="backup-tz" value={tz} onChange={(e) => setTz(e.target.value)}>
-                    {(allZones.includes(tz) ? allZones : [tz, ...allZones]).map((z) => (
-                      <option key={z} value={z}>
-                        {z}
-                      </option>
-                    ))}
-                  </NativeSelect>
-                </div>
-                {next.data && next.data.length > 0 && <p className="text-xs text-muted-foreground">{t("Next: {times}", { times: next.data.map((n) => zonedTime(n, tz)).join(" · ") })}</p>}
-                {next.error && <ErrorText>{errorMessage(next.error, t("Operation failed"))}</ErrorText>}
-                <p className="text-xs text-muted-foreground">
-                  {t("A time clocks skip when summer time starts isn't run that day; one that happens twice when it ends is run once. After the server was off, one snapshot catches up.")}
-                </p>
-              </div>
+              <ScheduleFields
+                s={when}
+                idPrefix="backup"
+                note={t("A time clocks skip when summer time starts isn't run that day; one that happens twice when it ends is run once. After the server was off, one snapshot catches up.")}
+              />
             )}
           </fieldset>
           <fieldset className="grid gap-2 text-sm">

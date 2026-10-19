@@ -6,6 +6,7 @@ import {
   ArchiveRestoreIcon,
   ArrowRightIcon,
   DatabaseBackupIcon,
+  DatabaseIcon,
   FolderSearchIcon,
   InfoIcon,
   PauseIcon,
@@ -31,6 +32,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { BackupPolicyDialog, zonedTime } from "@/admin/storage/BackupPolicyDialog";
+import { DatabaseBackupDialog, databaseBackupSummary } from "@/admin/storage/DatabaseBackupDialog";
 import { locationLabel } from "@/components/LocationSelect";
 import { RestoreDialog } from "@/admin/storage/RestoreDialog";
 import { DRIVE_ICON } from "@/lib/drives";
@@ -148,6 +150,12 @@ export function BackupsPage() {
   const newFor = params.get("new");
   const [making, setMaking] = useState<string | null>(null);
   const [finding, setFinding] = useState(false);
+  const [database, setDatabase] = useState(false);
+  const databaseBackup = useQuery({
+    queryKey: keys.databaseBackup(),
+    queryFn: ({ signal }) => api.databaseBackup(signal),
+    refetchInterval: (query) => (query.state.data?.running ? 2000 : 30_000),
+  });
   const refresh = () => {
     qc.invalidateQueries({ queryKey: keys.backups() });
     invalidateFiles(qc, "admin-drives", "storage-locations");
@@ -201,6 +209,7 @@ export function BackupsPage() {
       <ToolButton icon={Trash2Icon} label={t("Delete backup")} disabled={!idle(selected)} onClick={() => selected && setDialog({ t: "delete", set: selected })} />
       <ToolButton icon={InfoIcon} label={t("Details")} disabled={!selected} onClick={() => selected && setDialog({ t: "details", set: selected })} />
       <ToolButton icon={FolderSearchIcon} label={t("Find backups on a location…")} onClick={() => setFinding(true)} />
+      <ToolButton icon={DatabaseIcon} label={t("Database backups…")} showLabel className="h-9 px-2.5 text-[13px]" onClick={() => setDatabase(true)} />
       <ToolButton icon={RefreshCwIcon} label={t("Refresh")} onClick={refresh} />
     </>
   );
@@ -335,6 +344,7 @@ export function BackupsPage() {
       footer={
         <span>
           {t("{n} backup|{n} backups", { n: sets.length })} · {t("{n} job not finished|{n} jobs not finished", { n: running })}
+          {databaseBackup.data && ` · ${databaseBackupSummary(databaseBackup.data)}`}
         </span>
       }
     >
@@ -374,6 +384,7 @@ export function BackupsPage() {
       )}
       {dialog?.t === "settings" && <BackupPolicyDialog set={sets.find((s) => s.id === dialog.set.id) ?? dialog.set} onClose={() => setDialog(null)} onDone={refresh} />}
       {finding && <FindBackupsDialog onClose={() => setFinding(false)} onDone={refresh} />}
+      {database && <DatabaseBackupDialog onClose={() => setDatabase(false)} />}
       {dialog?.t === "details" && (
         <SetDetails set={sets.find((s) => s.id === dialog.set.id) ?? dialog.set} jobs={jobs.filter((j) => j.set_id === dialog.set.id)} onClose={() => setDialog(null)} />
       )}

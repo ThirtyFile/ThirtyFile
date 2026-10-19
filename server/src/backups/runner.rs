@@ -438,6 +438,7 @@ impl Engine for BackupEngine {
 /// Starts the runner of backups/ and the scheduler of backup policies
 pub fn spawn_runner(st: AppState) {
     super::policy::spawn_scheduler(st.clone());
+    super::database::spawn_scheduler(st.clone());
     spawn(st, &BACKUPS);
 }
 
