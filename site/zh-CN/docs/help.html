@@ -87,6 +87,7 @@
             <li><a href="#locked">所有人都看到“失败尝试过多”</a></li>
             <li><a href="#upload">大文件上传失败</a></li>
             <li><a href="#permission">启动时显示“Permission denied”</a></li>
+            <li><a href="#protocols">SFTP 或 FTP 无法连接</a></li>
             <li><a href="#logs">查看日志</a></li>
             <li><a href="#health">检查运行状态</a></li>
             <li><a href="#check">检查已存储的文件</a></li>
@@ -118,6 +119,15 @@
           <li>使用 <code>--user</code> 启动容器。请让文件夹对该用户可写：<code>sudo chown -R 1000:1000 /srv/thirtyfile</code>，将 1000 替换为实际用户编号。</li>
           <li>文件夹位于不允许修改所有者的网络共享中。日志会显示 <em>Can't give the folder … to user</em>。将 <code>THIRTYFILE_RUN_AS</code> 设为共享文件的所有者用户与用户组，例如 <code>1026:100</code>。</li>
         </ul>
+        <h2 id="protocols">SFTP 或 FTP 无法连接</h2>
+        <ul>
+          <li><strong>未运行</strong>：<strong>控制面板 › 常规 › 应用程序与协议</strong>会显示 SFTP 与 FTP 是否正在监听，以及无法监听的原因（端口已被占用、证书无法读取）。网站仍可正常使用，无法启动的服务会自动重试。请确认已在该处开启访问，且已在 Docker 发布端口。</li>
+          <li><strong>“主机密钥已更改”</strong>：SFTP 的主机密钥是数据文件夹中的 <code>sftp_host_ed25519</code>，控制面板会显示其指纹。还原或迁移数据文件夹时若缺少这个文件，就会生成新密钥，程序便会发出警告。请还原该文件，或先比对新指纹与控制面板显示的指纹再接受。</li>
+          <li><strong>FTP 能登录，却无法列出或传输</strong>：传输使用被动模式端口（<code>THIRTYFILE_FTP_PASSIVE</code>）。请在 Docker 发布整个范围且内外端口号相同、在路由器转发，若位于 NAT 后，将 <code>THIRTYFILE_FTP_PASSIVE_HOST</code> 设为公开名称或 IPv4 地址。</li>
+          <li><strong>FTP 端口</strong>：<code>THIRTYFILE_FTP_ADDR</code> 与发布的端口要一起设置。在 <code>compose.yaml</code> 中两行都要取消注释，否则发布的端口上没有服务在监听。</li>
+          <li><strong>证书</strong>：<code>THIRTYFILE_FTP_CERT</code> 与 <code>THIRTYFILE_FTP_KEY</code> 必须是用户 1000 可读取的 PEM 文件。设备拒绝证书时，需要符合其连接名称的证书；设备必须以被动模式使用显式 FTPS（AUTH TLS）。</li>
+        </ul>
+
         <h2 id="logs">查看日志</h2>
         <pre><code>docker logs --tail 100 thirtyfile</code></pre>
         <h2 id="health">检查运行状态</h2>

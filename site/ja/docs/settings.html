@@ -99,9 +99,15 @@
           <tr><td><code>THIRTYFILE_LOG_FORMAT</code></td><td>text</td><td><code>json</code> は収集ツール向けにログを 1 行 1 JSON で出力</td></tr>
           <tr><td><code>RUST_LOG</code></td><td><code>thirtyfile=info</code></td><td>ログの詳しさ。問題を調べる間は <code>thirtyfile=debug</code> など</td></tr>
           <tr><td><code>TZ</code></td><td><code>UTC</code></td><td>タイムゾーン。<code>Asia/Taipei</code> など</td></tr>
-          <tr><td><code>THIRTYFILE_SECRET_KEY</code></td><td><code>/data</code> の <code>secret.key</code></td><td>保存場所、シングルサインオン、署名シークレットなど、データベースのパスワードとキーを暗号化する 64 桁の 16 進数キー。<code>openssl rand -hex 32</code> で作成できます。未設定なら初回起動で <code>/data/secret.key</code> を作ります。<a href="backup.html#key">アップグレードとバックアップ</a> を参照</td></tr>
+          <tr><td><code>THIRTYFILE_SECRET_KEY</code></td><td><code>/data</code> の <code>secret.key</code></td><td>保存場所、シングルサインオン、メールのパスワード、2 段階認証、S3 の Secret Key、署名シークレットなど、データベースのパスワードとキーを暗号化する 64 桁の 16 進数キー。<code>openssl rand -hex 32</code> で作成できます。未設定なら初回起動で <code>/data/secret.key</code> を作ります。<a href="backup.html#key">アップグレードとバックアップ</a> を参照</td></tr>
           <tr><td><code>THIRTYFILE_SECRET_KEY_FILE</code></td><td></td><td>代わりにそのキーを保存したファイル。Docker secret など</td></tr>
           <tr><td><code>THIRTYFILE_ADDR</code></td><td><code>0.0.0.0:8080</code></td><td>コンテナー内の待ち受けアドレスとポート。ホストのポートを変えるには公開ポート（<code>-p 9000:8080</code>）を変えます</td></tr>
+          <tr><td><code>THIRTYFILE_SFTP_ADDR</code></td><td><code>0.0.0.0:2022</code></td><td>コンテナー内の SFTP のアドレスとポート。<strong>コントロールパネル › 全般 › アプリとプロトコル</strong>で<strong>SFTP アクセスを許可</strong>をオンにするまで無効です。ポートも公開します。<a href="protocols.html#sftp">SFTP</a> を参照</td></tr>
+          <tr><td><code>THIRTYFILE_FTP_ADDR</code></td><td><code>0.0.0.0:21</code></td><td>コンテナー内の FTP 受信フォルダーのアドレスとポート。例では <code>0.0.0.0:2121</code> を使います。公開ポートと一緒に設定します。<a href="protocols.html#ftp-setup">FTP 受信フォルダー</a> を参照</td></tr>
+          <tr><td><code>THIRTYFILE_FTP_PASSIVE</code></td><td><code>30000-30009</code></td><td>機器が FTP の転送で接続するポート。範囲全体を内外同じ番号で公開します</td></tr>
+          <tr><td><code>THIRTYFILE_FTP_PASSIVE_HOST</code></td><td></td><td>サーバーが NAT の内側にあるとき、転送用に機器へ伝える公開 DNS 名または IPv4 アドレス。空なら機器が接続したアドレス</td></tr>
+          <tr><td><code>THIRTYFILE_FTP_CERT</code></td><td></td><td>FTPS の PEM 証明書チェーン。ユーザー 1000 が読めるファイルをマウントします</td></tr>
+          <tr><td><code>THIRTYFILE_FTP_KEY</code></td><td></td><td>その証明書の秘密鍵。ユーザー 1000 が読める PEM ファイルをマウントします</td></tr>
           <tr><td><code>THIRTYFILE_DATA</code></td><td><code>/data</code></td><td>データベース、サムネイル、進行中のアップロードのフォルダー。イメージが設定するため値を変えず、そこにフォルダーをマウントしてください。単体プログラムでは <code>./data</code></td></tr>
           <tr><td><code>THIRTYFILE_STORAGE</code></td><td><code>/storage</code></td><td>組み込み保存場所のフォルダー。<code>THIRTYFILE_DATA</code> と同様にイメージが設定します。単体プログラムではデータフォルダーの <code>blobs</code></td></tr>
         </tbody></table></div>

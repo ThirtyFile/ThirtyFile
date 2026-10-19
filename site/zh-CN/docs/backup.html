@@ -191,7 +191,7 @@ docker start thirtyfile</code></pre>
         <h2 id="database-size">数据库大小</h2>
         <p>数据库（<code>data/drive.db</code>）及近期写入日志（<code>drive.db-wal</code>）在启动和每日维护时归还不再使用的空间：清空写入日志；长时间读取（例如备份生成文件列表）结束后，日志不会持续大于 64 MB。新数据库也归还删除内容（如旧日志）的空间，仅保留数 MB 供之后写入。较旧版本创建的数据库则保留空闲空间供自身复用；如需缩小并在之后自动归还，停止 ThirtyFile，运行 <code>docker compose run --rm thirtyfile compact</code>（或 <code>docker run --rm -v …same volumes… ghcr.io/thirtyfile/thirtyfile compact</code>）。此操作重写整个数据库，需约等于数据库大小的剩余磁盘空间。</p>
         <h2 id="key">已保存密码的加密密钥</h2>
-        <p>存储位置密码与密钥、单点登录 client secrets、两步验证密钥，以及签名会话和分享链接的密钥，均加密存入数据库。加密密钥位于 <code>data/secret.key</code>（首次启动创建），或 <code>THIRTYFILE_SECRET_KEY</code>、<code>THIRTYFILE_SECRET_KEY_FILE</code> 指定处。因此仅有数据库副本无法取得这些秘密。</p>
+        <p>存储位置密码与密钥、单点登录 client secrets、电子邮件（SMTP）密码、两步验证密钥、存储桶的 S3 Secret Key，以及签名会话和分享链接的密钥，均加密存入数据库。加密密钥位于 <code>data/secret.key</code>（首次启动创建），或 <code>THIRTYFILE_SECRET_KEY</code>、<code>THIRTYFILE_SECRET_KEY_FILE</code> 指定处。因此仅有数据库副本无法取得这些秘密。</p>
         <ul>
           <li><strong>单独备份密钥</strong>，例如保存到密码管理器，并排除常规备份（如上方命令）。没有密钥仍可还原，但存储位置和单点登录需重新输入密码，所有人必须重新登录。</li>
           <li>要让密钥完全不放在数据目录，先创建密钥（<code>openssl rand -hex 32</code>），通过 <code>THIRTYFILE_SECRET_KEY_FILE</code>（Docker secret）或 <code>THIRTYFILE_SECRET_KEY</code> 提供。现有密钥文件内容也可采用相同方式。</li>

@@ -19,6 +19,8 @@ A self-hosted file manager that looks and works like Windows File Explorer, in y
 - Map it as a drive on a computer or phone (WebDAV)
 - Preview Word, PowerPoint and Excel in the browser; edit the text of Word documents, Excel workbooks and text files online; earlier versions are kept
 - Share with a link (password, expiry date, download limit), or receive files through one
+- Work with files from other programs: SFTP, a folder published as an S3 bucket, or an FTP folder that scanners upload to
+- Invite people from outside as guests, who see only what is shared with them, until a set date
 - Keep files as ordinary folders on a local disk or NAS, or on S3-compatible storage, SFTP or FTP; show an existing folder as a space
 - Personal, company and team spaces, with roles and size limits
 - Sign in with a password and two-factor sign-in, or with Microsoft, Google, GitHub or any OpenID Connect provider

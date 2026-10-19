@@ -86,6 +86,7 @@
             <li><a href="#locked">Everyone gets "too many failed attempts"</a></li>
             <li><a href="#upload">Large uploads fail</a></li>
             <li><a href="#permission">"Permission denied" when starting</a></li>
+            <li><a href="#protocols">SFTP or FTP doesn't connect</a></li>
             <li><a href="#logs">Looking at the log</a></li>
             <li><a href="#health">Checking that it is running</a></li>
             <li><a href="#check">Checking the stored files</a></li>
@@ -123,6 +124,15 @@
         <ul>
           <li>The container is started with <code>--user</code>. Make the folders writable for that user: <code>sudo chown -R 1000:1000 /srv/thirtyfile</code>, with the user's number instead of 1000.</li>
           <li>A folder is on a network share that doesn't let the owner be changed. The log says <em>Can't give the folder … to user</em>. Set <code>THIRTYFILE_RUN_AS</code> to the user and group that own the files on the share, for example <code>1026:100</code>.</li>
+        </ul>
+
+        <h2 id="protocols">SFTP or FTP doesn't connect</h2>
+        <ul>
+          <li><strong>Not running</strong>: <strong>Control panel › General › Apps and protocols</strong> shows whether SFTP and FTP are listening, and why not (a port already in use, a certificate that can't be read). The website keeps working, and a listener that couldn't start tries again. Check that access is turned on there, and that the port is published in Docker.</li>
+          <li><strong>"Host key has changed"</strong>: SFTP's host key is <code>sftp_host_ed25519</code> in the data folder, and its fingerprint is shown in the control panel. A data folder restored or moved without that file makes a new key, and programs warn about it. Restore the file, or compare the new fingerprint with the control panel's before accepting it.</li>
+          <li><strong>FTP signs in but lists or transfers nothing</strong>: transfers use the passive ports (<code>THIRTYFILE_FTP_PASSIVE</code>). Publish the whole range in Docker with the same numbers outside and inside, forward it on the router, and behind NAT set <code>THIRTYFILE_FTP_PASSIVE_HOST</code> to the public name or IPv4 address.</li>
+          <li><strong>FTP port</strong>: <code>THIRTYFILE_FTP_ADDR</code> and the published port go together. In <code>compose.yaml</code>, uncomment both lines, or nothing listens on the published port.</li>
+          <li><strong>Certificate</strong>: <code>THIRTYFILE_FTP_CERT</code> and <code>THIRTYFILE_FTP_KEY</code> must be PEM files that user 1000 can read. A device that refuses the certificate needs one for the name it connects to; devices must use explicit FTPS (AUTH TLS) in passive mode.</li>
         </ul>
 
         <h2 id="logs">Looking at the log</h2>
