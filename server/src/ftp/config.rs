@@ -12,9 +12,9 @@ pub struct Config {
     pub allow_private_plaintext: bool,
 }
 
+/// The setting as saved (in the transaction of `conn`)
 pub async fn from_connection(conn: &mut sqlx::SqliteConnection) -> AppResult<Config> {
-    let row: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key='ftp'").fetch_optional(conn).await?;
-    Ok(row.and_then(|(v,)| serde_json::from_str(&v).ok()).unwrap_or_default())
+    Ok(db::json_setting(conn, "ftp").await?)
 }
 
 pub async fn load(st: &AppState) -> AppResult<Config> {
@@ -50,7 +50,7 @@ pub async fn save(State(st): State<AppState>, Admin(user): Admin, Json(config): 
     let _w = st.write_lock.lock().await;
     let mut tx = db::begin_write(&st.db).await?;
     let user = crate::auth::require_admin(&mut tx, &user).await?;
-    db::set_setting(&mut tx, "ftp", &serde_json::to_string(&config).map_err(crate::error::AppError::internal)?).await?;
+    db::set_json_setting(&mut tx, "ftp", &config).await?;
     crate::logs::record_activity(&mut tx, &user, None, "settings", "Updated FTP settings").await?;
     tx.commit().await?;
     drop(_w);

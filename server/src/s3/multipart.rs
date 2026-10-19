@@ -142,10 +142,7 @@ async fn part_inner(st: AppState, mut req: S3Request<UploadPartInput>) -> S3Resu
         upload(&st, &identity, &req.input.upload_id, &req.input.key).await?;
         let (total,): (i64,) = sqlx::query_as("SELECT COALESCE(SUM(size),0) FROM s3_parts WHERE upload_id = ? AND number != ?").bind(&req.input.upload_id).bind(req.input.part_number).fetch_one(&st.db).await.map_err(super::internal)?;
         let total = (total as u64).checked_add(size).ok_or_else(|| s3_error!(EntityTooLarge))?;
-        access::check_size(&st, total).map_err(super::map_error)?;
-        let mut c = st.db.acquire().await.map_err(super::internal)?;
-        crate::tree::check_quota(&mut c, parent.drive(), total as i64 - up.existing.as_ref().map_or(0, |n| n.size)).await.map_err(super::map_error)?;
-        drop(c);
+        up.fits(&st, total).await.map_err(super::map_error)?;
         tmp.rename(file.clone()).await.map_err(super::internal)?;
         // The key may have been removed while this part was received; never leave an unreferenced new part.
         super::credentials::identity(&st, &identity.key.access_key, true).await?;
@@ -242,9 +239,7 @@ async fn complete_inner(st: AppState, req: S3Request<CompleteMultipartUploadInpu
     access::check_size(&st, size).map_err(super::map_error)?;
     let (parent, name) = access::rooted_parent(&st, &identity.user, &identity.root.id, &req.input.key).await.map_err(super::map_error)?;
     let up = super::objects::prepare_upload(&st, &identity, &parent, name.clone()).await?;
-    crate::tree::check_quota(&mut *st.db.acquire().await.map_err(super::internal)?, parent.drive(), size as i64 - up.existing.as_ref().map_or(0, |n| n.size))
-        .await
-        .map_err(super::map_error)?;
+    up.fits(&st, size).await.map_err(super::map_error)?;
     let assembled = super::temp::Temporary::new(&st, "complete");
 
     async {

@@ -278,7 +278,7 @@ pub async fn content_named(
 }
 
 pub async fn content(State(st): State<AppState>, user: User, Path(id): Path<String>, Query(q): Query<ContentQuery>, headers: HeaderMap) -> AppResult<Response> {
-    let node = tree::owned_node(&mut *st.db.acquire().await?, &user, &id).await?;
+    let node = tree::readable_node(&mut *st.db.acquire().await?, &user, &id).await?;
     let download = q.download == Some(1);
     let mut res = serve_blob(&st, &headers, node_blob(&st, &node).await?, download).await?;
     // Opened or previewed in the browser: listed in Recent. Downloads and app passwords (sync tools, backups) aren't

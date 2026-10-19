@@ -54,20 +54,17 @@ pub struct Preview {
 pub async fn preview(State(st): State<AppState>, user: User, Path(id): Path<String>) -> AppResult<Json<Preview>> {
     let mut c = st.db.acquire().await?;
     let node = controlled(&mut c, &user, &id).await?;
-    let inherited = sqlx::query_as(
-        "WITH RECURSIVE up(id, parent_id, restricted) AS (
-           SELECT id, parent_id, restricted FROM nodes WHERE id = ?1
-           UNION ALL SELECT n.id,n.parent_id,n.restricted FROM nodes n JOIN up ON n.id = up.parent_id WHERE NOT up.restricted
-         ) SELECT g.principal_type, g.principal_id, g.role,
+    // What reaches the folder from its parent up, as if it weren't restricted: what stops, or would apply again. Owners
+    // keep their access either way
+    let sql = format!(
+        "WITH RECURSIVE {} SELECT g.principal_type, g.principal_id, g.role,
            CASE g.principal_type WHEN 'user' THEN COALESCE(u.username, '(deleted)') WHEN 'group' THEN COALESCE(gr.name, '(deleted)') ELSE 'Everyone' END AS name
          FROM grants g JOIN up ON g.node_id = up.id LEFT JOIN users u ON g.principal_type = 'user' AND u.id = g.principal_id
          LEFT JOIN groups gr ON g.principal_type = 'group' AND gr.id = g.principal_id
-         WHERE g.role <> 'owner' AND (g.expires_at IS NULL OR g.expires_at > ?2) ORDER BY name,g.role",
-    )
-    .bind(&node.parent_id)
-    .bind(crate::util::now())
-    .fetch_all(&mut *c)
-    .await?;
+         WHERE up.inherited AND g.role <> 'owner' AND (g.expires_at IS NULL OR g.expires_at > ?2) ORDER BY name,g.role",
+        crate::tree::walk_up("up", "?1")
+    );
+    let inherited = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(&node.parent_id).bind(crate::util::now()).fetch_all(&mut *c).await?;
     Ok(Json(Preview { restricted: node.restricted, inherited }))
 }
 
@@ -152,5 +149,4 @@ mod tests {
 }
 
 #[cfg(test)]
-#[path = "restrictions_tests.rs"]
 mod regressions;

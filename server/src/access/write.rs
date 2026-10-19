@@ -36,6 +36,17 @@ pub struct Upload {
     pub existing: Option<Node>,
 }
 
+impl Upload {
+    /// Whether a file of `size` bytes may be stored here: within the upload size limit, and the room its space has
+    /// left, where the file it replaces counts as freed. Room on the disk it is received on is checked as it arrives
+    /// (`DiskRoom`)
+    pub async fn fits(&self, st: &AppState, size: u64) -> AppResult<()> {
+        check_size(st, size)?;
+        let replaced = self.existing.as_ref().map_or(0, |n| n.size);
+        tree::check_quota(&mut *st.db.acquire().await?, self.parent.drive(), size as i64 - replaced).await
+    }
+}
+
 /// Where a file `name` in `parent` goes, looked at before anything is received: the parent needs Add, so contributors
 /// can add files to folders other people made. A folder of that name is refused; replacing a file requires Write on
 /// that item. Both checks are repeated when the received content is committed.
@@ -75,15 +86,11 @@ where
 {
     let replaced = up.existing.as_ref().map_or(0, |n| n.size);
     let mut room = None;
-    {
-        let mut c = st.db.acquire().await?;
-        if let Some(len) = size {
-            check_size(st, len)?;
-            tree::check_quota(&mut c, up.parent.drive(), len as i64 - replaced).await?;
-            crate::util::DiskRoom::check(&st.tmp_dir(), len).await?;
-        } else if let Some((left, drive)) = tree::room_left(&mut c, up.parent.drive(), None).await? {
-            room = Some((u64::try_from(left + replaced).unwrap_or(0), drive));
-        }
+    if let Some(len) = size {
+        up.fits(st, len).await?;
+        crate::util::DiskRoom::check(&st.tmp_dir(), len).await?;
+    } else if let Some((left, drive)) = tree::room_left(&mut *st.db.acquire().await?, up.parent.drive(), None).await? {
+        room = Some((u64::try_from(left + replaced).unwrap_or(0), drive));
     }
     let tmp = st.tmp_dir().join(format!("dav-{}", new_id()));
     // Content for the content store is hashed as it arrives, so storing it doesn't read the file again

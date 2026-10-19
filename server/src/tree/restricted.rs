@@ -25,17 +25,9 @@ pub async fn space_owner(conn: &mut SqliteConnection, user: &User, node: &Node) 
 /// An ancestor publication must not delegate a restricted folder, even when its creator owns it.
 /// Publishing the restricted folder itself is an explicit choice and may reach its unrestricted children.
 pub async fn within_publication(conn: &mut SqliteConnection, root: &str, id: &str) -> AppResult<bool> {
-    let (inside,): (bool,) = sqlx::query_as(
-        "WITH RECURSIVE up(id, parent_id, stopped) AS (
-           SELECT id, parent_id, restricted FROM nodes WHERE id = ?1
-           UNION ALL SELECT n.id, n.parent_id, n.restricted FROM nodes n JOIN up ON n.id = up.parent_id
-           WHERE up.id <> ?2 AND NOT up.stopped
-         ) SELECT EXISTS(SELECT 1 FROM up WHERE id = ?2)",
-    )
-    .bind(id)
-    .bind(root)
-    .fetch_one(conn)
-    .await?;
+    // The published folder is above the item with no restricted folder between: as a grant on it would reach the item
+    let sql = format!("WITH RECURSIVE {} SELECT EXISTS(SELECT 1 FROM up WHERE id = ?2 AND inherited)", super::permissions::walk_up("up", "?1"));
+    let (inside,): (bool,) = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(id).bind(root).fetch_one(conn).await?;
     Ok(inside)
 }
 
@@ -86,6 +78,8 @@ pub fn visible_sql(user: &User, node: &str) -> String {
 pub fn visible_to_sql(id: i64, node: &str) -> String {
     let at = now();
     let principal = super::permissions::principal_sql(&id.to_string(), &at.to_string());
+    let walk = super::permissions::walk_up("visible_up", node);
+    let reaches = super::permissions::reaches("visible_up");
     // A member of a space without restricted folders sees all of it: answered from two indexes, without going up
     // from every item (the usual case). Otherwise, up from the item to the first grant that reaches it
     format!(
@@ -93,14 +87,10 @@ pub fn visible_to_sql(id: i64, node: &str) -> String {
            AND EXISTS(SELECT 1 FROM nodes vs JOIN drives vd ON vd.id = vs.drive_id JOIN grants g ON g.node_id = vd.root_id AND {principal}
              WHERE vs.id = {node} AND vd.disabled = 0
                AND NOT (vd.kind = 'personal' AND vd.owner_id = {id} AND EXISTS(SELECT 1 FROM users WHERE id = {id} AND guest)))
-         THEN 1 ELSE EXISTS(WITH RECURSIVE visible_up(id, parent_id, restricted, inherited) AS (
-           SELECT id, parent_id, restricted, 1 FROM nodes WHERE id = {node}
-           UNION ALL SELECT p.id, p.parent_id, p.restricted, visible_up.inherited AND NOT visible_up.restricted
-           FROM nodes p JOIN visible_up ON p.id = visible_up.parent_id
-         ) SELECT 1 FROM visible_up JOIN nodes vn ON vn.id = visible_up.id JOIN drives vd ON vd.id = vn.drive_id
+         THEN 1 ELSE EXISTS(WITH RECURSIVE {walk} SELECT 1 FROM visible_up JOIN nodes vn ON vn.id = visible_up.id JOIN drives vd ON vd.id = vn.drive_id
            LEFT JOIN grants g ON g.node_id = visible_up.id AND {principal}
            WHERE vd.disabled = 0 AND NOT (vd.kind = 'personal' AND vd.owner_id = {id} AND EXISTS(SELECT 1 FROM users WHERE id = {id} AND guest))
-             AND ((g.id IS NOT NULL AND (visible_up.inherited OR (visible_up.parent_id IS NULL AND g.role = 'owner')))
+             AND ((g.id IS NOT NULL AND {reaches})
              OR (vd.kind = 'company' AND EXISTS(SELECT 1 FROM users WHERE id = {id} AND role = 'admin' AND NOT guest AND disabled = 0))
              OR (vd.kind <> 'personal' AND EXISTS(SELECT 1 FROM users WHERE id = {id} AND role = 'admin' AND NOT guest AND disabled = 0)
                  AND EXISTS(SELECT 1 FROM visible_up WHERE restricted)))) END)"
@@ -124,15 +114,11 @@ pub fn scopes_visible_sql(user: i64, scopes: &str) -> String {
 
 pub async fn saved_scopes(conn: &mut SqliteConnection, id: Option<&str>) -> AppResult<String> {
     let Some(id) = id else { return Ok("[]".into()) };
-    let rows: Vec<(String, String)> = sqlx::query_as(
-        "WITH RECURSIVE up(id,parent_id,restricted,drive_id) AS (
-      SELECT id,parent_id,restricted,drive_id FROM nodes WHERE id = ?1 UNION ALL
-      SELECT n.id,n.parent_id,n.restricted,n.drive_id FROM nodes n JOIN up ON n.id = up.parent_id)
-      SELECT id,drive_id FROM up WHERE restricted ORDER BY id",
-    )
-    .bind(id)
-    .fetch_all(conn)
-    .await?;
+    let sql = format!(
+        "WITH RECURSIVE {} SELECT up.id, n.drive_id FROM up JOIN nodes n ON n.id = up.id WHERE up.restricted ORDER BY up.id",
+        super::permissions::walk_up("up", "?1")
+    );
+    let rows: Vec<(String, String)> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(id).fetch_all(conn).await?;
     Ok(serde_json::Value::Array(rows.into_iter().map(|(id, drive)| serde_json::json!({"id": id, "drive": drive})).collect()).to_string())
 }
 

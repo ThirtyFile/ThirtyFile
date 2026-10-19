@@ -39,7 +39,6 @@ export default {
   "Guests can't have My files": "ゲストに「マイファイル」を作成できません",
   "Review and confirm the guest conversion before saving": "保存前に変更内容を確認し、同意してください",
   "Guests can't create spaces": "ゲストはスペースを作成できません",
-  "Guests can't publish protocol folders": "ゲストはプロトコル用フォルダーを公開できません",
   "Your account couldn't join its configured groups. Ask an administrator to check guest access.": "設定されたグループに参加できませんでした。管理者にゲストのアクセス設定の確認を依頼してください。",
   "Guest access must end within 1 to 3650 days": "有効期間は 1〜3650 日で設定してください",
   "People may share only within their groups": "所属グループ内でのみ共有を許可",
@@ -48,4 +47,5 @@ export default {
   "changed to guest": "ゲストに変更",
   "changed to standard account": "通常のアカウントに変更",
   "This account's type changed. Reload it and confirm your identity again before saving.": "アカウントの種類が変更されました。再読み込みし、もう一度本人確認を行ってから保存してください。",
+  "Guest accounts can't publish folders": "ゲストアカウントはフォルダーを公開できません",
 };

@@ -29,8 +29,6 @@ pub mod scheduler;
 mod tidy;
 
 #[cfg(test)]
-mod policy_tests;
-#[cfg(test)]
 mod tests;
 
 use serde::{Deserialize, Serialize};

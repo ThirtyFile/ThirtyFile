@@ -12,7 +12,7 @@ use crate::{
     auth::{self, User},
     error::{AppError, AppResult},
     state::AppState,
-    tree::{self, LinkMakers, Node, Role, SpaceKind},
+    tree::{self, Node, Role},
     util::now,
 };
 
@@ -49,27 +49,10 @@ pub struct Identity {
     pub root: Node,
 }
 
-/// Administrators can publish team spaces even without a membership grant; personal spaces never become buckets.
+/// The folder `node_id`, when `user` may publish it as a bucket (`crate::publish::publisher`): administrators can
+/// publish team spaces even without a membership grant; personal spaces never become buckets
 pub async fn publisher(conn: &mut SqliteConnection, user: &User, node_id: &str, managers: bool) -> AppResult<Node> {
-    let current = auth::current_user(conn, user).await?;
-    let user = &current;
-    if user.guest {
-        return Err(AppError::forbidden("Guests can't publish protocol folders"));
-    }
-    let node = tree::get_node(conn, node_id).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
-    let drive = tree::get_drive(conn, node.drive()).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
-    if !node.is_folder() || drive.kind == SpaceKind::Personal || drive.disabled || drive.link_makers == LinkMakers::Nobody {
-        return Err(AppError::forbidden("This folder can't be published as an S3 bucket"));
-    }
-    let (in_trash,): (bool,) = sqlx::query_as("WITH RECURSIVE up(id, parent_id, trash) AS (SELECT id, parent_id, trashed_at IS NOT NULL FROM nodes WHERE id = ? UNION ALL SELECT n.id, n.parent_id, n.trashed_at IS NOT NULL FROM nodes n JOIN up ON n.id = up.parent_id) SELECT COALESCE(MAX(trash), 1) FROM up")
-        .bind(&node.id).fetch_one(&mut *conn).await?;
-    if in_trash {
-        return Err(AppError::not_found("Folder not found"));
-    }
-    if !user.is_admin() && (!managers || !user.can_share || !tree::live_role_on(conn, user, &node).await?.is_some_and(|r| r >= Role::Manager)) {
-        return Err(AppError::forbidden("Only allowed space managers can publish S3 buckets"));
-    }
-    Ok(node)
+    crate::publish::publisher(conn, user, node_id, crate::publish::Publication::S3Bucket, managers).await
 }
 
 pub async fn identity(st: &AppState, access_key: &str, write: bool) -> S3Result<Identity> {
@@ -188,14 +171,13 @@ pub async fn actor_in_transaction(conn: &mut SqliteConnection, actor: &User, nee
         .fetch_optional(&mut *conn)
         .await?
         .ok_or_else(|| AppError::forbidden("The bucket's creator no longer has access"))?;
-    let cfg: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key='s3'").fetch_optional(&mut *conn).await?;
-    let cfg: super::config::Config = cfg.and_then(|(s,)| serde_json::from_str(&s).ok()).unwrap_or_default();
+    let cfg = super::config::from_connection(conn).await?;
     if !cfg.enabled {
         return Err(AppError::forbidden("S3 access is disabled"));
     }
     let root = publisher(conn, &current, &bucket.node_id, cfg.managers_publish).await?;
     if matches!(need, tree::Need::Add | tree::Need::Write | tree::Need::Delete) {
-        if !key.writable || root.space_read_only {
+        if !key.writable || crate::publish::may_receive(&current, &root).is_err() {
             return Err(AppError::forbidden("This S3 key or space is read-only"));
         }
         tree::allows(&current, Role::Manager, need)?;

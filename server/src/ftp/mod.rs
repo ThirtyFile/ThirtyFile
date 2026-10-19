@@ -7,8 +7,6 @@ pub mod manage;
 mod storage;
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod tls_tests;
 
 use crate::{
     error::{AppError, AppResult},

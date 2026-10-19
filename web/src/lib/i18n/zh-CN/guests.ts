@@ -39,7 +39,6 @@ export default {
   "Guests can't have My files": "访客不能拥有“我的文件”",
   "Review and confirm the guest conversion before saving": "请先查看并确认访客转换，再保存",
   "Guests can't create spaces": "访客不能创建空间",
-  "Guests can't publish protocol folders": "访客不能发布协议文件夹",
   "Your account couldn't join its configured groups. Ask an administrator to check guest access.": "账号无法加入配置的群组，请管理员检查访客访问设置。",
   "Guest access must end within 1 to 3650 days": "访客访问期限必须在 1 到 3650 天内",
   "People may share only within their groups": "用户只能在自己的群组内分享",
@@ -48,4 +47,5 @@ export default {
   "changed to guest": "改为访客",
   "changed to standard account": "改为普通账号",
   "This account's type changed. Reload it and confirm your identity again before saving.": "账号类型已更改，请重新加载并再次确认身份后再保存。",
+  "Guest accounts can't publish folders": "访客账号无法发布文件夹",
 };

@@ -120,25 +120,25 @@ pub fn is_own(user: &User, node: &Node) -> bool {
     node.owner_id == user.id && !node.found && node.parent_id.is_some()
 }
 
-/// `allows`, for an item: a contributor may also change, move and delete what they added themselves (`is_own`), as
-/// their account's permissions let them. A folder they made moves or goes to the trash only while everything in it is
-/// theirs too, since that goes with it.
-pub async fn allows_on(conn: &mut SqliteConnection, user: &User, role: Role, need: Need, node: &Node) -> AppResult<()> {
+/// `allows`, for an item, with the user's role on it now: a contributor may also change, move and delete what they
+/// added themselves (`is_own`), as their account's permissions let them. A folder they made moves or goes to the trash
+/// only while everything in it is theirs too, since that goes with it.
+pub async fn allows_on(conn: &mut SqliteConnection, user: &User, need: Need, node: &Node) -> AppResult<()> {
     let current = crate::auth::sftp::current_user(conn, user, need != Need::Read).await?;
     let user = current.as_ref().unwrap_or(user);
     let current = crate::auth::current_user(conn, user).await?;
     let user = &current;
     let (mut fresh_role, in_trash) = access(conn, user, node).await?;
-    if fresh_role.is_none()
-        && in_trash
+    if in_trash
         && user.is_admin()
         && let Some(drive) = get_drive(conn, node.drive()).await?
         && drive.kind != super::SpaceKind::Personal
     {
-        // Administrators may manage the trash of team spaces without membership; ordinary reads still require it.
-        fresh_role = Some(Role::Manager);
+        // Administrators manage the trash of team spaces, members or not, and whatever role a grant gives them there
+        // (`nodes::trash::trash_role`); ordinary reads still require membership
+        fresh_role = fresh_role.max(Some(Role::Manager));
     }
-    let role = fresh_role.ok_or_else(|| AppError::not_found("Item not found"))?.min(role);
+    let role = fresh_role.ok_or_else(|| AppError::not_found("Item not found"))?;
     allows_current(conn, user, role, need, node).await
 }
 
@@ -278,10 +278,39 @@ pub(crate) fn principal_sql(user: &str, now: &str) -> String {
         "(g.expires_at IS NULL OR g.expires_at > {now})
     AND (NOT EXISTS(SELECT 1 FROM users WHERE id = {user} AND guest = 1)
       OR (g.expires_at IS NOT NULL AND g.role IN ('viewer','contributor','editor')))
-    AND ((g.principal_type = 'everyone' AND NOT EXISTS(SELECT 1 FROM users WHERE id = {user} AND guest = 1))
+    AND {}",
+        names_sql(user)
+    )
+}
+
+/// SQL for "the grant `g` names the user": them, a group of theirs, or everyone (but guests)
+fn names_sql(user: &str) -> String {
+    format!(
+        "((g.principal_type = 'everyone' AND NOT EXISTS(SELECT 1 FROM users WHERE id = {user} AND guest = 1))
       OR (g.principal_type = 'user' AND g.principal_id = {user})
       OR (g.principal_type = 'group' AND g.principal_id IN (SELECT group_id FROM group_members WHERE user_id = {user})))"
     )
+}
+
+/// SQL for the way up from the item `start` (an SQL expression) to the root of its space, as the table `name` (for a
+/// `WITH RECURSIVE`) with the columns `id, parent_id, name, depth, trashed, restricted, inherited`: the item itself
+/// at depth 0, then each folder it is in. `inherited`: grants there still reach the item, as no restricted folder is
+/// between them (a restricted folder's own grants reach what is in it). Every inheritance of access is this walk.
+pub(crate) fn walk_up(name: &str, start: &str) -> String {
+    format!(
+        "{name}(id, parent_id, name, depth, trashed, restricted, inherited) AS (
+           SELECT id, parent_id, name, 0, trashed_at IS NOT NULL, restricted, 1 FROM nodes WHERE id = {start}
+           UNION ALL SELECT {name}_n.id, {name}_n.parent_id, {name}_n.name, {name}.depth + 1, {name}_n.trashed_at IS NOT NULL, {name}_n.restricted,
+             {name}.inherited AND NOT {name}.restricted
+           FROM nodes {name}_n JOIN {name} ON {name}_n.id = {name}.parent_id
+         )"
+    )
+}
+
+/// SQL for "the grant `g`, on a folder of the walk `name` (`walk_up`), reaches the item": no restricted folder is
+/// between, or it makes someone an owner of the space, as owners keep access to restricted folders
+pub(crate) fn reaches(name: &str) -> String {
+    format!("({name}.inherited OR ({name}.parent_id IS NULL AND g.role = 'owner'))")
 }
 
 /// The user's role on a node: the highest grant among all ancestors (including itself); None means no access
@@ -324,13 +353,9 @@ async fn access_current(conn: &mut SqliteConnection, user: &User, node: &Node) -
     // Keep walking above the inheritance boundary to check trash and retain space owners, while ordinary grants
     // stop at the nearest restricted folder. An item's uploader is not a space owner.
     let sql = format!(
-        "WITH RECURSIVE up(id, parent_id, trashed, restricted, inherited) AS (
-           SELECT id, parent_id, trashed_at IS NOT NULL, restricted, 1 FROM nodes WHERE id = ?1
-           UNION ALL SELECT n.id, n.parent_id, n.trashed_at IS NOT NULL, n.restricted, up.inherited AND NOT up.restricted
-           FROM nodes n JOIN up ON n.id = up.parent_id
-         )
-         SELECT g.role, up.trashed, up.restricted FROM up LEFT JOIN grants g ON g.node_id = up.id
-           AND (up.inherited OR (up.parent_id IS NULL AND g.role = 'owner')) AND {}",
+        "WITH RECURSIVE {} SELECT g.role, up.trashed, up.restricted FROM up LEFT JOIN grants g ON g.node_id = up.id AND {} AND {}",
+        walk_up("up", "?1"),
+        reaches("up"),
         principal_match(2, 3)
     );
     let rows: Vec<(Option<Role>, bool, bool)> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(&node.id).bind(user.id).bind(now()).fetch_all(conn).await?;
@@ -349,12 +374,10 @@ async fn access_current(conn: &mut SqliteConnection, user: &User, node: &Node) -
 /// owner there; None when one of them doesn't end (or they manage it through no grant)
 pub async fn manages_until(conn: &mut SqliteConnection, user: &User, node: &Node) -> AppResult<Option<i64>> {
     let sql = format!(
-        "WITH RECURSIVE up(id, parent_id, restricted, inherited) AS (
-           SELECT id, parent_id, restricted, 1 FROM nodes WHERE id = ?1
-           UNION ALL SELECT n.id, n.parent_id, n.restricted, up.inherited AND NOT up.restricted FROM nodes n JOIN up ON n.id = up.parent_id
-         )
-         SELECT CASE WHEN COUNT(*) = COUNT(g.expires_at) THEN MAX(g.expires_at) END
-         FROM grants g JOIN up ON g.node_id = up.id WHERE (up.inherited OR (up.parent_id IS NULL AND g.role = 'owner')) AND g.role IN ('manager', 'owner') AND {}",
+        "WITH RECURSIVE {} SELECT CASE WHEN COUNT(*) = COUNT(g.expires_at) THEN MAX(g.expires_at) END
+         FROM grants g JOIN up ON g.node_id = up.id WHERE {} AND g.role IN ('manager', 'owner') AND {}",
+        walk_up("up", "?1"),
+        reaches("up"),
         principal_match(2, 3)
     );
     let (until,): (Option<i64>,) = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(&node.id).bind(user.id).bind(now()).fetch_one(conn).await?;
@@ -363,15 +386,10 @@ pub async fn manages_until(conn: &mut SqliteConnection, user: &User, node: &Node
 
 /// Whether a grant to this principal gives the user access: it names them, a group of theirs, or everyone
 pub async fn grant_applies_to(conn: &mut SqliteConnection, user: &User, principal_type: PrincipalType, principal_id: i64) -> AppResult<bool> {
-    Ok(match principal_type {
-        PrincipalType::Everyone => !user.guest,
-        PrincipalType::User => principal_id == user.id,
-        PrincipalType::Group => {
-            let (n,): (i64,) =
-                sqlx::query_as("SELECT COUNT(*) FROM group_members WHERE group_id = ? AND user_id = ?").bind(principal_id).bind(user.id).fetch_one(conn).await?;
-            n > 0
-        }
-    })
+    let sql = format!("SELECT EXISTS(SELECT 1 FROM (SELECT ?1 AS principal_type, ?2 AS principal_id) g WHERE {})", names_sql("?3"));
+    let (applies,): (bool,) =
+        sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(principal_type.as_str()).bind(principal_id).bind(user.id).fetch_one(conn).await?;
+    Ok(applies)
 }
 
 /// Gets a node the user can access that isn't in the trash (nor in a folder that is), together with the user's role.
@@ -495,8 +513,8 @@ pub async fn folder_for(conn: &mut SqliteConnection, user: &User, id: &str, need
     Ok(n)
 }
 
-/// Read access is enough
-pub async fn owned_node(conn: &mut SqliteConnection, user: &User, id: &str) -> AppResult<Node> {
+/// An item the user may read (`node_for` with `Need::Read`)
+pub async fn readable_node(conn: &mut SqliteConnection, user: &User, id: &str) -> AppResult<Node> {
     node_for(conn, user, id, Need::Read).await
 }
 

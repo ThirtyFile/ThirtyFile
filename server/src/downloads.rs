@@ -675,7 +675,7 @@ async fn owned_nodes(st: &AppState, user: &User, ids: &[String]) -> AppResult<Ve
     let mut c = st.db.acquire().await?;
     let mut roots = Vec::with_capacity(ids.len());
     for id in ids {
-        roots.push(tree::owned_node(&mut c, user, id).await?);
+        roots.push(tree::readable_node(&mut c, user, id).await?);
     }
     Ok(roots)
 }

@@ -228,13 +228,7 @@ impl Files {
 async fn stage_size(st: &AppState, user: &User, stage: &Staged, size: u64) -> Result<(), StatusCode> {
     access::check_size(st, size).map_err(code)?;
     let up = access::upload_to(st, user, &stage.up.parent, stage.up.name.clone()).await.map_err(code)?;
-    crate::tree::check_quota(
-        &mut *st.db.acquire().await.map_err(|_| StatusCode::Failure)?,
-        up.parent.drive(),
-        size as i64 - up.existing.as_ref().map_or(0, |n| n.size),
-    )
-    .await
-    .map_err(code)?;
+    up.fits(st, size).await.map_err(code)?;
     let before = stage.file.metadata().await.map_err(|_| StatusCode::Failure)?.len();
     crate::util::DiskRoom::check(&st.tmp_dir(), size.saturating_sub(before)).await.map_err(code)?;
     Ok(())

@@ -936,6 +936,27 @@ mod tests {
         assert!(restore(State(env.st.clone()), admin.clone(), ids(&[&private])).await.is_err());
     }
 
+    /// An administrator who is also given a lower role in a team space manages its trash as one who isn't
+    #[tokio::test]
+    async fn administrators_with_a_lower_grant_in_a_team_space_still_manage_its_trash() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let admin = env.admin().await;
+        let root = {
+            let mut conn = env.st.db.acquire().await.unwrap();
+            let (_, root) = crate::db::create_drive(&mut conn, "Team", "team", amy.id, 0, "local").await.unwrap();
+            crate::db::add_grant(&mut conn, &root, "user", amy.id, "owner", Some(amy.id), None).await.unwrap();
+            crate::db::add_grant(&mut conn, &root, "user", admin.id, "viewer", Some(amy.id), None).await.unwrap();
+            root
+        };
+        let doc = env.file(&amy, &root, "plan.txt").await;
+        let _ = trash(State(env.st.clone()), amy.clone(), ids(&[&doc])).await.unwrap();
+        let Json(job) = restore(State(env.st.clone()), admin.clone(), ids(&[&doc])).await.unwrap();
+        crate::jobs::wait_for(&env.st, &job.id).await;
+        let node = tree::get_node(&mut env.st.db.acquire().await.unwrap(), &doc).await.unwrap().unwrap();
+        assert!(node.trashed_at.is_none(), "still in the trash");
+    }
+
     #[tokio::test]
     async fn folder_share_editor_cannot_take_folder_out_of_its_drive() {
         let env = testutil::env().await;

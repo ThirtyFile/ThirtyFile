@@ -2,7 +2,7 @@
 
 use super::credentials::{Folder, publisher};
 use crate::{
-    auth::{Admin, User},
+    auth::User,
     error::{AppError, AppResult},
     state::AppState,
     util::{new_id, now, random_token},
@@ -73,10 +73,6 @@ pub async fn list(State(st): State<AppState>, user: User, Query(q): Query<ListQu
     }
     Ok(Json(out))
 }
-pub async fn admin_list(st: State<AppState>, Admin(user): Admin, q: Query<ListQuery>) -> AppResult<Json<List>> {
-    list(st, user, q).await
-}
-
 #[derive(Deserialize)]
 pub struct Change {
     pub name: String,
@@ -167,7 +163,7 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
 async fn managed(conn: &mut sqlx::SqliteConnection, user: &User, id: &str) -> AppResult<Folder> {
     let current = crate::auth::current_user(conn, user).await?;
     if current.guest {
-        return Err(AppError::forbidden("Guest accounts can't publish receive folders"));
+        return Err(AppError::forbidden("Guest accounts can't publish folders"));
     }
     let folder: Folder = sqlx::query_as("SELECT * FROM ftp_receive_folders WHERE id=?")
         .bind(id)

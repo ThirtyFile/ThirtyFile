@@ -39,7 +39,9 @@ pub struct Inner {
     /// Days before trashed items are deleted for good (0 = kept until the trash is emptied)
     pub trash_days: i64,
     pub max_upload: u64,
-    /// SQLite allows only one writer; every write transaction takes this lock first, to avoid SQLITE_BUSY when a deferred transaction is upgraded.
+    /// SQLite allows only one writer. Write transactions (`db::begin_write`, BEGIN IMMEDIATE) that may wait take this
+    /// lock first, so they queue here rather than in SQLite; short ones may begin without it, and then wait in SQLite
+    /// for their turn (`busy_timeout`, 15 s). Either way no deferred transaction is upgraded to a writer midway.
     pub write_lock: tokio::sync::Mutex<()>,
     /// System settings (cached in memory; changes are also written to the settings table)
     pub system: RwLock<SystemSettings>,

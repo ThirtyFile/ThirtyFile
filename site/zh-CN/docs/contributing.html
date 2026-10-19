@@ -142,6 +142,7 @@ cd web &amp;&amp; pnpm format</code></pre>
           <li>0.4.0 的数据库结构已冻结，确保旧版本创建的数据继续有效。结构修改必须新增 <code>server/migrations/0002_&lt;name&gt;.sql</code> 及后续编号的迁移文件，以升级 0.4.0 数据库。禁止修改 <code>0001_init.sql</code> 和此前版本已发布的迁移文件，检查会阻止这种修改。</li>
           <li>网页应用的 API 类型（<code>web/src/api/types.ts</code>）是手写的。服务器有一项测试把主要响应的结构记录在 <code>web/tests/contract/shapes.json</code>，结构一改就会失败：在 <code>server/</code> 运行 <code>THIRTYFILE_UPDATE_SHAPES=1 cargo test api_shapes</code>，再修改类型直到 <code>pnpm typecheck</code> 通过。</li>
           <li>会更改用户文件的逻辑（公式、工作簿保存、文本编码）须在 <code>web/tests/unit/</code> 中添加单元测试。</li>
+          <li>服务器的测试放在代码旁：<code>x.rs</code> 的测试在 <code>x/tests.rs</code>，模块文件夹的测试在其 <code>tests.rs</code>，同一模块的其他测试文件则是其子模块（<code>x/tests/&lt;主题&gt;.rs</code>）。</li>
         </ul>
         <p>每个 Pull Request 都运行上述检查，约需几分钟：<code>scripts/check.sh quick</code>、<code>cargo deny</code>，以及更改服务器时的服务器测试。完整测试与镜像构建在正式发布和预发布前运行，也可在 <strong>Actions › Build › Run workflow</strong> 手动运行；手动验证不发布任何内容。发布前，两种架构的镜像都会使用 <code>compose.yaml</code> 在最新已发布版本的数据上启动。CodeQL 在合并后、每周及发布前扫描 <code>main</code>。合并到 <code>main</code> 不发布任何内容，网站也不发布：指南随版本发布，以描述用户实际可安装的功能。对当前已发布版本也正确的指南修复可手动发布：在 <strong>Actions › Website › Run workflow</strong> 中选择 <code>main</code> 为要发布的分支或标签。</p>
         <h2 id="translations">其他语言的网站</h2>
