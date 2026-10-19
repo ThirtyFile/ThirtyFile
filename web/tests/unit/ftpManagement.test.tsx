@@ -269,7 +269,8 @@ describe("FTP receive folder management", () => {
     await type(input("Your current password"), "current-password");
     await click(button("Rotate password", top()));
     await settled(() => expect(input("Device password").value).toBe(created.password));
-    expect(top().querySelector('input[type="password"]')).toBeNull();
+    // The confirmation field is gone: the one password field left is the new device password, as dots until shown
+    expect([...top().querySelectorAll('input[type="password"]')]).toEqual([input("Device password")]);
     expect(api.rotateFtpPassword).toHaveBeenCalledWith(folder.id, { password: "current-password", code: undefined });
     await click(button("Done", top()));
     await settled(() => expect(document.querySelector('[role="dialog"]')).toBeNull());

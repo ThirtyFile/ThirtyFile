@@ -83,7 +83,7 @@ test("a new app password is shown as dots until Show is pressed, and copied with
   await page.getByRole("button", { name: username, exact: true }).click();
   await page.getByRole("menuitem", { name: "App passwords", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "App passwords" });
-  await dialog.getByLabel("Name", { exact: true }).fill(unique("Nightly backup"));
+  await dialog.getByLabel("Name", { exact: true }).fill(`Nightly backup ${unique()}`);
   await dialog.getByLabel("Your current password").fill(`${USER_PASSWORD}-2`);
   const created = answer(page, "POST", "/api/auth/app-passwords");
   await dialog.getByRole("button", { name: "Create", exact: true }).click();

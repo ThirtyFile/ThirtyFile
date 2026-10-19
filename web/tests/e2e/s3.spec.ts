@@ -58,8 +58,9 @@ test("administrators configure S3, publish from a folder menu and manage keys sh
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   await keyDialog.getByRole("button", { name: "Copy credentials", exact: true }).click();
   await expect(page.getByText("Copied", { exact: true })).toBeVisible();
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(`AWS_ACCESS_KEY_ID=${access}
-AWS_SECRET_ACCESS_KEY=${secret}`);
+  // Windows gives the clipboard's line break as CRLF
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  expect(copied.replace(/\r\n/g, "\n")).toBe(`AWS_ACCESS_KEY_ID=${access}\nAWS_SECRET_ACCESS_KEY=${secret}`);
   await expect(secretField).toHaveAttribute("type", "password");
   await keyDialog.getByRole("button", { name: "Done", exact: true }).click();
   await expect(page.getByLabel("Secret Key", { exact: true })).toHaveCount(0);

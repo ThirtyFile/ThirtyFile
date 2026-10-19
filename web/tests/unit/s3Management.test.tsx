@@ -75,6 +75,7 @@ const button = (name: string) => {
 const input = (label: string) => {
   const found =
     document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`) ??
+    (([...document.querySelectorAll("label")].find((item) => item.textContent?.trim() === label) as HTMLLabelElement | undefined)?.control as HTMLInputElement | null) ??
     [...document.querySelectorAll("label")].find((item) => item.textContent?.trim() === label)?.querySelector<HTMLInputElement>("input");
   expect(found, `input ${label}`).toBeDefined();
   return found!;
@@ -243,6 +244,8 @@ describe("Access Keys", () => {
     await settle(() => expect(input("Access Key").readOnly).toBe(true));
     expect(input("Secret Key").readOnly).toBe(true);
     expect(input("Secret Key").value).toBe("test-secret-shown-once");
+    // As dots until Show is pressed
+    expect(input("Secret Key").type).toBe("password");
     clipboard.mockRejectedValueOnce(new DOMException("Permission denied", "NotAllowedError"));
     click("Copy credentials");
     await settle(() => expect(toast.error).toHaveBeenCalledWith("Couldn't copy"));
