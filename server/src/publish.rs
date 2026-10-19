@@ -67,6 +67,20 @@ pub async fn publisher(conn: &mut SqliteConnection, user: &User, id: &str, kind:
     Ok(node)
 }
 
+/// The most a list of publications (S3 buckets, FTP receive folders) gives at once, and when no `limit` is asked for
+pub const LIST_MAX: u32 = 1000;
+
+/// How many of a list of publications a page holds: `limit`, within 1 and `LIST_MAX`
+pub fn list_limit(limit: Option<u32>) -> i64 {
+    i64::from(limit.unwrap_or(LIST_MAX).clamp(1, LIST_MAX))
+}
+
+/// SQL: the row of `table` comes after the last one of the page before (`?3` its `created_at`, `?4` its id), in a list
+/// that is newest first. Two rows made in the same second are told apart by their ids, so paging skips none
+pub fn after_sql(table: &str) -> String {
+    format!("(?3 IS NULL OR {table}.created_at < ?3 OR ({table}.created_at = ?3 AND {table}.id < ?4))")
+}
+
 /// Whether what is published from `node` by `publisher` may take files: the space takes changes, and the publisher's
 /// account may add files (an FTP receive folder, a writable S3 key)
 pub fn may_receive(publisher: &User, node: &Node) -> AppResult<()> {
