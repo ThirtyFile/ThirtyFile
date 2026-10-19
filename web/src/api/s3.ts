@@ -1,4 +1,4 @@
-import { enc, get, post, request, qs } from "@/api/client";
+import { enc, get, post, request, qs, pageQuery, type ListPage } from "@/api/client";
 
 export interface S3Config {
   enabled: boolean;
@@ -41,7 +41,8 @@ export const s3Api = {
   s3Config: (signal?: AbortSignal) => get<S3Config>("/admin/s3", signal),
   s3Options: (signal?: AbortSignal) => get<S3Config>("/s3/options", signal),
   saveS3Config: (config: S3Config) => request<S3Config>("PUT", "/admin/s3", config),
-  s3Buckets: (nodeId?: string, search?: string, signal?: AbortSignal) => get<{ can_publish: boolean; buckets: S3Bucket[] }>(`/s3/buckets${qs({ node_id: nodeId, search })}`, signal),
+  s3Buckets: (nodeId?: string, search?: string, signal?: AbortSignal, page: ListPage = {}) =>
+    get<{ can_publish: boolean; buckets: S3Bucket[] }>(`/s3/buckets${qs({ node_id: nodeId, search, ...pageQuery(page) })}`, signal),
   /** `confirm`: the person's password (and code), asked again, as for other credentials */
   publishS3Bucket: (nodeId: string, name: string, confirm: Confirm) => post<NewS3Bucket>("/s3/buckets", { node_id: nodeId, name, ...confirm }),
   setS3Bucket: (id: string, enabled: boolean) => request("PATCH", enc`/s3/buckets/${id}`, { enabled }),

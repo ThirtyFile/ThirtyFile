@@ -561,7 +561,7 @@ async fn an_ended_receive_folder_can_be_renamed_with_its_end_date_kept_and_found
     assert_eq!(update("Old scanner", Some(ended - 60)).await.unwrap_err().status, axum::http::StatusCode::BAD_REQUEST);
     // Searched for on the server: by its name, its creator, its folder; nothing else
     let search = async |text: &str| {
-        let q = axum::extract::Query(manage::ListQuery { node_id: None, search: Some(text.into()) });
+        let q = axum::extract::Query(manage::ListQuery { search: Some(text.into()), ..Default::default() });
         let Json(list) = manage::list(State(env.st.clone()), admin.clone(), q).await.unwrap();
         list.folders.len()
     };

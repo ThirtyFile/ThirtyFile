@@ -18,6 +18,10 @@ pub struct ListQuery {
     pub node_id: Option<String>,
     /// Part of the receive folder's name, its device username, its creator's or its folder's name
     pub search: Option<String>,
+    /// The page after the receive folder made at `after_created` with the id `after_id`; at most `limit` of them
+    pub after_created: Option<i64>,
+    pub after_id: Option<String>,
+    pub limit: Option<u32>,
 }
 #[derive(Serialize)]
 pub struct FolderInfo {
@@ -48,19 +52,38 @@ pub async fn list(State(st): State<AppState>, user: User, Query(q): Query<ListQu
         return Ok(Json(out));
     }
     let search = q.search.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_lowercase);
-    let folders: Vec<Folder> = sqlx::query_as(
-        "SELECT * FROM ftp_receive_folders f WHERE (?1 IS NULL OR f.node_id = ?1)
+    #[derive(sqlx::FromRow)]
+    struct Listed {
+        #[sqlx(flatten)]
+        folder: Folder,
+        folder_name: String,
+    }
+    // Newest first, a page at a time
+    let sql = format!(
+        "SELECT f.*, COALESCE(n.name, '') AS folder_name FROM ftp_receive_folders f LEFT JOIN nodes n ON n.id = f.node_id
+         WHERE (?1 IS NULL OR f.node_id = ?1)
            AND (?2 IS NULL OR instr(unicode_lower(f.name), ?2) > 0 OR instr(lower(f.username), ?2) > 0
              OR EXISTS(SELECT 1 FROM users u WHERE u.id = f.creator_id AND instr(unicode_lower(u.username), ?2) > 0)
-             OR EXISTS(SELECT 1 FROM nodes n WHERE n.id = f.node_id AND instr(unicode_lower(n.name), ?2) > 0))
-         ORDER BY f.created_at DESC LIMIT 1000",
-    )
-    .bind(q.node_id)
-    .bind(search)
-    .fetch_all(&mut *conn)
-    .await?;
-    for folder in folders {
-        let creator = crate::auth::user_by_id(&st, &mut conn, folder.creator_id).await?;
+             OR instr(unicode_lower(n.name), ?2) > 0)
+           AND {}
+         ORDER BY f.created_at DESC, f.id DESC LIMIT ?5",
+        crate::publish::after_sql("f")
+    );
+    let listed: Vec<Listed> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
+        .bind(q.node_id)
+        .bind(search)
+        .bind(q.after_created)
+        .bind(q.after_id)
+        .bind(crate::publish::list_limit(q.limit))
+        .fetch_all(&mut *conn)
+        .await?;
+    // Each creator once, however many receive folders they made
+    let mut creators: std::collections::HashMap<i64, Option<User>> = Default::default();
+    for Listed { folder, folder_name } in listed {
+        if let std::collections::hash_map::Entry::Vacant(slot) = creators.entry(folder.creator_id) {
+            slot.insert(crate::auth::user_by_id(&st, &mut conn, folder.creator_id).await?);
+        }
+        let creator = creators[&folder.creator_id].clone();
         let active = cfg.enabled
             && folder.enabled
             && folder.expires_at.is_none_or(|t| t > now())
@@ -68,7 +91,6 @@ pub async fn list(State(st): State<AppState>, user: User, Query(q): Query<ListQu
                 Some(u) => publisher(&mut conn, u, &folder.node_id, cfg.managers_publish).await.is_ok(),
                 None => false,
             };
-        let folder_name = crate::tree::get_node(&mut conn, &folder.node_id).await?.map(|n| n.name).unwrap_or_default();
         out.folders.push(FolderInfo { folder, creator: creator.map(|u| u.username).unwrap_or_default(), folder_name, active });
     }
     Ok(Json(out))

@@ -385,7 +385,8 @@ test("the administrator's bucket list retries failed loads, searches on the serv
   await settle(() => expect(document.querySelector('[role="alert"]')?.textContent).toContain("Bucket list unavailable"));
   click("Try again");
   await settle(() => expect(document.querySelector('section[aria-label="client-backups"]')).not.toBeNull());
-  expect(String(fetchMock.mock.calls[0][0])).toBe("/api/s3/buckets");
+  // A page at a time
+  expect(String(fetchMock.mock.calls[0][0])).toBe("/api/s3/buckets?limit=100");
   // One search box, the page's own
   const boxes = document.querySelectorAll<HTMLInputElement>('input[placeholder="Search buckets"]');
   expect(boxes).toHaveLength(1);
@@ -410,4 +411,23 @@ test("the administrator's bucket list retries failed loads, searches on the serv
   current = [];
   click("Refresh");
   await settle(() => expect(document.body.textContent).toContain("No S3 buckets yet"));
+});
+
+test("the administrator's bucket list shows more when a page is full, asking for the buckets after the last one", async () => {
+  const many = Array.from({ length: 101 }, (_, i) => ({ ...bucket, id: `bucket-${String(i).padStart(3, "0")}`, name: `bucket-${i}`, created_at: 1000 - i, keys: [] }));
+  // The server's pages: newest first, after the bucket the page before ended with
+  fetchMock.mockImplementation(async (url) => {
+    const params = new URL(String(url), "http://files.example.com").searchParams;
+    const after = params.get("after_id");
+    const start = after ? many.findIndex((b) => b.id === after) + 1 : 0;
+    return json({ can_publish: true, buckets: many.slice(start, start + Number(params.get("limit"))) });
+  });
+  mount(<S3BucketsPage />);
+  await settle(() => expect(document.querySelectorAll("section[aria-label]")).toHaveLength(100));
+  click("Show more");
+  await settle(() => expect(document.querySelectorAll("section[aria-label]")).toHaveLength(101));
+  const second = new URL(String(fetchMock.mock.calls.at(-1)![0]), "http://files.example.com").searchParams;
+  expect([second.get("after_created"), second.get("after_id"), second.get("limit")]).toEqual(["901", "bucket-099", "100"]);
+  // The last page wasn't full: nothing more to ask for
+  expect([...document.querySelectorAll("button")].some((b) => b.textContent === "Show more")).toBe(false);
 });

@@ -155,11 +155,19 @@ pub async fn protect_saved(conn: &mut SqliteConnection, node: &Node) -> AppResul
     Ok(())
 }
 
-// Carry the flag while walking the subtree. A final join back to nodes lets SQLite scan unrelated rows by id.
+// The restricted folders in a subtree, the folder itself included: one walk down it, carrying the flag (a final join back
+// to nodes lets SQLite scan unrelated rows by id). Only the restricted ones are kept, so the answer stays small however
+// large the subtree.
 const RESTRICTED_SUBTREE_SQL: &str = "WITH RECURSIVE sub(id, restricted) AS (
     SELECT id, restricted FROM nodes WHERE id = ?1
     UNION ALL SELECT n.id, n.restricted FROM nodes n JOIN sub ON n.parent_id = sub.id
-  ) SELECT id FROM sub WHERE restricted AND id > ?2 ORDER BY id LIMIT 128";
+  ) SELECT id FROM sub WHERE restricted ORDER BY id";
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: how many times `require_subtree` walked a subtree on this thread
+    static SUBTREE_WALKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 /// Moving or deleting a parent must never carry along descendants the caller cannot act on. Refusal is generic:
 /// neither the name nor even the number of restricted descendants is disclosed.
@@ -168,22 +176,19 @@ pub async fn require_subtree(conn: &mut SqliteConnection, user: &User, node: &No
     if !has_restricted(conn, node.drive()).await? {
         return Ok(());
     }
-    let mut after = String::new();
-    loop {
-        let ids: Vec<(String,)> = sqlx::query_as(RESTRICTED_SUBTREE_SQL).bind(&node.id).bind(&after).fetch_all(&mut *conn).await?;
-        if ids.is_empty() {
-            return Ok(());
+    // Walked once, not again for every few of them: under the write lock, a large subtree is read one time
+    #[cfg(test)]
+    SUBTREE_WALKS.with(|n| n.set(n.get() + 1));
+    let ids: Vec<(String,)> = sqlx::query_as(RESTRICTED_SUBTREE_SQL).bind(&node.id).fetch_all(&mut *conn).await?;
+    for (id,) in &ids {
+        let item = super::get_node(conn, id).await?.ok_or_else(|| AppError::conflict("The folder changed while checking access"))?;
+        let role = super::role_on(conn, user, &item).await?.ok_or_else(|| AppError::forbidden("You don't have access to everything in this folder"))?;
+        // Contributor ownership is checked once by the root operation, including actual folder-space entries.
+        if !(role == Role::Contributor && super::is_own(user, &item)) {
+            super::allows(user, role, need).map_err(|_| AppError::forbidden("You don't have permission to change everything in this folder"))?;
         }
-        for (id,) in &ids {
-            let item = super::get_node(conn, id).await?.ok_or_else(|| AppError::conflict("The folder changed while checking access"))?;
-            let role = super::role_on(conn, user, &item).await?.ok_or_else(|| AppError::forbidden("You don't have access to everything in this folder"))?;
-            // Contributor ownership is checked once by the root operation, including actual folder-space entries.
-            if !(role == Role::Contributor && super::is_own(user, &item)) {
-                super::allows(user, role, need).map_err(|_| AppError::forbidden("You don't have permission to change everything in this folder"))?;
-            }
-        }
-        after = ids.last().unwrap().0.clone();
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -220,7 +225,7 @@ mod tests {
         .await
         .unwrap();
         let explain = format!("EXPLAIN QUERY PLAN {RESTRICTED_SUBTREE_SQL}");
-        let plan: Vec<(i64, i64, i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(explain.as_str())).bind(&empty).bind("").fetch_all(&env.st.db).await.unwrap();
+        let plan: Vec<(i64, i64, i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(explain.as_str())).bind(&empty).fetch_all(&env.st.db).await.unwrap();
         let (version,): (String,) = sqlx::query_as("SELECT sqlite_version()").fetch_one(&env.st.db).await.unwrap();
         println!("SQLite {version}: {plan:?}");
         assert!(
@@ -233,7 +238,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn subtree_checks_keep_restricted_descendants_after_the_first_page() {
+    async fn subtree_checks_see_every_restricted_descendant_in_one_walk() {
         let env = testutil::env().await;
         let owner = env.user("owner", true).await;
         let editor = env.user("editor", true).await;
@@ -256,7 +261,10 @@ mod tests {
         }
         let mut conn = env.st.db.acquire().await.unwrap();
         let node = super::super::get_node(&mut conn, &parent).await.unwrap().unwrap();
+        // More restricted folders than a page held before: still one walk down the subtree
+        let before = SUBTREE_WALKS.with(std::cell::Cell::get);
         require_subtree(&mut conn, &owner, &node, Need::Delete).await.unwrap();
+        assert_eq!(SUBTREE_WALKS.with(std::cell::Cell::get) - before, 1);
         let error = require_subtree(&mut conn, &editor, &node, Need::Delete).await.unwrap_err();
         assert_eq!(error.status, axum::http::StatusCode::FORBIDDEN);
         assert!(!error.message.contains("Restricted"));

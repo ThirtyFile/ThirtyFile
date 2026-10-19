@@ -17,6 +17,10 @@ use serde::{Deserialize, Serialize};
 pub struct ListQuery {
     pub node_id: Option<String>,
     pub search: Option<String>,
+    /// The page after the bucket made at `after_created` with the id `after_id`; at most `limit` buckets
+    pub after_created: Option<i64>,
+    pub after_id: Option<String>,
+    pub limit: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -47,30 +51,53 @@ pub async fn list(State(st): State<AppState>, user: User, Query(q): Query<ListQu
     if q.node_id.is_some() && !can_manage {
         return Ok(Json(FolderBuckets { can_publish, buckets: vec![] }));
     }
-    let buckets: Vec<Bucket> =
-        // The bucket's name, its creator's or its folder's
-        sqlx::query_as(
-            "SELECT * FROM s3_buckets b WHERE (?1 IS NULL OR b.node_id = ?1)
-               AND (?2 IS NULL OR instr(b.name, ?2) > 0
-                 OR EXISTS(SELECT 1 FROM users u WHERE u.id = b.creator_id AND instr(unicode_lower(u.username), ?2) > 0)
-                 OR EXISTS(SELECT 1 FROM nodes n WHERE n.id = b.node_id AND instr(unicode_lower(n.name), ?2) > 0))
-             ORDER BY b.created_at DESC LIMIT 1000",
-        )
+    #[derive(sqlx::FromRow)]
+    struct Listed {
+        #[sqlx(flatten)]
+        bucket: Bucket,
+        folder: String,
+    }
+    // The bucket's name, its creator's or its folder's; newest first, a page at a time
+    let sql = format!(
+        "SELECT b.*, COALESCE(n.name, '') AS folder FROM s3_buckets b LEFT JOIN nodes n ON n.id = b.node_id
+         WHERE (?1 IS NULL OR b.node_id = ?1)
+           AND (?2 IS NULL OR instr(b.name, ?2) > 0
+             OR EXISTS(SELECT 1 FROM users u WHERE u.id = b.creator_id AND instr(unicode_lower(u.username), ?2) > 0)
+             OR instr(unicode_lower(n.name), ?2) > 0)
+           AND {}
+         ORDER BY b.created_at DESC, b.id DESC LIMIT ?5",
+        crate::publish::after_sql("b")
+    );
+    let listed: Vec<Listed> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
         .bind(q.node_id)
         .bind(q.search.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_lowercase))
-            .fetch_all(&mut *conn)
-            .await?;
+        .bind(q.after_created)
+        .bind(q.after_id)
+        .bind(crate::publish::list_limit(q.limit))
+        .fetch_all(&mut *conn)
+        .await?;
+    // The keys of the page in one query, and each creator once, however many buckets they made
+    let ids = serde_json::to_string(&listed.iter().map(|l| &l.bucket.id).collect::<Vec<_>>()).map_err(AppError::internal)?;
+    let all: Vec<Key> =
+        sqlx::query_as("SELECT * FROM s3_keys WHERE bucket_id IN (SELECT value FROM json_each(?)) ORDER BY created_at DESC").bind(ids).fetch_all(&mut *conn).await?;
+    let mut keys: std::collections::HashMap<String, Vec<Key>> = Default::default();
+    for key in all {
+        keys.entry(key.bucket_id.clone()).or_default().push(key);
+    }
+    let mut creators: std::collections::HashMap<i64, Option<User>> = Default::default();
     let mut rows = Vec::new();
-    for bucket in buckets {
-        let creator = crate::auth::user_by_id(&st, &mut conn, bucket.creator_id).await?;
+    for Listed { bucket, folder } in listed {
+        if let std::collections::hash_map::Entry::Vacant(slot) = creators.entry(bucket.creator_id) {
+            slot.insert(crate::auth::user_by_id(&st, &mut conn, bucket.creator_id).await?);
+        }
+        let creator = creators[&bucket.creator_id].clone();
         let active = config.enabled
             && bucket.enabled
             && match &creator {
                 Some(u) => publisher(&mut conn, u, &bucket.node_id, config.managers_publish).await.is_ok(),
                 None => false,
             };
-        let folder = crate::tree::get_node(&mut conn, &bucket.node_id).await?.map(|n| n.name).unwrap_or_default();
-        let keys = sqlx::query_as("SELECT * FROM s3_keys WHERE bucket_id = ? ORDER BY created_at DESC").bind(&bucket.id).fetch_all(&mut *conn).await?;
+        let keys = keys.remove(&bucket.id).unwrap_or_default();
         rows.push(BucketInfo { bucket, creator: creator.map(|u| u.username).unwrap_or_default(), folder, keys, active });
     }
     Ok(Json(FolderBuckets { can_publish, buckets: rows }))

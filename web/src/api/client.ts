@@ -97,6 +97,23 @@ function checkOoxml(buf: ArrayBuffer) {
 }
 
 /** `signal` stops the request when its answer isn't wanted any more (React Query passes one to each query) */
+/** A page of a list that is newest first: the items made before the last one of the page before (its `created_at`
+ * and id), at most `limit` of them */
+export interface ListPage {
+  after_created?: number;
+  after_id?: string;
+  limit?: number;
+}
+
+/** A page's part of a query string */
+export const pageQuery = (page: ListPage) => ({ after_created: page.after_created?.toString(), after_id: page.after_id, limit: page.limit?.toString() });
+
+/** The page after `items` when it was full (`limit` items), else none */
+export function nextPage<T extends { id: string; created_at: number }>(items: T[], limit: number): ListPage | undefined {
+  const last = items.at(-1);
+  return last && items.length >= limit ? { after_created: last.created_at, after_id: last.id } : undefined;
+}
+
 export const get = <T>(p: string, signal?: AbortSignal) => request<T>("GET", p, undefined, undefined, undefined, signal);
 /** Convert filters to query parameters (skipping empty values) */
 export const toParams = (o: object) =>

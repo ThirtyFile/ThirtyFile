@@ -23,8 +23,12 @@ export const keys = {
   // was searched for), and the settings of the protocols
   bucketLists: () => ["s3-buckets"],
   buckets: (nodeId: string | null, search = "") => ["s3-buckets", nodeId, search],
+  /** The administrator's list of every bucket, a page at a time */
+  bucketPages: (search: string) => ["s3-buckets", "pages", search],
   receiveFolderLists: () => ["ftp-folders"],
   receiveFolders: (nodeId: string | null, search = "") => ["ftp-folders", nodeId, search],
+  /** The administrator's list of every receive folder, a page at a time */
+  receiveFolderPages: (search: string) => ["ftp-folders", "pages", search],
   s3Options: () => ["s3-options"],
   s3Config: () => ["s3-config"],
   ftpConfig: () => ["ftp-config"],

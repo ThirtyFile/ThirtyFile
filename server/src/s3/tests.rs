@@ -1023,9 +1023,46 @@ fn request_times_come_from_x_amz_date_or_date() {
 async fn administrators_find_buckets_by_their_name_creator_or_folder() {
     let s = server(false).await;
     let search = async |text: &str| {
-        let q = axum::extract::Query(super::manage::ListQuery { node_id: None, search: Some(text.into()) });
+        let q = axum::extract::Query(super::manage::ListQuery { search: Some(text.into()), ..Default::default() });
         let Json(list) = super::manage::list(State(s.env.st.clone()), s.admin.clone(), q).await.unwrap();
         list.buckets.len()
     };
     assert_eq!((search("backups").await, search(&s.admin.username.to_uppercase()).await, search("published").await, search("nothing").await), (1, 1, 1, 0));
+}
+
+/// The administrator's list comes a page at a time, newest first: every bucket once, also of several made in the
+/// same second, each with its own keys, and its creator and folder looked up once for the page, not once a bucket
+#[tokio::test]
+async fn the_administrators_bucket_list_pages_without_skipping_any_and_with_each_buckets_keys() {
+    let s = server(false).await;
+    let (node, created): (String, i64) = sqlx::query_as("SELECT node_id, created_at FROM s3_buckets").fetch_one(&s.env.st.db).await.unwrap();
+    for (id, name) in [("b-1", "same-second-one"), ("b-2", "same-second-two"), ("b-3", "same-second-three")] {
+        sqlx::query("INSERT INTO s3_buckets(id, name, node_id, creator_id, created_at) VALUES(?, ?, ?, ?, ?)")
+            .bind(id)
+            .bind(name)
+            .bind(&node)
+            .bind(s.admin.id)
+            .bind(created + 1)
+            .execute(&s.env.st.db)
+            .await
+            .unwrap();
+    }
+    let page = async |after: Option<&super::manage::BucketInfo>| {
+        let q = super::manage::ListQuery {
+            after_created: after.map(|b| b.bucket.created_at),
+            after_id: after.map(|b| b.bucket.id.clone()),
+            limit: Some(2),
+            ..Default::default()
+        };
+        super::manage::list(State(s.env.st.clone()), s.admin.clone(), axum::extract::Query(q)).await.unwrap().0.buckets
+    };
+    let first = page(None).await;
+    let second = page(first.last()).await;
+    let names: Vec<&str> = first.iter().chain(&second).map(|b| b.bucket.name.as_str()).collect();
+    assert_eq!(names, ["same-second-three", "same-second-two", "same-second-one", "backups"]);
+    assert!(page(second.last()).await.is_empty());
+    let backups = second.iter().find(|b| b.bucket.name == "backups").unwrap();
+    assert_eq!(backups.keys.len(), 1);
+    assert_eq!(backups.folder, "Published");
+    assert!(first.iter().all(|b| b.keys.is_empty() && b.folder == "Published" && b.creator == s.admin.username));
 }
