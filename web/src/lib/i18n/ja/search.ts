@@ -21,4 +21,6 @@ export default {
   "Showing the first {n} results. Add words or filters to find the rest.": "最初の {n} 件の結果を表示しています。残りを見つけるには、キーワードやフィルターを追加してください。",
   "Checking the folder: {n} items read…": "フォルダーを確認しています：{n} 件の項目を読み取り済み…",
   "Updating: {done} of {total} changes…": "更新しています：{total} 件中 {done} 件の変更が完了…",
+  "Clear search": "検索をクリア",
+  "Type in the search box to find files": "検索ボックスに入力してファイルを探します",
 } satisfies Record<string, string>;

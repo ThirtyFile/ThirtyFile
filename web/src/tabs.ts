@@ -146,8 +146,11 @@ export function useTabsState() {
   return useStore(store);
 }
 
-/** Called on every URL change: record it in the current tab's history */
-export function syncLocation(loc: string) {
+/**
+ * Called on every URL change: record it in the current tab's history. `replace`: the page replaced the one before it
+ * (a search refined as it is typed, a redirect), which it takes the place of, as in the browser's history
+ */
+export function syncLocation(loc: string, replace = false) {
   if (pending !== null) {
     const expected = pending;
     pending = null;
@@ -155,6 +158,12 @@ export function syncLocation(loc: string) {
   }
   const tab = activeTab();
   if (currentEntry(tab) === loc) return;
+  if (replace) {
+    const entries = [...tab.entries];
+    entries[tab.index] = loc;
+    updateTab(tab.id, { entries });
+    return;
+  }
   const entries = [...tab.entries.slice(0, tab.index + 1), loc].slice(-MAX_ENTRIES);
   updateTab(tab.id, { entries, index: entries.length - 1 });
 }

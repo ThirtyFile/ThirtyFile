@@ -274,4 +274,5 @@ export default {
   "Permanently delete {n} item?|Permanently delete {n} items?": "永久删除 {n} 个项目？",
   "Permanently deleted items can't be recovered.": "永久删除后无法恢复。",
   "Permanently deleted": "已永久删除",
+  "Updating…": "正在更新…",
 } satisfies Record<string, string>;

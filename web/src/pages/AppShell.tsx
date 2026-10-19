@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useLayoutEffect } from "react";
 import { Loader2Icon } from "lucide-react";
-import { Outlet, useLocation, useNavigate } from "react-router";
+import { Outlet, useLocation, useNavigate, useNavigationType } from "react-router";
 import { toast } from "sonner";
 import { SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -48,9 +48,10 @@ export function AppShell() {
   }, [location.search, location.pathname, navigate]);
 
   // Record URL changes in the current tab's history
+  const navigation = useNavigationType();
   useEffect(() => {
-    syncLocation(location.pathname + location.search);
-  }, [location.pathname, location.search]);
+    syncLocation(location.pathname + location.search, navigation === "REPLACE");
+  }, [location.pathname, location.search, navigation]);
 
   // As uploaded files land, refresh the first page of the folders they went to (not every open folder, nor the rest of
   // a big folder), at most every 1.5 s; when the uploads end, once more the lists of the folders they went to (and,
