@@ -3,8 +3,16 @@
 import { expect, test } from "vitest";
 import { activeTab, loadTabs, syncLocation } from "@/tabs";
 
+test("new tabs start at the first page shown, without their unseen home page before it", () => {
+  loadTabs(9000);
+  syncLocation("/search?q=report");
+  expect(activeTab().entries).toEqual(["/search?q=report"]);
+  expect(activeTab().index).toBe(0);
+});
+
 test("a replaced page takes the place of the one before it; a new one is added after it", () => {
   loadTabs(9001);
+  syncLocation("/files");
   syncLocation("/files/folder-1");
   syncLocation("/search?q=a&in=folder-1");
   syncLocation("/search?q=ab&in=folder-1", true);

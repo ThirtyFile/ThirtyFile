@@ -30,6 +30,11 @@ let storageKey = "tf-tabs";
 const store = createStore<TabsState>(fresh(HOME));
 /** The next navigation, triggered by a tab operation, that shouldn't be written to the history */
 let pending: string | null = null;
+/**
+ * The tabs are new (none saved): their home page is only a start, never shown, which the first page shown replaces. A
+ * page opened from a link then has nothing before it (no Back to a page that wasn't seen)
+ */
+let unseen = true;
 
 function newTab(path: string): Tab {
   return { id: `t${Date.now().toString(36)}${seq++}`, entries: [path], index: 0, title: "" };
@@ -95,8 +100,10 @@ export function loadTabs(userId: number) {
   try {
     const raw = sessionStorage.getItem(key) ?? localStorage.getItem(key);
     const saved = raw ? validTabs(JSON.parse(raw)) : null;
+    unseen = !saved;
     store.set(saved ?? fresh(HOME));
   } catch {
+    unseen = true;
     store.set(fresh(HOME));
   }
 }
@@ -156,9 +163,11 @@ export function syncLocation(loc: string, replace = false) {
     pending = null;
     if (expected === loc) return;
   }
+  const first = unseen;
+  unseen = false;
   const tab = activeTab();
   if (currentEntry(tab) === loc) return;
-  if (replace) {
+  if (replace || first) {
     const entries = [...tab.entries];
     entries[tab.index] = loc;
     updateTab(tab.id, { entries });

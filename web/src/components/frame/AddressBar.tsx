@@ -159,6 +159,7 @@ export function SearchInput({
       handoff.end = el.selectionEnd;
       if (el.isConnected) handoff.focused = document.activeElement === el;
     };
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- once, on showing and on leaving
   }, []);
 
   const change = (v: string, composing = false) => {

@@ -89,6 +89,7 @@ test("editing the words keeps the filters; Back, clearing, Escape and deleting t
   await expect(page).toHaveURL(/\/search\?/);
   await page.keyboard.press("Escape");
   await expect(page).toHaveURL(folderUrl);
+  await expect.poll(() => focus(page)).toEqual({ value: "", caret: 0, end: 0 });
   await page.keyboard.type("a");
   await expect(page).toHaveURL(/\/search\?q=a&/);
   await page.keyboard.press("Backspace");
