@@ -103,9 +103,15 @@
             <tr><td><code>THIRTYFILE_LOG_FORMAT</code></td><td>text</td><td><code>json</code> 每行輸出一個 JSON 物件，供紀錄收集工具使用</td></tr>
             <tr><td><code>RUST_LOG</code></td><td><code>thirtyfile=info</code></td><td>紀錄詳細程度，例如排查問題時設定 <code>thirtyfile=debug</code></td></tr>
             <tr><td><code>TZ</code></td><td><code>UTC</code></td><td>時區，例如 <code>Asia/Taipei</code></td></tr>
-            <tr><td><code>THIRTYFILE_SECRET_KEY</code></td><td><code>/data</code> 中的 <code>secret.key</code></td><td>加密資料庫所儲存密碼和金鑰的金鑰（儲存位置、單一登入、簽名金鑰），為 64 個十六進位字元，例如由 <code>openssl rand -hex 32</code> 產生。未設定時，首次啟動會建立 <code>/data/secret.key</code>。參閱<a href="backup.html#key">升級與備份</a></td></tr>
+            <tr><td><code>THIRTYFILE_SECRET_KEY</code></td><td><code>/data</code> 中的 <code>secret.key</code></td><td>加密資料庫所儲存密碼和金鑰的金鑰（儲存位置、單一登入、電子郵件密碼、兩步驟驗證、S3 Secret Key、簽名金鑰），為 64 個十六進位字元，例如由 <code>openssl rand -hex 32</code> 產生。未設定時，首次啟動會建立 <code>/data/secret.key</code>。參閱<a href="backup.html#key">升級與備份</a></td></tr>
             <tr><td><code>THIRTYFILE_SECRET_KEY_FILE</code></td><td></td><td>從檔案讀取金鑰，例如 Docker secret</td></tr>
             <tr><td><code>THIRTYFILE_ADDR</code></td><td><code>0.0.0.0:8080</code></td><td>容器內伺服器監聽的位址與連接埠。要更改電腦對外埠，應修改對外開放的連接埠（<code>-p 9000:8080</code>）</td></tr>
+            <tr><td><code>THIRTYFILE_SFTP_ADDR</code></td><td><code>0.0.0.0:2022</code></td><td>容器內 SFTP 的位址與連接埠。需在<strong>控制台 › 一般 › 應用程式與通訊協定</strong>開啟<strong>允許 SFTP 存取</strong>後才會啟用，並需另外開放連接埠。參閱 <a href="protocols.html#sftp">SFTP</a></td></tr>
+            <tr><td><code>THIRTYFILE_FTP_ADDR</code></td><td><code>0.0.0.0:21</code></td><td>容器內 FTP 接收資料夾的位址與連接埠。範例使用 <code>0.0.0.0:2121</code>，必須與對外開放的連接埠一起設定。參閱 <a href="protocols.html#ftp-setup">FTP 接收資料夾</a></td></tr>
+            <tr><td><code>THIRTYFILE_FTP_PASSIVE</code></td><td><code>30000-30009</code></td><td>裝置傳輸 FTP 資料時連線的連接埠。整段範圍都要開放，內外埠號相同</td></tr>
+            <tr><td><code>THIRTYFILE_FTP_PASSIVE_HOST</code></td><td></td><td>伺服器位於 NAT 後方時，告知裝置傳輸用的公開 DNS 名稱或 IPv4 位址。留空時使用裝置連入的位址</td></tr>
+            <tr><td><code>THIRTYFILE_FTP_CERT</code></td><td></td><td>FTPS 的 PEM 憑證鏈，掛載的檔案需讓使用者 1000 可讀取</td></tr>
+            <tr><td><code>THIRTYFILE_FTP_KEY</code></td><td></td><td>該憑證的私鑰，掛載的 PEM 檔案需讓使用者 1000 可讀取</td></tr>
             <tr><td><code>THIRTYFILE_DATA</code></td><td><code>/data</code></td><td>資料庫、縮圖和進行中上傳的目錄。由映像設定，請在該處掛載資料夾，不要修改變數。獨立伺服器程式使用 <code>./data</code></td></tr>
             <tr><td><code>THIRTYFILE_STORAGE</code></td><td><code>/storage</code></td><td>內建儲存位置的資料夾，與 <code>THIRTYFILE_DATA</code> 一樣由映像設定。獨立伺服器程式使用資料目錄內的 <code>blobs</code></td></tr>
           </tbody>

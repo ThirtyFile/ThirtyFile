@@ -185,7 +185,7 @@ docker start thirtyfile</code></pre>
         <h2 id="database-size">データベースの容量</h2>
         <p><code>data/drive.db</code> と最近の書き込みログ <code>drive.db-wal</code> は、起動時と毎日、不要な容量を返します。ログを空にし、バックアップの一覧作成など長い読み取りの後は 64 MB を超えたままになりません。新しいデータベースは古いログなどの削除領域も返し、次の書き込み用に数 MB を残します。古い版のデータベースは領域を次の書き込みに再利用するため、縮小して以後も返すには、停止して <code>docker compose run --rm thirtyfile compact</code>（または <code>docker run --rm -v …same volumes… ghcr.io/thirtyfile/thirtyfile compact</code>）を実行します。全体を書き直すので同程度の空き容量が必要です。</p>
         <h2 id="key">保存パスワードの暗号化キー</h2>
-        <p>保存場所のパスワード、キー、シングルサインオンのシークレット、2 段階認証のシークレット、セッションと共有リンクの署名シークレットは暗号化して保存します。キーは初回作成の <code>data/secret.key</code>、または <code>THIRTYFILE_SECRET_KEY</code>、<code>THIRTYFILE_SECRET_KEY_FILE</code> です。データベースだけを入手しても読めません。</p>
+        <p>保存場所のパスワード、キー、シングルサインオンのシークレット、メール（SMTP）のパスワード、2 段階認証のシークレット、バケットの S3 Secret Key、セッションと共有リンクの署名シークレットは暗号化して保存します。キーは初回作成の <code>data/secret.key</code>、または <code>THIRTYFILE_SECRET_KEY</code>、<code>THIRTYFILE_SECRET_KEY_FILE</code> です。データベースだけを入手しても読めません。</p>
         <ul>
           <li><strong>キーは別にバックアップ</strong> し、パスワード管理ツールなどへ入れ、通常のバックアップからは除外します（上記の例）。なくても復元できますが、パスワードの再入力と全員の再サインインが必要です。</li>
           <li>データフォルダーに置かない場合は、<code>openssl rand -hex 32</code> で作り、Docker secret の <code>THIRTYFILE_SECRET_KEY_FILE</code> か <code>THIRTYFILE_SECRET_KEY</code> で渡します。既存キーファイルの内容も同じように使えます。</li>

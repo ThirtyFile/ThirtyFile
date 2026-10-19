@@ -192,7 +192,7 @@ docker start thirtyfile</code></pre>
         <h2 id="database-size">資料庫大小</h2>
         <p>資料庫（<code>data/drive.db</code>）及近期寫入紀錄（<code>drive.db-wal</code>）在啟動和每日維護時歸還不再使用的空間：清空寫入紀錄；長時間讀取（例如備份產生檔案清單）結束後，紀錄不會持續大於 64 MB。新資料庫也歸還刪除內容（如舊紀錄）的空間，僅保留數 MB 供之後寫入。較舊版本建立的資料庫則保留空閒空間供自身重複使用；如需縮小並在之後自動歸還，停止 ThirtyFile，執行 <code>docker compose run --rm thirtyfile compact</code>（或 <code>docker run --rm -v …same volumes… ghcr.io/thirtyfile/thirtyfile compact</code>）。此操作重寫整個資料庫，需約等於資料庫大小的剩餘磁碟空間。</p>
         <h2 id="key">已儲存密碼的加密金鑰</h2>
-        <p>儲存位置密碼與金鑰、單一登入 client secrets、兩步驟驗證金鑰，以及簽名工作階段和分享連結的金鑰，均加密存入資料庫。加密金鑰位於 <code>data/secret.key</code>（首次啟動建立），或 <code>THIRTYFILE_SECRET_KEY</code>、<code>THIRTYFILE_SECRET_KEY_FILE</code> 指定處。因此僅有資料庫副本無法取得這些秘密。</p>
+        <p>儲存位置密碼與金鑰、單一登入 client secrets、電子郵件（SMTP）密碼、兩步驟驗證金鑰、Bucket 的 S3 Secret Key，以及簽名工作階段和分享連結的金鑰，均加密存入資料庫。加密金鑰位於 <code>data/secret.key</code>（首次啟動建立），或 <code>THIRTYFILE_SECRET_KEY</code>、<code>THIRTYFILE_SECRET_KEY_FILE</code> 指定處。因此僅有資料庫副本無法取得這些秘密。</p>
         <ul>
           <li><strong>單獨備份金鑰</strong>，例如儲存到密碼管理器，並排除一般備份（如上方命令）。沒有金鑰仍可還原，但儲存位置和單一登入需重新輸入密碼，所有人必須重新登入。</li>
           <li>要讓金鑰完全不放在資料目錄，先建立金鑰（<code>openssl rand -hex 32</code>），透過 <code>THIRTYFILE_SECRET_KEY_FILE</code>（Docker secret）或 <code>THIRTYFILE_SECRET_KEY</code> 提供。現有金鑰檔案內容也可採用相同方式。</li>

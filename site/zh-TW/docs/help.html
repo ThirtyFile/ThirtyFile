@@ -87,6 +87,7 @@
             <li><a href="#locked">所有人都看到「失敗嘗試過多」</a></li>
             <li><a href="#upload">大檔案上傳失敗</a></li>
             <li><a href="#permission">啟動時顯示「Permission denied」</a></li>
+            <li><a href="#protocols">SFTP 或 FTP 無法連線</a></li>
             <li><a href="#logs">檢視紀錄</a></li>
             <li><a href="#health">檢查執行狀態</a></li>
             <li><a href="#check">檢查已儲存的檔案</a></li>
@@ -119,6 +120,15 @@
           <li>使用 <code>--user</code> 啟動容器。請讓資料夾對該使用者可寫：<code>sudo chown -R 1000:1000 /srv/thirtyfile</code>，將 1000 替換為實際使用者編號。</li>
           <li>資料夾位於不允許修改擁有者的網路分享中。紀錄會顯示 <em>Can't give the folder … to user</em>。將 <code>THIRTYFILE_RUN_AS</code> 設為分享檔案的擁有者使用者與群組，例如 <code>1026:100</code>。</li>
         </ul>
+        <h2 id="protocols">SFTP 或 FTP 無法連線</h2>
+        <ul>
+          <li><strong>未執行</strong>：<strong>控制台 › 一般 › 應用程式與通訊協定</strong>會顯示 SFTP 與 FTP 是否正在監聽，以及無法監聽的原因（連接埠已被占用、憑證無法讀取）。網站仍可正常使用，無法啟動的服務會自動重試。請確認已在該處開啟存取，且已在 Docker 開放連接埠。</li>
+          <li><strong>「主機金鑰已變更」</strong>：SFTP 的主機金鑰是資料資料夾中的 <code>sftp_host_ed25519</code>，控制台會顯示其指紋。還原或搬移資料資料夾時若少了這個檔案，就會產生新金鑰，程式便會發出警告。請還原該檔案，或先比對新指紋與控制台顯示的指紋再接受。</li>
+          <li><strong>FTP 能登入，卻無法列出或傳輸</strong>：傳輸使用被動模式連接埠（<code>THIRTYFILE_FTP_PASSIVE</code>）。請在 Docker 開放整段範圍且內外埠號相同、在路由器轉送，若位於 NAT 後方，將 <code>THIRTYFILE_FTP_PASSIVE_HOST</code> 設為公開名稱或 IPv4 位址。</li>
+          <li><strong>FTP 連接埠</strong>：<code>THIRTYFILE_FTP_ADDR</code> 與對外開放的連接埠要一起設定。在 <code>compose.yaml</code> 中兩行都要取消註解，否則開放的連接埠上沒有服務在監聽。</li>
+          <li><strong>憑證</strong>：<code>THIRTYFILE_FTP_CERT</code> 與 <code>THIRTYFILE_FTP_KEY</code> 必須是使用者 1000 可讀取的 PEM 檔案。裝置拒絕憑證時，需要符合其連線名稱的憑證；裝置必須以被動模式使用明確 FTPS（AUTH TLS）。</li>
+        </ul>
+
         <h2 id="logs">檢視紀錄</h2>
         <pre><code>docker logs --tail 100 thirtyfile</code></pre>
         <h2 id="health">檢查執行狀態</h2>

@@ -102,9 +102,15 @@
             <tr><td><code>THIRTYFILE_LOG_FORMAT</code></td><td>text</td><td><code>json</code> 每行输出一个 JSON 对象，供日志收集工具使用</td></tr>
             <tr><td><code>RUST_LOG</code></td><td><code>thirtyfile=info</code></td><td>日志详细程度，例如排查问题时设置 <code>thirtyfile=debug</code></td></tr>
             <tr><td><code>TZ</code></td><td><code>UTC</code></td><td>时区，例如 <code>Asia/Taipei</code></td></tr>
-            <tr><td><code>THIRTYFILE_SECRET_KEY</code></td><td><code>/data</code> 中的 <code>secret.key</code></td><td>加密数据库所保存密码和密钥的密钥（存储位置、单点登录、签名密钥），为 64 个十六进制字符，例如由 <code>openssl rand -hex 32</code> 生成。未设置时，首次启动会创建 <code>/data/secret.key</code>。参阅<a href="backup.html#key">升级与备份</a></td></tr>
+            <tr><td><code>THIRTYFILE_SECRET_KEY</code></td><td><code>/data</code> 中的 <code>secret.key</code></td><td>加密数据库所保存密码和密钥的密钥（存储位置、单点登录、电子邮件密码、两步验证、S3 Secret Key、签名密钥），为 64 个十六进制字符，例如由 <code>openssl rand -hex 32</code> 生成。未设置时，首次启动会创建 <code>/data/secret.key</code>。参阅<a href="backup.html#key">升级与备份</a></td></tr>
             <tr><td><code>THIRTYFILE_SECRET_KEY_FILE</code></td><td></td><td>从文件读取密钥，例如 Docker secret</td></tr>
             <tr><td><code>THIRTYFILE_ADDR</code></td><td><code>0.0.0.0:8080</code></td><td>容器内服务器监听的地址和端口。要更改电脑对外端口，应修改发布端口（<code>-p 9000:8080</code>）</td></tr>
+            <tr><td><code>THIRTYFILE_SFTP_ADDR</code></td><td><code>0.0.0.0:2022</code></td><td>容器内 SFTP 的地址和端口。需在<strong>控制面板 › 常规 › 应用程序与协议</strong>开启<strong>允许 SFTP 访问</strong>后才会启用，并需另外发布端口。参阅 <a href="protocols.html#sftp">SFTP</a></td></tr>
+            <tr><td><code>THIRTYFILE_FTP_ADDR</code></td><td><code>0.0.0.0:21</code></td><td>容器内 FTP 接收文件夹的地址和端口。示例使用 <code>0.0.0.0:2121</code>，必须与发布的端口一起设置。参阅 <a href="protocols.html#ftp-setup">FTP 接收文件夹</a></td></tr>
+            <tr><td><code>THIRTYFILE_FTP_PASSIVE</code></td><td><code>30000-30009</code></td><td>设备传输 FTP 数据时连接的端口。整个范围都要发布，内外端口号相同</td></tr>
+            <tr><td><code>THIRTYFILE_FTP_PASSIVE_HOST</code></td><td></td><td>服务器位于 NAT 后时，告知设备传输用的公开 DNS 名称或 IPv4 地址。留空时使用设备连入的地址</td></tr>
+            <tr><td><code>THIRTYFILE_FTP_CERT</code></td><td></td><td>FTPS 的 PEM 证书链，挂载的文件需让用户 1000 可读取</td></tr>
+            <tr><td><code>THIRTYFILE_FTP_KEY</code></td><td></td><td>该证书的私钥，挂载的 PEM 文件需让用户 1000 可读取</td></tr>
             <tr><td><code>THIRTYFILE_DATA</code></td><td><code>/data</code></td><td>数据库、缩略图和进行中上传的目录。由镜像设置，请在该处挂载文件夹，不要修改变量。独立服务器程序使用 <code>./data</code></td></tr>
             <tr><td><code>THIRTYFILE_STORAGE</code></td><td><code>/storage</code></td><td>内置存储位置的文件夹，与 <code>THIRTYFILE_DATA</code> 一样由镜像设置。独立服务器程序使用数据目录内的 <code>blobs</code></td></tr>
           </tbody>

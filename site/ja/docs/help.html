@@ -86,6 +86,7 @@
             <li><a href="#locked">全員に「失敗した試行が多すぎます」と表示される</a></li>
             <li><a href="#upload">大きなファイルのアップロードに失敗する</a></li>
             <li><a href="#permission">起動時に「Permission denied」と表示される</a></li>
+            <li><a href="#protocols">SFTP や FTP に接続できない</a></li>
             <li><a href="#logs">ログを見る</a></li>
             <li><a href="#health">稼働状態を確認する</a></li>
             <li><a href="#check">保存されたファイルを確認する</a></li>
@@ -117,6 +118,15 @@
           <li><code>--user</code> を指定して起動している場合。そのユーザーが書き込めるようにします。<code>sudo chown -R 1000:1000 /srv/thirtyfile</code> の 1000 を、そのユーザーの番号に置き換えてください。</li>
           <li>所有者を変更できないネットワーク共有上のフォルダーを使っている場合。ログに <em>Can't give the folder … to user</em> と表示されます。<code>THIRTYFILE_RUN_AS</code> に、その共有のファイルを所有するユーザーとグループ、たとえば <code>1026:100</code> を指定してください。</li>
         </ul>
+        <h2 id="protocols">SFTP や FTP に接続できない</h2>
+        <ul>
+          <li><strong>停止中</strong>：<strong>コントロールパネル › 全般 › アプリとプロトコル</strong>に、SFTP と FTP が待ち受けているか、できない理由（使用中のポート、読めない証明書）が表示されます。Web サイトは使えたままで、開始できなかった待ち受けは再試行します。そこでアクセスがオンか、Docker でポートを公開したかを確認してください。</li>
+          <li><strong>「ホストキーが変わった」</strong>：SFTP のホストキーはデータフォルダーの <code>sftp_host_ed25519</code> で、指紋はコントロールパネルに表示されます。このファイルなしでデータフォルダーを復元・移動すると新しいキーが作られ、プログラムが警告します。ファイルを戻すか、新しい指紋をコントロールパネルと比べてから受け入れてください。</li>
+          <li><strong>FTP にサインインできるが一覧や転送ができない</strong>：転送はパッシブポート（<code>THIRTYFILE_FTP_PASSIVE</code>）を使います。Docker で範囲全体を内外同じ番号で公開し、ルーターで転送し、NAT の内側なら <code>THIRTYFILE_FTP_PASSIVE_HOST</code> に公開名か IPv4 アドレスを設定します。</li>
+          <li><strong>FTP のポート</strong>：<code>THIRTYFILE_FTP_ADDR</code> と公開ポートは一緒に設定します。<code>compose.yaml</code> では両方の行のコメントを外さないと、公開ポートで何も待ち受けません。</li>
+          <li><strong>証明書</strong>：<code>THIRTYFILE_FTP_CERT</code> と <code>THIRTYFILE_FTP_KEY</code> はユーザー 1000 が読める PEM ファイルにします。機器が証明書を拒むときは、接続先の名前に合う証明書が必要です。機器はパッシブモードで明示的 FTPS（AUTH TLS）を使います。</li>
+        </ul>
+
         <h2 id="logs">ログを見る</h2>
         <pre><code>docker logs --tail 100 thirtyfile</code></pre>
         <h2 id="health">稼働状態を確認する</h2>

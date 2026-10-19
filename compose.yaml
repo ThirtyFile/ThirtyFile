@@ -16,7 +16,8 @@ services:
       - "8080:8080"
       # SFTP (also enable access in Control panel > General > Apps and protocols):
       # - "2022:2022"
-      # FTP receive folders (explicit FTPS; also enable in Control panel > General):
+      # FTP receive folders (explicit FTPS; also enable in Control panel > General). Uncomment these together with
+      # THIRTYFILE_FTP_ADDR below: FTP listens on port 21 unless it is set
       # - "2121:2121"
       # - "30000-30009:30000-30009"
     volumes:
@@ -36,6 +37,7 @@ services:
       # THIRTYFILE_TRUST_PROXY: "true"
       # THIRTYFILE_MAX_UPLOAD_MB: "0"
       # THIRTYFILE_SFTP_ADDR: "0.0.0.0:2022"
+      # With the FTP ports above:
       # THIRTYFILE_FTP_ADDR: "0.0.0.0:2121"
       # THIRTYFILE_FTP_PASSIVE: "30000-30009"
       # THIRTYFILE_FTP_PASSIVE_HOST: "ftp.files.example.com"
