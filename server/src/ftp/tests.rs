@@ -335,6 +335,42 @@ async fn ftps_sender_can_send_close_notify_then_close_without_waiting_for_our_re
     env.st.db.close().await;
 }
 
+/// After its 234 reply to AUTH TLS the server speaks only TLS: what the client sends next is never read as a command
+/// and answered in plaintext, which broke the client's handshake now and then (#620). A command sent right after AUTH
+/// TLS, before the reply, is where that showed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn after_auth_tls_nothing_is_answered_in_plaintext() {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let (env, _, _, plain) = fixture(false).await;
+    plain.finish().await;
+    let (server, _) = tls_listener(&env).await;
+    let address = env.st.part::<Memory>().status.read().address.clone();
+    for _ in 0..20 {
+        let mut control = BufReader::new(tokio::net::TcpStream::connect(&address).await.unwrap());
+        let mut line = String::new();
+        control.read_line(&mut line).await.unwrap();
+        assert!(line.starts_with("220"), "{line}");
+        control
+            .get_mut()
+            .write_all(
+                b"AUTH TLS
+NOOP
+",
+            )
+            .await
+            .unwrap();
+        line.clear();
+        control.read_line(&mut line).await.unwrap();
+        assert!(line.starts_with("234"), "{line}");
+        // The server waits for a TLS handshake: no reply to NOOP (the connection ends, or nothing comes)
+        line.clear();
+        let next = tokio::time::timeout(Duration::from_millis(300), control.read_line(&mut line)).await;
+        assert!(!matches!(next, Ok(Ok(n)) if n > 0), "answered in plaintext after AUTH TLS: {line:?}");
+    }
+    server.finish().await;
+    env.st.db.close().await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn ftps_truncated_uploads_refuse_success_and_preserve_previous_bytes() {
     use tokio::io::AsyncWriteExt;
