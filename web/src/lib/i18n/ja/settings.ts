@@ -372,7 +372,7 @@ export default {
   "Show private key": "秘密キーを表示",
   "Search inside files": "ファイル内検索",
   "Find files by what is inside them": "中身でファイルを探す",
-  "Reads the text of plain text, Markdown, CSV and code files, web pages, and Word, Excel, PowerPoint and OpenDocument files, so searches can find words inside them. The text is kept on this server's disk, and people find only what they can open. PDFs and pictures are not read yet.": "テキスト、Markdown、CSV、コードのファイル、Web ページ、Word・Excel・PowerPoint・OpenDocument ファイルの文字を読み取り、ファイルの中の言葉を検索で見つけられるようにします。文字はこのサーバーのディスクに保存され、各自が開けるファイルだけが見つかります。PDF と画像はまだ読み取りません。",
+  "Reads the text of plain text, Markdown, CSV and code files, web pages, PDFs, and Word, Excel, PowerPoint and OpenDocument files, so searches can find words inside them. The text is kept on this server's disk, and people find only what they can open. Pictures and scanned pages are not read.": "テキスト、Markdown、CSV、コードのファイル、Web ページ、PDF、Word・Excel・PowerPoint・OpenDocument ファイルの文字を読み取り、ファイルの中の言葉を検索で見つけられるようにします。文字はこのサーバーのディスクに保存され、各自が開けるファイルだけが見つかります。画像とスキャンしたページは読み取りません。",
   "Files are read in the background, one at a time, so the server stays responsive. The first reading of many files takes a while.": "ファイルはバックグラウンドで 1 つずつ読み取るため、サーバーの動作は重くなりません。ファイルが多いと最初の読み取りには時間がかかります。",
   "Pause reading": "読み取りを一時停止",
   "Index again": "インデックスを作り直す",

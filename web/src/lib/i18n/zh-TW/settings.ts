@@ -372,7 +372,7 @@ export default {
   "Show private key": "顯示私鑰",
   "Search inside files": "搜尋檔案內容",
   "Find files by what is inside them": "依檔案內容尋找檔案",
-  "Reads the text of plain text, Markdown, CSV and code files, web pages, and Word, Excel, PowerPoint and OpenDocument files, so searches can find words inside them. The text is kept on this server's disk, and people find only what they can open. PDFs and pictures are not read yet.": "讀取純文字、Markdown、CSV 和程式碼檔案、網頁，以及 Word、Excel、PowerPoint 和 OpenDocument 檔案的文字，讓搜尋能找到檔案裡的字詞。文字會存放在這台伺服器的磁碟上，每個人只會找到自己能開啟的檔案。目前還不會讀取 PDF 和圖片。",
+  "Reads the text of plain text, Markdown, CSV and code files, web pages, PDFs, and Word, Excel, PowerPoint and OpenDocument files, so searches can find words inside them. The text is kept on this server's disk, and people find only what they can open. Pictures and scanned pages are not read.": "讀取純文字、Markdown、CSV 和程式碼檔案、網頁、PDF，以及 Word、Excel、PowerPoint 和 OpenDocument 檔案的文字，讓搜尋能找到檔案裡的字詞。文字會存放在這台伺服器的磁碟上，每個人只會找到自己能開啟的檔案。圖片和掃描的頁面不會讀取。",
   "Files are read in the background, one at a time, so the server stays responsive. The first reading of many files takes a while.": "檔案會在背景一個一個讀取，伺服器仍能保持流暢。檔案很多時，第一次讀取需要一些時間。",
   "Pause reading": "暫停讀取",
   "Index again": "重新建立索引",

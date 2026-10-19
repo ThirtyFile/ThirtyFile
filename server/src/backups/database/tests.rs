@@ -289,9 +289,10 @@ async fn a_copy_is_made_when_one_is_due_and_the_next_time_is_set() {
     configure(&env, "nas").await;
     change_status(&env.st, |s| s.next_run_at = Some(now() - 1)).await.unwrap();
     tick(&env.st, now()).await.unwrap();
-    // Made in the background
+    // Made in the background: the next time is set once the copy is done, a moment after it is recorded
     for _ in 0..200 {
-        if !env.st.part::<Memory>().running.load(Ordering::Acquire) && status(&mut env.st.db.acquire().await.unwrap()).await.unwrap().last_success_at.is_some() {
+        let s = status(&mut env.st.db.acquire().await.unwrap()).await.unwrap();
+        if !env.st.part::<Memory>().running.load(Ordering::Acquire) && s.last_success_at.is_some() && s.next_run_at.is_some_and(|n| n > now()) {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;

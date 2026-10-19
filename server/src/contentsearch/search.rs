@@ -31,6 +31,9 @@ fn quoted(s: &str) -> String {
 /// several words, a file matches when it holds all of them, wherever they are; a word of less than three characters
 /// then takes the whole term to be one phrase instead.
 pub fn match_expr(term: &str) -> Option<String> {
+    // As the text of files is kept
+    let term = super::extract::compatible(term);
+    let term = term.as_str();
     let words: Vec<&str> = term.split_whitespace().take(MAX_WORDS).collect();
     if !words.is_empty() && words.iter().all(|w| w.chars().count() >= 3) {
         return Some(words.iter().map(|w| quoted(w)).collect::<Vec<_>>().join(" AND "));
