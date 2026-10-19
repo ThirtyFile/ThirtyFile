@@ -352,7 +352,7 @@ dependencies = [
  "lru",
  "percent-encoding",
  "regex-lite",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "tracing",
  "url",
 ]
@@ -374,7 +374,7 @@ dependencies = [
  "hmac",
  "http",
  "percent-encoding",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "time",
  "tracing",
 ]
@@ -407,7 +407,7 @@ dependencies = [
  "md-5 0.11.0",
  "pin-project-lite",
  "sha1",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "tracing",
 ]
 
@@ -708,7 +708,7 @@ checksum = "144e573728da132683b9488acd528274c790e07fc06ff81ee29f9d8f8b1041e0"
 dependencies = [
  "blowfish",
  "pbkdf2",
- "sha2 0.11.0",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -1441,7 +1441,7 @@ dependencies = [
  "ed25519",
  "rand_core",
  "serde",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "signature",
  "subtle",
  "zeroize",
@@ -2835,7 +2835,7 @@ dependencies = [
  "elliptic-curve",
  "primefield",
  "primeorder",
- "sha2 0.11.0",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -2849,7 +2849,7 @@ dependencies = [
  "fiat-crypto",
  "primefield",
  "primeorder",
- "sha2 0.11.0",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -2863,7 +2863,7 @@ dependencies = [
  "elliptic-curve",
  "primefield",
  "primeorder",
- "sha2 0.11.0",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -2879,7 +2879,7 @@ dependencies = [
  "futures",
  "log",
  "rand",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "thiserror",
  "tokio",
  "windows",
@@ -3035,7 +3035,7 @@ dependencies = [
  "pbkdf2",
  "rand_core",
  "scrypt",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "spki",
 ]
 
@@ -3428,7 +3428,7 @@ dependencies = [
  "pkcs1",
  "pkcs8",
  "rand_core",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "signature",
  "spki",
  "zeroize",
@@ -3491,7 +3491,7 @@ dependencies = [
  "scrypt",
  "sec1",
  "sha1",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "sha3 0.12.0",
  "signature",
  "spki",
@@ -3580,7 +3580,7 @@ version = "8.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d84e8ba78bd384263e5922f084cbe1b081c3b7e69add59c8fb097b879ba968a"
 dependencies = [
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "walkdir",
 ]
 
@@ -3738,7 +3738,7 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "sha1",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "smallvec",
  "std-next",
  "subtle",
@@ -3806,7 +3806,7 @@ dependencies = [
  "jiff",
  "nom 8.0.0",
  "serde",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "smallvec",
  "std-next",
  "thiserror",
@@ -3856,7 +3856,7 @@ dependencies = [
  "cfg-if",
  "pbkdf2",
  "salsa20",
- "sha2 0.11.0",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -3944,9 +3944,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.151"
+version = "1.0.154"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
+checksum = "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6"
 dependencies = [
  "itoa",
  "memchr",
@@ -4012,9 +4012,9 @@ dependencies = [
 
 [[package]]
 name = "sha2"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "446ba717509524cb3f22f17ecc096f10f4822d76ab5c0b9822c5f9c284e825f4"
+checksum = "47d7069beb7d6ac7b9acd1039986e73443f24234f41074da099d6f994ac9ad19"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.3.1",
@@ -4299,7 +4299,7 @@ dependencies = [
  "percent-encoding",
  "serde",
  "sha1",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "sqlx-core",
  "thiserror",
  "tracing",
@@ -4331,7 +4331,7 @@ dependencies = [
  "rand",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "smallvec",
  "sqlx-core",
  "stringprep",
@@ -4416,7 +4416,7 @@ dependencies = [
  "rsa",
  "sec1",
  "sha1",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "signature",
  "ssh-cipher",
  "ssh-encoding",
@@ -4464,9 +4464,9 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "suppaftp"
-version = "12.1.1"
+version = "12.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b161d71217da0cc91bd09c8f98ac5ad2a5e5b2735c6dfe1c6cb08b4471612f35"
+checksum = "2b58fcf921745cca6f0127c9f822069947da8c6dbeff52e9004750bcc448171f"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4584,7 +4584,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha1",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "sqlx",
  "subtle",
  "suppaftp",
@@ -4676,9 +4676,9 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
 name = "tokio"
-version = "1.53.2"
+version = "1.53.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e95f91fcc7a621e8b030f6aa23c71fe9838ae2fb4d8118b75602a328f5144044"
+checksum = "ce3335fa71841cda333a58d7615b03901380ecf09d59b3296d21f8bbac0dde4e"
 dependencies = [
  "bytes",
  "libc",
