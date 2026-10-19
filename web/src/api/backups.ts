@@ -9,6 +9,8 @@ import type {
   DatabaseBackup,
   DatabaseBackupSettings,
   DatabaseCopy,
+  AccessReview,
+  ReviewState,
   RestorePreview,
   RestoreRequest,
   SnapshotItem,
@@ -20,6 +22,9 @@ export const backupJobActive = (j: BackupJob) => j.state === "queued" || j.state
 
 /** Backups and copies of storage locations, and restoring from them (administrators) */
 export const backupsApi = {
+  accessReview: (signal?: AbortSignal) => get<AccessReview>("/admin/access-review", signal),
+  setReviewReminder: (everyDays: number) => request<ReviewState>("PUT", "/admin/access-review/reminder", { every_days: everyDays }),
+  markReviewed: () => post<ReviewState>("/admin/access-review/reviewed"),
   databaseBackup: (signal?: AbortSignal) => get<DatabaseBackup>("/admin/backups/database", signal),
   /** `passphrase`: a new one; the one saved stays when left out */
   saveDatabaseBackup: (settings: DatabaseBackupSettings & { passphrase?: string }) => request<DatabaseBackup>("PUT", "/admin/backups/database", settings),

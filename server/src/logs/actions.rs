@@ -56,6 +56,7 @@ pub const ACTIONS: &[&str] = &[
     "backup_policy_update",
     "backup_run",
     "backup_alert",
+    "access_review",
     "backup_import",
     "replica_create",
     "replica_update",

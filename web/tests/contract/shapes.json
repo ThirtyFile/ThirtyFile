@@ -407,6 +407,10 @@
         "email": false,
         "in_app": false
       },
+      "access_review": {
+        "email": false,
+        "in_app": false
+      },
       "app_password": {
         "email": false,
         "in_app": false

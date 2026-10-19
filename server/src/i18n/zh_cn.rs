@@ -46,6 +46,8 @@ pub(super) const TEXTS: &[(Text, &str)] = &[
     (LinkUploadSubject, "有人通过链接将“{file}”上传到了“{name}”"),
     (LinkUploadBody, "有人通过你创建的可接收文件的链接，将“{file}”上传到了“{name}”。\n"),
     // New app password
+    (AccessReviewSubject, "访问权限该审查了"),
+    (AccessReviewBody, "请在控制面板 › 访问权限审查中检查谁能访问哪些内容，然后标记为已审查。当前设置每 {days} 天审查一次。\n"),
     (AppPasswordSubject, "你的账号创建了应用密码“{name}”"),
     (AppPasswordBody, "你的账号刚刚创建了应用密码“{name}”（{access}），来源地址 {ip}。\n\n如果不是你创建的，请在账号菜单的“应用密码”中移除它，并修改你的密码。\n"),
     (AppPasswordReadOnly, "只能读取文件"),

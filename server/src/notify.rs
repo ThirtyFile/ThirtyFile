@@ -39,7 +39,7 @@ use crate::{
     util::{format_bytes, now},
 };
 
-pub const KINDS: [&str; 8] = ["shared", "space_full", "access_expiring", "app_password", "sign_in_method", "link_upload", "backup", "replica"];
+pub const KINDS: [&str; 9] = ["shared", "space_full", "access_expiring", "app_password", "sign_in_method", "link_upload", "backup", "replica", "access_review"];
 /// Files through one link within this long are told in one notification
 const LINK_UPLOAD_BATCH: i64 = 3600;
 /// A space is almost full from this share of its size (percent)…
@@ -464,6 +464,7 @@ pub fn render(n: &Notice, lang: Lang, tz_offset: i64, site: &str, base_url: &str
         "link_upload" => link_upload_text(d, &name, lang),
         "app_password" => app_password_text(d, lang),
         "sign_in_method" => sign_in_method_text(d, lang),
+        "access_review" => access_review_text(d, lang),
         _ => expiring_text(&name, &role, &ends.unwrap_or_default(), lang),
     };
     if let (Some(id), false) = (&n.node_id, base_url.is_empty()) {
@@ -548,6 +549,12 @@ fn app_password_text(d: &Value, lang: Lang) -> (String, String) {
     let access = tr(lang, if read_only { Text::AppPasswordReadOnly } else { Text::AppPasswordReadWrite }, &[]);
     let vars = [("name", d["name"].as_str().unwrap_or_default()), ("access", &access), ("ip", d["ip"].as_str().unwrap_or_default())];
     (tr(lang, Text::AppPasswordSubject, &vars), tr(lang, Text::AppPasswordBody, &vars))
+}
+
+/// An access review is due (access_review.rs)
+fn access_review_text(d: &Value, lang: Lang) -> (String, String) {
+    let days = d["every_days"].as_i64().unwrap_or_default().to_string();
+    (tr(lang, Text::AccessReviewSubject, &[]), tr(lang, Text::AccessReviewBody, &[("days", &days)]))
 }
 
 /// A sign-in method was linked to the account

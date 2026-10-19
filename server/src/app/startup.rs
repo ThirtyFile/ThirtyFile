@@ -199,6 +199,7 @@ pub async fn start(cfg: Settings, storage: PathBuf, db: sqlx::SqlitePool) -> Res
     usage::sample::spawn(state.clone());
     moves::spawn_runner(state.clone());
     backups::spawn_runner(state.clone());
+    crate::access_review::spawn_reminder(state.clone());
     replicas::spawn_runner(state.clone());
     personal::spawn_retry(state.clone());
     folders::spawn_scanner(state.clone());
