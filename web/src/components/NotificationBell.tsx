@@ -7,6 +7,7 @@ import {
   CalendarClockIcon,
   CheckCheckIcon,
   CopyCheckIcon,
+  ShieldCheckIcon,
   HardDriveIcon,
   InboxIcon,
   KeySquareIcon,
@@ -33,6 +34,7 @@ const ICON = {
   link_upload: InboxIcon,
   backup: ArchiveRestoreIcon,
   replica: CopyCheckIcon,
+  access_review: ShieldCheckIcon,
 };
 
 /** How often the bell asks for new notifications */

@@ -46,6 +46,8 @@ pub(super) const TEXTS: &[(Text, &str)] = &[
     (LinkUploadSubject, "有人透過連結把「{file}」傳到了「{name}」"),
     (LinkUploadBody, "有人透過你建立的收件連結，把「{file}」上傳到「{name}」。\n"),
     // New app password
+    (AccessReviewSubject, "存取權該審查了"),
+    (AccessReviewBody, "請在控制台 › 存取權審查中檢查誰能存取哪些內容，然後標記為已審查。目前設定每 {days} 天審查一次。\n"),
     (AppPasswordSubject, "你的帳號建立了應用程式密碼「{name}」"),
     (
         AppPasswordBody,

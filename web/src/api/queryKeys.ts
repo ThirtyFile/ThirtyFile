@@ -104,6 +104,7 @@ export const keys = {
   moves: () => ["moves"],
   backups: () => ["backups"],
   databaseBackup: () => ["database-backup"],
+  accessReview: () => ["access-review"],
   databaseCopies: () => ["database-backup", "copies"],
   copyPreview: (source: string, dest: string) => ["copy-preview", source, dest],
   backupNextRuns: (schedule: string, tz: string) => ["backup-next-runs", schedule, tz],

@@ -427,6 +427,90 @@ export interface BackupSet {
 /** When a policy makes snapshots on a schedule: every N minutes, daily at a time, or on some days of the week */
 export type BackupSchedule = { every: number } | { daily: string } | { weekly: string; days: number[] };
 
+// ───────────── Access review (Control panel › Access review) ─────────────
+
+export interface ReviewPrincipal {
+  kind: PrincipalType;
+  id: number;
+  name: string;
+  /** A guest, or a group with a guest in it */
+  guest: boolean;
+}
+
+export interface ReviewGrant {
+  principal: ReviewPrincipal;
+  role: Role;
+  expires_at: number | null;
+  granted_at: number;
+}
+
+/** Where something is; in a personal space only whose it is (`space` is its owner), never its name or path */
+export interface ReviewPlace {
+  space_id: string;
+  space: string;
+  space_kind: DriveKind;
+  node_id: string | null;
+  path: string[] | null;
+}
+
+export interface AccessReview {
+  generated_at: number;
+  spaces: { id: string; name: string; kind: DriveKind; members: ReviewGrant[]; folders: { place: ReviewPlace; restricted: boolean; grants: ReviewGrant[] }[] }[];
+  personal: { owner: string; items: number; grants: number; links: number }[];
+  expiring: { place: ReviewPlace; grant: ReviewGrant }[];
+  people: {
+    id: number;
+    username: string;
+    display_name: string;
+    guest: boolean;
+    admin: boolean;
+    disabled: boolean;
+    groups: string[];
+    reach: { place: ReviewPlace; role: Role; via: "direct" | "group" | "everyone"; group: string | null; expires_at: number | null }[];
+    app_passwords: { name: string; scope: "read" | "write"; created_at: number; expires_at: number | null; last_used_at: number | null }[];
+    ssh_keys: { name: string; created_at: number; last_used_at: number | null }[];
+  }[];
+  links: {
+    place: ReviewPlace;
+    creator: string;
+    created_at: number;
+    expires_at: number | null;
+    password: boolean;
+    allow_upload: boolean;
+    allow_download: boolean;
+    downloads: number;
+    max_downloads: number | null;
+    views: number;
+    last_access: number | null;
+  }[];
+  buckets: {
+    name: string;
+    place: ReviewPlace;
+    creator: string;
+    enabled: boolean;
+    keys: { description: string; writable: boolean; enabled: boolean; expires_at: number | null; last_used_at: number | null }[];
+  }[];
+  receive_folders: {
+    name: string;
+    username: string;
+    place: ReviewPlace;
+    creator: string;
+    enabled: boolean;
+    allow_list: boolean;
+    allow_read: boolean;
+    expires_at: number | null;
+    last_used_at: number | null;
+  }[];
+  review: ReviewState;
+}
+
+export interface ReviewState {
+  every_days: number;
+  last_reviewed_at: number | null;
+  last_reviewed_by: string | null;
+  due_at: number | null;
+}
+
 /** Copies of the database on a schedule (Control panel › Backups › Database backups) */
 export interface DatabaseBackupSettings {
   enabled: boolean;
@@ -858,7 +942,7 @@ export interface SsoProvider {
   label: string;
 }
 
-export type NotificationKind = "shared" | "space_full" | "access_expiring" | "app_password" | "sign_in_method" | "link_upload" | "backup" | "replica";
+export type NotificationKind = "shared" | "space_full" | "access_expiring" | "app_password" | "sign_in_method" | "link_upload" | "backup" | "replica" | "access_review";
 
 /** What a notification shows; names are copied when it was made */
 export interface NotificationData {
@@ -866,6 +950,8 @@ export interface NotificationData {
   name?: string;
   /** A backup notice about the database backups (`name` is then "Database") */
   database?: boolean;
+  /** An access review notice: how often a review is asked for */
+  every_days?: number;
   /** Whether a whole space was shared ("space"), or a folder or file */
   item?: "space" | "folder" | "file";
   drive_kind?: DriveKind;

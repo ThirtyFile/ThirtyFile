@@ -58,6 +58,11 @@ pub(super) const TEXTS: &[(Text, &str)] = &[
     (LinkUploadSubject, "リンク経由で「{file}」が「{name}」に届きました"),
     (LinkUploadBody, "あなたが作成したファイルを受け付けるリンクから、「{file}」が「{name}」にアップロードされました。\n"),
     // New app password
+    (AccessReviewSubject, "アクセス権の見直しの時期です"),
+    (
+        AccessReviewBody,
+        "コントロールパネル › アクセス権の見直しで、誰が何にアクセスできるかを確認し、見直し済みにしてください。見直しは {days} 日ごとに求められます。\n",
+    ),
     (AppPasswordSubject, "アカウントにアプリパスワード「{name}」が作成されました"),
     (
         AppPasswordBody,

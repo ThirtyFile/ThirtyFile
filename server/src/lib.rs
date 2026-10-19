@@ -7,6 +7,7 @@
 #![warn(clippy::allow_attributes_without_reason)]
 
 mod access;
+mod access_review;
 mod admin;
 pub mod app;
 mod archive;

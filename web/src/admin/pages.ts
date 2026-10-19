@@ -10,6 +10,7 @@ export const ADMIN_PAGES: Record<ControlPanelKey, () => Promise<ComponentType>> 
   s3: () => import("@/admin/users/S3BucketsPage").then((m) => m.S3BucketsPage),
   ftp: () => import("@/admin/users/FtpFoldersPage").then((m) => m.FtpFoldersPage),
   shares: () => import("@/admin/users/AdminSharesPage").then((m) => m.AdminSharesPage),
+  access: () => import("@/admin/users/AccessReviewPage").then((m) => m.AccessReviewPage),
   sso: () => import("@/admin/users/SsoPage").then((m) => m.SsoPage),
   drives: () => import("@/admin/storage/AdminDrivesPage").then((m) => m.AdminDrivesPage),
   storage: () => import("@/admin/storage/StorageSettingsPage").then((m) => m.StorageSettingsPage),

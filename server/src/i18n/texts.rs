@@ -93,6 +93,8 @@ texts! {
     LinkUploadBody = "Someone uploaded “{file}” to “{name}” through a link you made that accepts files.\n",
 
     // ───── New app password ─────
+    AccessReviewSubject = "Access is due for review",
+    AccessReviewBody = "Go through who can reach what under Control panel › Access review, then mark it reviewed. A review is asked for every {days} days.\n",
     AppPasswordSubject = "An app password “{name}” was created for your account",
     /// `access`: one of the two below
     AppPasswordBody = "The app password “{name}” ({access}) was just created for your account, from {ip}.\n\nIf you didn't create it, remove it under App passwords in the account menu and change your password.\n",

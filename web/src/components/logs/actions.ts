@@ -5,6 +5,7 @@ import { t } from "@/lib/i18n";
 
 const ACTION_LABEL: Record<string, string> = {
   upload: t("Upload"),
+  access_review: t("Access review"),
   create_folder: t("Create folder"),
   rename: t("Rename"),
   move: t("Move"),
@@ -73,7 +74,7 @@ export const ACTION_GROUPS: { label: string; actions: string[] }[] = [
   { label: t("Files"), actions: ["upload", "create_folder", "edit", "rename", "move", "copy", "compress", "extract", "trash", "restore", "delete", "empty_trash"] },
   { label: t("Sharing and permissions"), actions: ["share_create", "share_update", "share_delete", "grant", "revoke", "restriction"] },
   { label: t("Spaces"), actions: ["drive_create", "drive_update", "drive_delete", "scan", "move_start", "move_done", "move_failed", "move_cancel"] },
-  { label: t("Users and groups"), actions: ["user_create", "user_update", "user_delete", "group_create", "group_update", "group_delete"] },
+  { label: t("Users and groups"), actions: ["user_create", "user_update", "user_delete", "group_create", "group_update", "group_delete", "access_review"] },
   {
     label: t("System"),
     actions: ["settings", "storage_create", "storage_update", "storage_delete", "storage_default", "storage_cleanup", "log_archive", "log_archive_delete"],

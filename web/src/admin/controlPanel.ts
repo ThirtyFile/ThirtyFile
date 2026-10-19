@@ -11,6 +11,7 @@ import {
   MailIcon,
   PaletteIcon,
   PieChartIcon,
+  ShieldCheckIcon,
   TruckIcon,
   SlidersHorizontalIcon,
   UsersIcon,
@@ -24,6 +25,7 @@ export type ControlPanelKey =
   | "users"
   | "groups"
   | "shares"
+  | "access"
   | "s3"
   | "ftp"
   | "drives"
@@ -103,6 +105,16 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
     tone: "bg-violet-500/12 text-violet-600 dark:text-violet-300",
     category: "users",
     keywords: "成員 授權 group member access", // i18n-ignore: bilingual search keywords
+  },
+  {
+    key: "access",
+    to: adminPath("access"),
+    title: t("Access review"),
+    desc: t("Who can reach each space and folder, people and their credentials, links, S3 keys and FTP devices, on one page"),
+    icon: ShieldCheckIcon,
+    tone: "bg-indigo-500/12 text-indigo-700 dark:text-indigo-300",
+    category: "users",
+    keywords: "存取權 審查 稽核 權限 訪客 access review audit permissions guests", // i18n-ignore: bilingual search keywords
   },
   {
     key: "shares",
