@@ -427,6 +427,63 @@ export interface BackupSet {
 /** When a policy makes snapshots on a schedule: every N minutes, daily at a time, or on some days of the week */
 export type BackupSchedule = { every: number } | { daily: string } | { weekly: string; days: number[] };
 
+// ───────────── Administrator alerts (Control panel › Administrator alerts) ─────────────
+
+export interface AlertSettings {
+  /** Email to the administrators with an address */
+  email: boolean;
+  /** A webhook to post to as well; blank: none */
+  webhook_url: string;
+  /** Allow a webhook on the private network or this computer */
+  allow_private: boolean;
+  usage: boolean;
+  offline: boolean;
+  data_disk: boolean;
+  sign_ins: boolean;
+  backups: boolean;
+  certificate: boolean;
+  /** Failed sign-ins passing this many in `sign_in_minutes`, from one address or for one account */
+  sign_in_failures: number;
+  sign_in_minutes: number;
+  /** Minutes before a problem that comes back is told again */
+  cooldown_minutes: number;
+}
+
+/** What an alert holds: names of locations, addresses, accounts and numbers, never an item's name */
+export interface AlertParams {
+  location?: string;
+  percent?: number;
+  ip?: string;
+  username?: string;
+  count?: number;
+  minutes?: number;
+  days?: number;
+  name?: string;
+  database?: boolean;
+  error?: string;
+}
+
+export interface AlertsInfo extends AlertSettings {
+  has_secret: boolean;
+  email_ready: boolean;
+  /** What is wrong now */
+  active: { kind: string; params: AlertParams; since: number; announced: boolean }[];
+  /** The latest messages */
+  recent: {
+    id: number;
+    channel: "email" | "webhook";
+    recipient: string | null;
+    state: "firing" | "resolved";
+    kind: string;
+    params: AlertParams;
+    created_at: number;
+    attempts: number;
+    done_at: number | null;
+    failed: boolean;
+    error: string | null;
+  }[];
+}
+
 // ───────────── Access review (Control panel › Access review) ─────────────
 
 export interface ReviewPrincipal {

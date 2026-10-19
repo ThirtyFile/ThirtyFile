@@ -78,6 +78,8 @@ async-trait = "0.1"
 # the version that libunftp release needs: both are exact, and change together.
 libunftp = { version = "=0.23.1", path = "vendor/libunftp", default-features = false, features = ["aws_lc_rs", "experimental"] }
 unftp-core = "=0.1.0"
+# Reading when a certificate ends (already built for unftp-core)
+x509-parser = { version = "0.18", default-features = false }
 md-5 = "0.11"
 http-body-util = "0.1"
 

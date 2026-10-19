@@ -11,6 +11,8 @@ import type {
   DatabaseCopy,
   AccessReview,
   ReviewState,
+  AlertSettings,
+  AlertsInfo,
   RestorePreview,
   RestoreRequest,
   SnapshotItem,
@@ -25,6 +27,10 @@ export const backupsApi = {
   accessReview: (signal?: AbortSignal) => get<AccessReview>("/admin/access-review", signal),
   setReviewReminder: (everyDays: number) => request<ReviewState>("PUT", "/admin/access-review/reminder", { every_days: everyDays }),
   markReviewed: () => post<ReviewState>("/admin/access-review/reviewed"),
+  alerts: (signal?: AbortSignal) => get<AlertsInfo>("/admin/alerts", signal),
+  /** `secret`: a new shared secret for the webhook; the one saved stays when left out */
+  saveAlerts: (settings: AlertSettings & { secret?: string }) => request<AlertsInfo>("PUT", "/admin/alerts", settings),
+  testAlert: (channel: "email" | "webhook") => post<{ ok: boolean }>("/admin/alerts/test", { channel }),
   databaseBackup: (signal?: AbortSignal) => get<DatabaseBackup>("/admin/backups/database", signal),
   /** `passphrase`: a new one; the one saved stays when left out */
   saveDatabaseBackup: (settings: DatabaseBackupSettings & { passphrase?: string }) => request<DatabaseBackup>("PUT", "/admin/backups/database", settings),

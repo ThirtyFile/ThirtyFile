@@ -3,6 +3,7 @@ import {
   ActivityIcon,
   ArchiveIcon,
   ArchiveRestoreIcon,
+  BellRingIcon,
   CopyCheckIcon,
   DatabaseIcon,
   HardDriveIcon,
@@ -38,6 +39,7 @@ export type ControlPanelKey =
   | "branding"
   | "sso"
   | "email"
+  | "alerts"
   | "activity"
   | "logs";
 
@@ -218,6 +220,16 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
     category: "users",
     keywords:
       "sso 單一登入 三方登入 第三方 oauth oidc microsoft entra azure ad office 365 google workspace github openid keycloak authentik 登入 帳號 連結 single sign-on third-party sign in login account link", // i18n-ignore: bilingual search keywords
+  },
+  {
+    key: "alerts",
+    to: adminPath("alerts"),
+    title: t("Administrator alerts"),
+    desc: t("Email and webhook messages when a storage location fails, a disk fills up, sign-ins fail or a certificate ends"),
+    icon: BellRingIcon,
+    tone: "bg-red-500/12 text-red-700 dark:text-red-300",
+    category: "system",
+    keywords: "警示 通知 警報 告警 webhook 郵件 磁碟 離線 登入失敗 憑證 alerts email webhook disk offline sign-in certificate monitoring", // i18n-ignore: bilingual search keywords
   },
   {
     key: "email",

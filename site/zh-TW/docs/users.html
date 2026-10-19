@@ -84,6 +84,7 @@
             <li><a href="#groups">群組</a></li>
             <li><a href="#spaces">空間</a></li>
             <li><a href="#email">通知電子郵件</a></li>
+            <li><a href="#alerts">管理員警示</a></li>
             <li><a href="#privacy">管理員能看到什麼</a></li>
             <li><a href="#password">忘記密碼</a></li>
             <li><a href="#guests">訪客帳號</a></li>
@@ -150,6 +151,18 @@
           <li>開啟<strong>以電子郵件寄送通知</strong>並<strong>儲存</strong>。<strong>寄出測試郵件</strong>會使用頁面上的設定測試，無論是否已儲存，並說明失敗原因。</li>
         </ul>
         <p>郵件寄到使用者在通知設定填寫的位址。單一登入帳號在郵件設定完成後的首次登入，會採用提供者已驗證的電子郵件信箱。郵件連結使用<strong>控制台 › 一般</strong>中的<strong>網站網址</strong>；未設定時郵件不含連結。郵件傳送失敗會記錄在伺服器紀錄。</p>
+        <h2 id="alerts">管理員警示</h2>
+        <p>小型團隊不會一直盯著儀表板。<strong>控制台 › 管理員警示</strong>會把需要管理員處理的事，以電子郵件寄給每位有信箱的管理員，也可以另外送到 webhook：</p>
+        <ul>
+          <li>儲存位置超過用量門檻或發生故障（門檻使用<a href="storage.html#usage">儲存空間用量</a>的設定），以及無法連線的儲存位置；</li>
+          <li>資料資料夾所在的磁碟快滿了；</li>
+          <li>登入失敗：同一位址或同一帳號超過上限（預設 10 分鐘內 10 次）。只會列出存在的帳號；</li>
+          <li>失敗或逾期的備份或鏡像（App 內也會通知）；</li>
+          <li>14 天內到期的 FTPS 憑證。</li>
+        </ul>
+        <p>每一項都可以關閉。每個問題在開始時通知一次，結束時再通知一次；時好時壞的問題會等冷卻時間（預設 30 分鐘）過後才再通知。訊息只包含儲存位置、位址、帳號的名稱與數字，絕不包含檔案或資料夾的名稱。郵件使用<strong>控制台 › 電子郵件</strong>的伺服器，並以各管理員的語言撰寫。</p>
+        <p><strong>Webhook</strong> 會收到 JSON 內容（<code>event</code>、<code>state</code>（<code>firing</code> 或 <code>resolved</code>）、<code>kind</code>、<code>key</code>、<code>title</code>、<code>params</code>、<code>site</code>、<code>at</code>），並附上簽章供接收端驗證：標頭 <code>X-ThirtyFile-Timestamp</code> 與 <code>X-ThirtyFile-Signature: sha256=…</code>，內容是以你設定的共用密鑰，對「時間戳記、句點、內容」計算的 HMAC-SHA256。請拒絕時間戳記過舊的訊息。網際網路上的 webhook 必須使用 https；位於私人網路或這台電腦上的 webhook 需要勾選<strong>允許 webhook 位於私人網路</strong>。無法送達的訊息會在 1 分鐘、5 分鐘、30 分鐘、2 小時、6 小時後重試，之後放棄，頁面會顯示每則訊息的結果。按<strong>傳送測試</strong>可立即測試郵件與 webhook。</p>
+
         <h2 id="privacy">管理員能看到什麼</h2>
         <p>管理員管理所有團隊和公司空間，包括資源回收筒。不能打開個人空間或檢視內容，只能看到用量；但<a href="#delete">刪除帳號</a>或<a href="#personal">移除「我的檔案」</a>時，可將檔案移到有權開啟的空間。也可<a href="storage.html#per-space">將「我的檔案」搬移到其他儲存位置</a>：搬移失敗清單不顯示檔案名稱。</p>
         <p>管理員可從<strong>控制台 › 所有分享連結</strong>檢視每個公開連結，以撤銷不應公開的分享。其他人個人空間的連結只顯示建立者、選項和使用次數，不顯示位址或分享內容；管理員只能刪除，不能修改。相應存取紀錄也會省略同樣資訊。</p>

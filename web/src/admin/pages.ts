@@ -16,6 +16,7 @@ export const ADMIN_PAGES: Record<ControlPanelKey, () => Promise<ComponentType>> 
   storage: () => import("@/admin/storage/StorageSettingsPage").then((m) => m.StorageSettingsPage),
   moves: () => import("@/admin/storage/MovesPage").then((m) => m.MovesPage),
   backups: () => import("@/admin/storage/BackupsPage").then((m) => m.BackupsPage),
+  alerts: () => import("@/admin/system/AlertsPage").then((m) => m.AlertsPage),
   replicas: () => import("@/admin/storage/ReplicasPage").then((m) => m.ReplicasPage),
   usage: () => import("@/admin/storage/UsageSettingsPage").then((m) => m.UsageSettingsPage),
   general: () => import("@/admin/system/GeneralSettingsPage").then((m) => m.GeneralSettingsPage),

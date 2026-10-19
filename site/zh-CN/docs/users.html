@@ -84,6 +84,7 @@
             <li><a href="#groups">用户组</a></li>
             <li><a href="#spaces">空间</a></li>
             <li><a href="#email">通知邮件</a></li>
+            <li><a href="#alerts">管理员警报</a></li>
             <li><a href="#privacy">管理员能看到什么</a></li>
             <li><a href="#password">忘记密码</a></li>
             <li><a href="#guests">访客账号</a></li>
@@ -149,6 +150,18 @@
           <li>开启<strong>通过电子邮件发送通知</strong>并<strong>保存</strong>。<strong>发送测试邮件</strong>会使用页面上的配置测试，无论是否已保存，并说明失败原因。</li>
         </ul>
         <p>邮件发到用户在通知设置填写的地址。单点登录账号在邮件配置完成后的首次登录，会采用提供商已验证的邮箱。邮件链接使用<strong>控制面板 › 常规</strong>中的<strong>网站地址</strong>；未设置时邮件不含链接。邮件发送失败会记录在服务器日志。</p>
+        <h2 id="alerts">管理员警报</h2>
+        <p>小型团队不会一直盯着仪表板。<strong>控制面板 › 管理员警报</strong>会把需要管理员处理的事，通过电子邮件发给每位有邮箱的管理员，也可以另外发送到 webhook：</p>
+        <ul>
+          <li>存储位置超过用量阈值或发生故障（阈值使用<a href="storage.html#usage">存储用量</a>中的设置），以及无法连接的存储位置；</li>
+          <li>数据文件夹所在的磁盘快满了；</li>
+          <li>登录失败：同一地址或同一账号超过上限（默认 10 分钟内 10 次）。只会列出存在的账号；</li>
+          <li>失败或逾期的备份或镜像（应用内也会通知）；</li>
+          <li>14 天内到期的 FTPS 证书。</li>
+        </ul>
+        <p>每一项都可以关闭。每个问题在开始时通知一次，结束时再通知一次；时好时坏的问题会等冷却时间（默认 30 分钟）过后才再次通知。消息只包含存储位置、地址、账号的名称与数字，绝不包含文件或文件夹的名称。邮件使用<strong>控制面板 › 电子邮件</strong>的服务器，并以各管理员的语言撰写。</p>
+        <p><strong>Webhook</strong> 会收到 JSON 内容（<code>event</code>、<code>state</code>（<code>firing</code> 或 <code>resolved</code>）、<code>kind</code>、<code>key</code>、<code>title</code>、<code>params</code>、<code>site</code>、<code>at</code>），并附上签名供接收端验证：标头 <code>X-ThirtyFile-Timestamp</code> 与 <code>X-ThirtyFile-Signature: sha256=…</code>，内容是以您设置的共享密钥，对“时间戳、句点、内容”计算的 HMAC-SHA256。请拒绝时间戳过旧的消息。互联网上的 webhook 必须使用 https；位于私有网络或这台电脑上的 webhook 需要勾选<strong>允许 webhook 位于私有网络</strong>。无法送达的消息会在 1 分钟、5 分钟、30 分钟、2 小时、6 小时后重试，之后放弃，页面会显示每条消息的结果。点<strong>发送测试</strong>可立即测试邮件与 webhook。</p>
+
         <h2 id="privacy">管理员能看到什么</h2>
         <p>管理员管理所有团队和公司空间，包括回收站。不能打开个人空间或查看内容，只能看到用量；但<a href="#delete">删除账号</a>或<a href="#personal">移除“我的文件”</a>时，可将文件移到有权打开的空间。也可<a href="storage.html#per-space">将“我的文件”迁移到其他存储位置</a>：迁移失败列表不显示文件名称。</p>
         <p>管理员可从<strong>控制面板 › 所有分享链接</strong>查看每个公开链接，以撤销不应公开的分享。其他人个人空间的链接只显示创建者、选项和使用次数，不显示地址或分享内容；管理员只能删除，不能修改。相应访问日志也会省略同样信息。</p>

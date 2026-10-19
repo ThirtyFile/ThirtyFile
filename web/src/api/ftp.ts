@@ -10,6 +10,8 @@ export interface FtpStatus extends FtpConfig {
   passive_ports: string;
   passive_host: string;
   tls_ready: boolean;
+  /** When the certificate the listener serves ends (Unix seconds) */
+  cert_expires_at: number | null;
   listening: boolean;
   error: string | null;
 }

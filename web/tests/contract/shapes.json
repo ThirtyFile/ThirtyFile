@@ -71,6 +71,49 @@
     "private": false,
     "username": ""
   },
+  "AlertsInfo": {
+    "active": [
+      {
+        "announced": false,
+        "kind": "",
+        "params": {
+          "location": ""
+        },
+        "since": 0
+      }
+    ],
+    "allow_private": false,
+    "backups": false,
+    "certificate": false,
+    "cooldown_minutes": 0,
+    "data_disk": false,
+    "email": false,
+    "email_ready": false,
+    "has_secret": false,
+    "offline": false,
+    "recent": [
+      {
+        "attempts": 0,
+        "channel": "",
+        "created_at": 0,
+        "done_at": null,
+        "error": null,
+        "failed": false,
+        "id": 0,
+        "kind": "",
+        "params": {
+          "location": ""
+        },
+        "recipient": null,
+        "state": ""
+      }
+    ],
+    "sign_in_failures": 0,
+    "sign_in_minutes": 0,
+    "sign_ins": false,
+    "usage": false,
+    "webhook_url": ""
+  },
   "AppPassword": {
     "created_at": 0,
     "expires_at": null,
@@ -153,6 +196,7 @@
   "FtpStatus": {
     "address": "",
     "allow_private_plaintext": false,
+    "cert_expires_at": null,
     "enabled": false,
     "error": null,
     "listening": false,

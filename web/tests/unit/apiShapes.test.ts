@@ -5,6 +5,7 @@
 import { expect, test } from "vitest";
 import type {
   AccessInfo,
+  AlertsInfo,
   AppPassword,
   Activity,
   Device,
@@ -53,6 +54,7 @@ function agrees<D extends { missing: never; unknown: never }>(): D | undefined {
 /** Each recorded response, checked against the type the app reads it as */
 const checked: { [K in keyof Shapes]: unknown } = {
   AccessInfo: agrees<Drift<Shapes["AccessInfo"], AccessInfo>>(),
+  AlertsInfo: agrees<Drift<Shapes["AlertsInfo"], AlertsInfo>>(),
   AppPassword: agrees<Drift<Shapes["AppPassword"], AppPassword>>(),
   Activity: agrees<Drift<Shapes["Activity"], Activity>>(),
   Device: agrees<Drift<Shapes["Device"], Device>>(),

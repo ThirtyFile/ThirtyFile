@@ -128,6 +128,17 @@ async fn api_shapes_match_the_recorded_ones() {
     record("NewAppPassword", &call(&app, &me, Method::POST, "/api/auth/app-passwords", Some(app_password)).await);
     record("AppPassword", &call(&app, &me, Method::GET, "/api/auth/app-passwords", None).await[0]);
 
+    // Administrator alerts: the settings with their secret kept, what is wrong now and the latest messages
+    let alerts = json!({
+        "email": true, "webhook_url": "https://hooks.example.com/alerts", "allow_private": false, "usage": true, "offline": true, "data_disk": true,
+        "sign_ins": true, "backups": true, "certificate": true, "sign_in_failures": 10, "sign_in_minutes": 10, "cooldown_minutes": 30,
+        "secret": "a shared secret of 24 chars"
+    });
+    let mut saved = call(&app, &me, Method::PUT, "/api/admin/alerts", Some(alerts)).await;
+    saved["active"] = json!([{ "kind": "offline", "params": { "location": "NAS" }, "since": 1, "announced": true }]);
+    saved["recent"] = json!([{ "id": 1, "channel": "webhook", "recipient": null, "state": "firing", "kind": "offline", "params": { "location": "NAS" }, "created_at": 1, "attempts": 0, "done_at": null, "failed": false, "error": null }]);
+    record("AlertsInfo", &saved);
+
     let now = serde_json::to_string_pretty(&Value::Object(shapes)).unwrap() + "\n";
     if std::env::var_os("THIRTYFILE_UPDATE_SHAPES").is_some() {
         std::fs::write(SHAPES, &now).unwrap();
