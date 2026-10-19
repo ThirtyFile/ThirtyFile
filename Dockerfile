@@ -21,7 +21,7 @@
 
 # ───────────── 1) Frontend ─────────────
 # The output is platform-independent, so multi-platform builds only build it once on the build machine's platform
-FROM --platform=$BUILDPLATFORM node:26.11.1-alpine3.24@sha256:143494b1da2945f061539253adc65e4f1569ddf07da2d384c022c791a9d90a4a AS web
+FROM --platform=$BUILDPLATFORM node:26.12.0-alpine3.24@sha256:6f08a523443ddedf52941874c203475b0ad503e859ad70cb26ab8be9a517dbd5 AS web
 ARG BUILDKIT_SBOM_SCAN_STAGE=true
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 # Node no longer includes corepack (since version 25), which installs the pnpm version named in package.json and checks
@@ -43,7 +43,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
 # ───────────── 2) Backend (with the frontend embedded) ─────────────
 # Runs on the build machine's platform and cross-compiles for the target platform with xx,
 # so arm64 images are built at native speed on amd64 machines (and vice versa) without emulation
-FROM --platform=$BUILDPLATFORM tonistiigi/xx:1.9.0@sha256:c64defb9ed5a91eacb37f96ccc3d4cd72521c4bd18d5442905b95e2226b0e707 AS xx
+FROM --platform=$BUILDPLATFORM tonistiigi/xx:1.10.0@sha256:40fe21f44bb8cddf1eb1226db190d0a984118f62ee02a91b77d99448d28264a6 AS xx
 # cargo auditable 0.7.6 writes the list of crates into the program, for scanners. Taken from its release for the build
 # machine, checked against the checksum published with it (Dependabot doesn't see it: update the version and both
 # checksums by hand)
