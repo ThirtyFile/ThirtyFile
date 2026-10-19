@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { SearchXIcon } from "lucide-react";
 import { api } from "@/api";
 import { keys } from "@/api/queryKeys";
@@ -17,7 +17,8 @@ export function S3BucketsPage() {
     const timer = setTimeout(() => setSearch(typed.trim()), 250);
     return () => clearTimeout(timer);
   }, [typed]);
-  const q = useQuery({ queryKey: keys.buckets(null, search), queryFn: ({ signal }) => api.s3Buckets(undefined, search || undefined, signal) });
+  // The buckets shown stay while another search loads, and with them a question open about one
+  const q = useQuery({ queryKey: keys.buckets(null, search), queryFn: ({ signal }) => api.s3Buckets(undefined, search || undefined, signal), placeholderData: keepPreviousData });
   return (
     <SettingsFrame item="s3" onRefresh={() => q.refetch()} searchPlaceholder={t("Search buckets")} onSearch={setTyped}>
       {q.error ? (

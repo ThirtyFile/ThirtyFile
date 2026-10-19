@@ -274,4 +274,5 @@ export default {
   "Permanently delete {n} item?|Permanently delete {n} items?": "{n} 個の項目を完全に削除しますか？",
   "Permanently deleted items can't be recovered.": "完全に削除した項目は元に戻せません。",
   "Permanently deleted": "完全に削除しました",
+  "Updating…": "更新中…",
 } satisfies Record<string, string>;

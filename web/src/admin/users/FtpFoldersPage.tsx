@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { SearchXIcon } from "lucide-react";
 import { SettingsFrame } from "@/admin/SettingsFrame";
 import { FtpFolderCard, ftpFolderQuery } from "@/components/FtpFolders";
@@ -16,7 +16,8 @@ export function FtpFoldersPage() {
     const timer = setTimeout(() => setSearch(typed.trim()), 250);
     return () => clearTimeout(timer);
   }, [typed]);
-  const q = useQuery(ftpFolderQuery(undefined, search));
+  // The receive folders shown stay while another search loads, and with them a question open about one
+  const q = useQuery({ ...ftpFolderQuery(undefined, search), placeholderData: keepPreviousData });
   return (
     <SettingsFrame item="ftp" onRefresh={() => q.refetch()} searchPlaceholder={t("Search receive folders")} onSearch={setTyped}>
       {q.error ? (

@@ -399,9 +399,9 @@ test("the administrator's bucket list retries failed loads, searches on the serv
     await act(async () => new Promise((r) => setTimeout(r, 300)));
   };
   await search("travel");
-  // Loading the new answer shows neither; then only what matches
-  await settle(() => expect(document.querySelector('section[aria-label="photos"]')).not.toBeNull());
-  expect(document.querySelector('section[aria-label="client-backups"]')).toBeNull();
+  // The buckets shown stay while the new answer loads; then only what matches
+  await settle(() => expect(document.querySelector('section[aria-label="client-backups"]')).toBeNull());
+  expect(document.querySelector('section[aria-label="photos"]')).not.toBeNull();
   expect(fetchMock.mock.calls.some(([url]) => String(url).includes("search=travel"))).toBe(true);
   await search("nothing-like-it");
   await settle(() => expect(document.body.textContent).toContain('No buckets match "nothing-like-it"'));

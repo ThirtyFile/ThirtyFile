@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo, useRef, useState } from "react";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { ClockIcon, FolderSearchIcon, PencilIcon, SearchIcon, SearchXIcon, StarIcon, TagIcon, Trash2Icon } from "lucide-react";
 import { api, type Located, type SearchFilter, type SortKey, type SortOrder, type TagColor } from "@/api";
@@ -178,7 +178,12 @@ export function SearchPage() {
   // Rounded to the hour, so the query key stays the same while the page is open
   if (days) filter.from = Math.floor(Date.now() / 3_600_000) * 3600 - days * DAY;
   const [sort, onSort, setSort] = useSort();
-  const q = useQuery({ queryKey: keys.search(term, filter), queryFn: () => api.search(term, filter), enabled: !!term });
+  // Refined as it is typed: the results shown stay until the new ones come, marked as being updated
+  const q = useQuery({ queryKey: keys.search(term, filter), queryFn: ({ signal }) => api.search(term, filter, signal), enabled: !!term, placeholderData: keepPreviousData });
+  const updating = q.isPlaceholderData && q.isFetching;
+  /** The words of the results shown: the earlier ones while newer ones load */
+  const shown = useRef(term);
+  if (!q.isPlaceholderData) shown.current = term;
   const items = useClientSort(q.data?.items, sort, true);
   const folderName = (folder.data?.is_root ? folder.data.drive.name : folder.data?.node.name) ?? "";
   const filters = (
@@ -254,8 +259,9 @@ export function SearchPage() {
   );
   return (
     <Explorer
-      items={items}
+      items={term ? items : []}
       loading={q.isLoading}
+      updating={updating}
       error={q.error}
       showLocation
       sort={sort}
@@ -264,9 +270,9 @@ export function SearchPage() {
       notice={filters}
       // A new search from here looks where this one does
       searchPlaceholder={within ? t("Search {name}", { name: folderName || "…" }) : undefined}
-      crumbs={crumbs(t('Search results for "{term}"', { term }))}
+      crumbs={crumbs(term ? t('Search results for "{term}"', { term: shown.current }) : t("Search"))}
       icon={SearchIcon}
-      empty={<Empty icon={SearchXIcon} text={t("No matching files found")} />}
+      empty={term ? <Empty icon={SearchXIcon} text={t("No matching files found")} /> : <Empty icon={SearchIcon} text={t("Type in the search box to find files")} />}
     />
   );
 }

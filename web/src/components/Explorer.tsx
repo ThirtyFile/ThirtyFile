@@ -38,6 +38,8 @@ export interface ExplorerProps {
   loading: boolean;
   /** Further pages of a large folder are still loading in the background */
   loadingMore?: boolean;
+  /** The items shown are about to be replaced by newer ones (a search refined as it is typed) */
+  updating?: boolean;
   error?: Error | null;
   /** A part of a large folder couldn't be loaded (the list shows the rest), and how to try again */
   partError?: Error | null;
@@ -154,6 +156,7 @@ export function Explorer(p: ExplorerProps) {
       <span>
         {p.loading ? t("Loading…") : t("{n} item|{n} items", { n: s.total })}
         {p.loadingMore && ` · ${t("Loading more items…")}`}
+        {p.updating && ` · ${t("Updating…")}`}
       </span>
       {p.partError && (
         <span className="border-l pl-3 text-destructive">
@@ -231,6 +234,7 @@ export function Explorer(p: ExplorerProps) {
           <ContextMenuTrigger
             ref={s.area}
             data-explorer-area
+            aria-busy={p.loading || p.updating || undefined}
             className="relative min-h-0 flex-1 overflow-auto outline-none"
             onContextMenuCapture={(e) => {
               // The column headers have their own menu, which leaves the selection alone, as does what shows the item

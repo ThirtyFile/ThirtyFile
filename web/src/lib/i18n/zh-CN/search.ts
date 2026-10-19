@@ -21,4 +21,6 @@ export default {
   "Showing the first {n} results. Add words or filters to find the rest.": "仅显示前 {n} 条结果。请添加更多关键词或筛选条件来查找其余项目。",
   "Checking the folder: {n} items read…": "正在检查文件夹：已读取 {n} 个项目…",
   "Updating: {done} of {total} changes…": "正在更新：{total} 项更改中已完成 {done} 项…",
+  "Clear search": "清除搜索",
+  "Type in the search box to find files": "在搜索框中输入文字来查找文件",
 } satisfies Record<string, string>;

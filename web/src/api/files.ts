@@ -62,8 +62,8 @@ export const filesApi = {
   /** What Empty trash would delete: items per space */
   emptyTrashPreview: () => get<{ kind: string; name: string; items: number }[]>("/trash/empty"),
   /** Names containing `q`; at most 300 (`truncated` when there were more) */
-  search: (q: string, f: SearchFilter = {}) =>
-    get<{ items: Located[]; truncated: boolean }>(`/search${qs(toParams({ q, ...f }))}`).then((r) => ({ ...r, items: r.items.map(localizeLocated) })),
+  search: (q: string, f: SearchFilter = {}, signal?: AbortSignal) =>
+    get<{ items: Located[]; truncated: boolean }>(`/search${qs(toParams({ q, ...f }))}`, signal).then((r) => ({ ...r, items: r.items.map(localizeLocated) })),
   recent: () => get<Located[]>("/recent").then((l) => l.map(localizeLocated)),
   favorites: (sort?: SortKey, order?: SortOrder) => get<Located[]>(`/favorites${qs({ sort, order })}`).then((l) => l.map(localizeLocated)),
   setFavorite: (ids: string[], favorite: boolean) => post("/nodes/favorite", { ids, favorite }),

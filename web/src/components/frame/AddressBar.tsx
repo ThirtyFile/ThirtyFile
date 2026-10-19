@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
-import { ArrowLeftIcon, ArrowRightIcon, ArrowUpIcon, CheckIcon, ChevronRightIcon, CopyIcon, RefreshCwIcon, SearchIcon, type LucideIcon } from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, ArrowUpIcon, CheckIcon, ChevronRightIcon, CopyIcon, RefreshCwIcon, SearchIcon, XIcon, type LucideIcon } from "lucide-react";
 import { api, ApiError } from "@/api";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,7 @@ import { shortcut } from "@/lib/keys";
 import { useStyleKit } from "@/components/style";
 import { t } from "@/lib/i18n";
 import { cn, copyText } from "@/lib/utils";
-import { useTabActions } from "@/tabs";
+import { activeTab, useTabActions } from "@/tabs";
 import { useFrameKeys, useHistory, useRefresh } from "./frameKeys";
 
 // ───────────── Address bar ─────────────
@@ -26,6 +26,25 @@ export interface Crumb {
   /** Virtual levels in the UI (e.g. "All spaces"): shown in the breadcrumb but not included in the copied path (the path doesn't change with the UI language) */
   virtual?: boolean;
 }
+
+/**
+ * Typing in a page's search box moves to the search page, which has a box of its own; clearing a search moves back to
+ * where it started. The text, the caret and the focus go over to the next page's box, once: not when the focus moved
+ * elsewhere meanwhile, nor when the next box doesn't come soon (the page didn't change)
+ */
+let handoff: {
+  /** The box it comes from, which updates it as it goes (text typed while the page changes) */
+  from: object;
+  /** Typed text; else a search cleared, whose box starts empty */
+  typed: boolean;
+  value: string;
+  start: number | null;
+  end: number | null;
+  focused: boolean;
+  at: number;
+} | null = null;
+const HANDOFF_MS = 5000;
+const isSearchPath = (path: string) => path.split(/[?#]/)[0] === "/search";
 
 export function SearchInput({
   placeholder,
@@ -43,24 +62,68 @@ export function SearchInput({
   const navigate = useNavigate();
   const location = useLocation();
   const [params] = useSearchParams();
+  const { back } = useTabActions();
+  const box = useRef<HTMLInputElement | null>(null);
   const onSearchPage = location.pathname === "/search";
   // Searching from a folder looks in that folder and below (the search page keeps the scope it was opened with)
   const scope = onSearchPage ? (params.get("in") ?? undefined) : within;
   // When the page filters itself (control panel), the search string lives in the URL's ?q=, so typing can continue after jumping over from a settings page
-  const initial = onSearchPage || onSearch ? (params.get("q") ?? "") : "";
-  const [q, setQ] = useState(initial);
+  const urlQuery = params.get("q") ?? "";
+  const initial = onSearchPage || onSearch ? urlQuery : "";
+  const taken = () => !!handoff && !onSearch && Date.now() - handoff.at <= HANDOFF_MS;
+  const [q, setQ] = useState(() => (taken() ? handoff!.value : initial));
+  /** The words this box last sent to the page's address: other changes of it (Back, Forward, a link) are shown */
+  const sent = useRef(urlQuery);
 
   useEffect(() => {
     if (!onSearchPage && !onSearch) setQ("");
   }, [onSearchPage, onSearch]);
+  useEffect(() => {
+    if (!onSearchPage || urlQuery === sent.current) return;
+    sent.current = urlQuery;
+    setQ(urlQuery);
+  }, [onSearchPage, urlQuery]);
 
+  const handOver = (typed: boolean) => {
+    const el = box.current;
+    handoff = {
+      from: box,
+      typed,
+      value: typed ? (el?.value ?? q) : "",
+      start: typed ? (el?.selectionStart ?? null) : 0,
+      end: typed ? (el?.selectionEnd ?? null) : 0,
+      focused: !!el && document.activeElement === el,
+      at: Date.now(),
+    };
+  };
+  /** Back to where the search started, or, for a search opened as it is (a link), the search page without words */
+  const clear = () => {
+    live.current?.cancel();
+    if (!onSearchPage) return;
+    const tab = activeTab();
+    const before = tab.entries[tab.index - 1];
+    handOver(false);
+    if (before !== undefined && !isSearchPath(before)) return back();
+    const next = new URLSearchParams(params);
+    next.delete("q");
+    sent.current = "";
+    navigate(`/search${next.size ? `?${next}` : ""}`, { replace: true });
+  };
   const search = (v: string) => {
     // The page filters itself (e.g. control panel): don't jump to file search
     if (onSearch) return onSearch(v);
-    if (v.trim())
-      navigate(`/search?q=${encodeURIComponent(v.trim())}${scope ? `&in=${encodeURIComponent(scope)}` : ""}`, {
-        replace: onSearchPage,
-      });
+    const text = v.trim();
+    if (!text) return clear();
+    if (onSearchPage) {
+      // Only the words change: where it looks and the filters chosen stay. One entry in the history for the search
+      const next = new URLSearchParams(params);
+      next.set("q", text);
+      sent.current = text;
+      if (next.toString() !== params.toString()) navigate(`/search?${next}`, { replace: true });
+      return;
+    }
+    handOver(true);
+    navigate(`/search?q=${encodeURIComponent(text)}${scope ? `&in=${encodeURIComponent(scope)}` : ""}`);
   };
   const latest = useRef({ search, filters: !!onSearch });
   latest.current = { search, filters: !!onSearch };
@@ -73,17 +136,52 @@ export function SearchInput({
   );
   // Cancel a pending search when leaving the page, so we don't jump to the search page after unmounting
   useEffect(() => () => live.current?.cancel(), []);
+  // Taking over from the previous page's box; or, leaving, giving it what was typed while the page changed. Once, on
+  // showing and on leaving
+  useLayoutEffect(() => {
+    const h = taken() ? handoff! : null;
+    if (h) {
+      handoff = null;
+      const el = box.current;
+      // The focus stays where it went meanwhile
+      if (el && h.focused && (!document.activeElement || document.activeElement === document.body)) {
+        el.focus();
+        el.setSelectionRange(h.start ?? h.value.length, h.end ?? h.value.length);
+      }
+      // Typed while the page changed: searched too
+      if (h.typed && h.value.trim() !== urlQuery) live.current!.input(h.value, false);
+    }
+    return () => {
+      const el = box.current;
+      if (!handoff || handoff.from !== box || !handoff.typed || !el) return;
+      handoff.value = el.value;
+      handoff.start = el.selectionStart;
+      handoff.end = el.selectionEnd;
+      if (el.isConnected) handoff.focused = document.activeElement === el;
+    };
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- once, on showing and on leaving
+  }, []);
 
   const change = (v: string, composing = false) => {
     setQ(v);
     live.current!.input(v, composing);
+  };
+  /** Emptied at once: the search ends, without waiting for a pause */
+  const empty = () => {
+    setQ("");
+    live.current!.cancel();
+    latest.current.search("");
   };
 
   return (
     <div className={cn("relative max-sm:w-full", className)}>
       <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-[13px] -translate-y-1/2 text-muted-foreground" />
       <Input
-        ref={inputRef}
+        ref={(el) => {
+          box.current = el;
+          if (typeof inputRef === "function") inputRef(el);
+          else if (inputRef) inputRef.current = el;
+        }}
         value={q}
         onChange={(e) => change(e.target.value, (e.nativeEvent as InputEvent).isComposing)}
         onCompositionStart={() => live.current!.compositionStart()}
@@ -91,13 +189,37 @@ export function SearchInput({
         onKeyDown={(e) => {
           // Enter and Escape choose or drop an input method's candidate while it is composing
           if (e.nativeEvent.isComposing || e.keyCode === 229 || live.current!.composing()) return;
-          if (e.key === "Escape") change("");
+          if (e.key === "Enter") {
+            // At once, without waiting for a pause
+            e.preventDefault();
+            live.current!.cancel();
+            latest.current.search(e.currentTarget.value);
+          } else if (e.key === "Escape" && q) {
+            e.preventDefault();
+            empty();
+          }
         }}
         placeholder={placeholder}
         aria-label={placeholder}
         autoFocus={!!onSearch && !!initial}
-        className="h-[30px] w-[210px] pl-7 text-xs max-lg:w-[160px] max-sm:w-full md:text-xs"
+        className={cn("h-[30px] w-[210px] pl-7 text-xs max-lg:w-[160px] max-sm:w-full md:text-xs", q && "pr-7")}
       />
+      {q && (
+        <button
+          type="button"
+          className="absolute top-1/2 right-1 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+          aria-label={t("Clear search")}
+          title={t("Clear search")}
+          // The focus stays in the box
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            box.current?.focus();
+            empty();
+          }}
+        >
+          <XIcon className="size-3" />
+        </button>
+      )}
     </div>
   );
 }
