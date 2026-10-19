@@ -108,7 +108,7 @@ jobs:
       # The backend's formatting (rustfmt, server/rustfmt.toml), then its tests (cargo test), clippy, and the end-to-end
       # test in a real browser (sign in, upload, preview, download) run against one build instrumented for coverage (cargo llvm-cov show-env): the dependencies are
       # compiled once for both, and the coverage in the job summary counts what the browser test reaches too.
-      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-llvm-cov
       # The browser the end-to-end test uses (about 150 MB), kept between runs while the lock file (and with it the
@@ -153,7 +153,7 @@ jobs:
 
       # Known security problems in dependencies, their licences and where they come from (server/deny.toml), with the
       # toolchain installed above (the cargo-deny action's container looked for it and logged an error each run)
-      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-deny
       - name: Rust dependencies
