@@ -9,6 +9,7 @@ import { focusList } from "@/components/S3Buckets";
 import { useConfirmIdentity } from "@/components/ConfirmIdentity";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SecretInput } from "@/components/SecretField";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
@@ -94,10 +95,10 @@ function EditDialog({ nodeId, folder, action = "edit", close, deleted }: { nodeI
               {t("Device username")}
               <Input readOnly value={created.username} className="font-mono" />
             </Label>
-            <Label className="grid gap-2">
-              {t("Device password")}
-              <Input readOnly value={created.password} className="font-mono" autoComplete="off" />
-            </Label>
+            <div className="grid gap-2">
+              <Label htmlFor="ftp-new-password">{t("Device password")}</Label>
+              <SecretInput id="ftp-new-password" readOnly value={created.password} className="font-mono" autoComplete="off" revealLabel={t("Show device password")} />
+            </div>
             <Button
               onClick={async () => {
                 try {

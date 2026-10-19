@@ -8,8 +8,8 @@ import { api, type StorageConfig, type StorageKind, type StorageLocation } from 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { SecretTextarea } from "@/components/SecretField";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { ErrorText } from "@/components/dialogs";
 import { cn } from "@/lib/utils";
 import { t } from "@/lib/i18n";
@@ -301,8 +301,9 @@ function RemoteFields({
         <>
           <div className="grid gap-1.5">
             <Label htmlFor="st-private_key">{t("Private key")}</Label>
-            <Textarea
+            <SecretTextarea
               id="st-private_key"
+              revealLabel={t("Show private key")}
               rows={4}
               className="font-mono text-xs"
               value={cfg.private_key ?? ""}

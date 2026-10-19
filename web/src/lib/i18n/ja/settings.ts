@@ -369,4 +369,5 @@ export default {
   "Unlink": "リンクを解除",
   "Link": "リンク",
   "Before unlinking all accounts, make sure you remember your username and password; otherwise, you'll need an administrator to reset your password to sign in.": "すべてのアカウントのリンクを解除する前に、ユーザー名とパスワードを覚えていることを確認してください。覚えていない場合、サインインするには管理者にパスワードをリセットしてもらう必要があります。",
+  "Show private key": "秘密キーを表示",
 } satisfies Record<string, string>;

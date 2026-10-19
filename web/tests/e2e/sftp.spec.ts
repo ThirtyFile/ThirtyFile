@@ -76,3 +76,44 @@ test("ordinary users add and remove their SSH keys with identity confirmation on
   expect((await page.request.get("/api/admin/sftp")).status()).toBe(403);
   expect(errors).toEqual([]);
 });
+
+test("a new app password is shown as dots until Show is pressed, and copied without being shown", async ({ page, context }) => {
+  const username = await signInAsNewUser(page, "apppass");
+  await page.goto("/files");
+  await page.getByRole("button", { name: username, exact: true }).click();
+  await page.getByRole("menuitem", { name: "App passwords", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "App passwords" });
+  await dialog.getByLabel("Name", { exact: true }).fill(unique("Nightly backup"));
+  await dialog.getByLabel("Your current password").fill(`${USER_PASSWORD}-2`);
+  const created = answer(page, "POST", "/api/auth/app-passwords");
+  await dialog.getByRole("button", { name: "Create", exact: true }).click();
+  const token = (await (await created).json()).token as string;
+  const field = dialog.getByLabel("App password", { exact: true });
+  await expect(field).toHaveAttribute("type", "password");
+  await expect(field).toHaveValue(token);
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await dialog.getByRole("button", { name: "Copy", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(token);
+  await expect(field).toHaveAttribute("type", "password");
+  await dialog.getByRole("button", { name: "Show app password", exact: true }).click();
+  await expect(field).toHaveAttribute("type", "text");
+});
+
+test("an SFTP storage location's private key is hidden but kept with its line breaks", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/admin/storage");
+  await page.getByRole("button", { name: "Add storage location" }).first().click();
+  const dialog = page.getByRole("dialog", { name: "Add storage location" });
+  await dialog.getByLabel("Type", { exact: true }).selectOption("sftp");
+  await dialog.getByLabel("Sign-in methods", { exact: true }).selectOption("key");
+  const key = dialog.getByLabel("Private key", { exact: true });
+  const text = "-----BEGIN OPENSSH PRIVATE KEY-----\nexample-test-key-line\n-----END OPENSSH PRIVATE KEY-----";
+  await key.fill(text);
+  await expect(key).toHaveValue(text);
+  // Dots where the browser draws them, else blurred: either way not readable
+  expect(await key.evaluate((el) => getComputedStyle(el).getPropertyValue("-webkit-text-security") === "disc" || getComputedStyle(el).filter.includes("blur"))).toBe(true);
+  await dialog.getByRole("button", { name: "Show private key", exact: true }).click();
+  expect(await key.evaluate((el) => getComputedStyle(el).getPropertyValue("-webkit-text-security") !== "disc" && !getComputedStyle(el).filter.includes("blur"))).toBe(true);
+  await expect(key).toHaveValue(text);
+  await page.keyboard.press("Escape");
+});

@@ -7,6 +7,7 @@ import { keys } from "@/api/queryKeys";
 import type { S3Bucket, S3Key } from "@/api/s3";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SecretInput } from "@/components/SecretField";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
@@ -73,10 +74,10 @@ function KeyForm({ bucket, close }: { bucket: S3Bucket; close(): void }) {
               {t("Access Key")}
               <Input readOnly value={created.access_key} className="mt-2 font-mono" />
             </Label>
-            <Label className="grid gap-2">
-              {t("Secret Key")}
-              <Input readOnly value={created.secret_key} className="mt-2 font-mono" autoComplete="off" />
-            </Label>
+            <div className="grid gap-2">
+              <Label htmlFor="s3-new-secret">{t("Secret Key")}</Label>
+              <SecretInput id="s3-new-secret" readOnly value={created.secret_key} className="font-mono" autoComplete="off" revealLabel={t("Show Secret Key")} />
+            </div>
             <Button
               onClick={async () => {
                 try {

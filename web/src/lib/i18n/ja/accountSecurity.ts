@@ -88,4 +88,5 @@ export default {
   "Wrong two-factor code": "2 段階認証コードの誤り",
   "Two-factor sign-in reset by an administrator": "管理者による 2 段階認証のリセット",
   "Recovery code used": "回復コードの使用",
+  "Show app password": "アプリパスワードを表示",
 } satisfies Record<string, string>;

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { SecretInput } from "@/components/SecretField";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { ErrorText, errorProps } from "@/components/dialogs";
@@ -273,13 +274,14 @@ export function ShareDialog({ node, onClose }: { node: Node; onClose(): void }) 
                 <Label htmlFor="share-pw">
                   <KeyRoundIcon className="size-3.5" /> {policy.password_required ? t("Password (required)") : t("Password (optional)")}
                 </Label>
-                <Input
+                <SecretInput
                   id="share-pw"
+                  revealLabel={t("Show password")}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder={policy.password_required ? undefined : tc("unset", "None")}
                   required={policy.password_required}
-                  autoComplete="off"
+                  autoComplete="new-password"
                   {...errorProps(create.error, "share-error")}
                 />
               </div>
@@ -370,12 +372,13 @@ export function EditShareDialog({ share, onClose }: { share: ShareInfo; onClose(
             <Label htmlFor="edit-share-pw">
               <KeyRoundIcon className="size-3.5" /> {share.has_password ? t("New password (leave blank to keep the current one)") : t("Password (optional)")}
             </Label>
-            <Input
+            <SecretInput
               id="edit-share-pw"
+              revealLabel={t("Show password")}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               disabled={removePassword}
-              autoComplete="off"
+              autoComplete="new-password"
               {...errorProps(save.error, "edit-share-error")}
             />
             {share.has_password && !policy.password_required && (

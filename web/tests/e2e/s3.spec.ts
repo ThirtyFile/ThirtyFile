@@ -49,9 +49,18 @@ test("administrators configure S3, publish from a folder menu and manage keys sh
   await keyDialog.getByRole("button", { name: "Create key" }).click();
   await expect(keyDialog.getByText("Save the Secret Key now. It is shown only once.")).toBeVisible();
   const access = await keyDialog.getByLabel("Access Key", { exact: true }).inputValue();
-  const secret = await keyDialog.getByLabel("Secret Key", { exact: true }).inputValue();
+  const secretField = keyDialog.getByLabel("Secret Key", { exact: true });
+  const secret = await secretField.inputValue();
   expect(access).toMatch(/^TF[A-F0-9]+$/);
   expect(secret.length).toBeGreaterThan(30);
+  // As dots, and copied without being shown
+  await expect(secretField).toHaveAttribute("type", "password");
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await keyDialog.getByRole("button", { name: "Copy credentials", exact: true }).click();
+  await expect(page.getByText("Copied", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(`AWS_ACCESS_KEY_ID=${access}
+AWS_SECRET_ACCESS_KEY=${secret}`);
+  await expect(secretField).toHaveAttribute("type", "password");
   await keyDialog.getByRole("button", { name: "Done", exact: true }).click();
   await expect(page.getByLabel("Secret Key", { exact: true })).toHaveCount(0);
   const response = await page.request.get(`/api/s3/buckets?node_id=${node}`);

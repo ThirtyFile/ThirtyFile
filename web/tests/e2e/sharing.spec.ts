@@ -66,6 +66,87 @@ test("a link to one file shows it to a visitor on a phone, who can download it",
   await visitor.close();
 });
 
+for (const phone of [false, true]) {
+  test(`a share link's password stays hidden until shown, and editing keeps, changes or removes it${phone ? " on a phone" : ""}`, async ({ page, browser, baseURL }) => {
+    if (phone) await page.setViewportSize({ width: 390, height: 844 });
+    await signIn(page);
+    const dir = await makeFolder(page, `Hidden password ${phone ? "phone" : "desktop"}`);
+    await uploadFile(page, dir, "plan.txt", "The plan");
+    await page.goto(`/files/${dir}`);
+    const share = async () => {
+      await page.locator("[data-node-id]").filter({ hasText: "plan.txt" }).click({ button: "right" });
+      await page.getByRole("menuitem", { name: "Create share link" }).click();
+      return page.getByRole("dialog", { name: "Share link for “plan.txt”" });
+    };
+    let dialog = await share();
+    let field = dialog.getByLabel("Password (optional)");
+    // Dots, and not filled in with the account's own password
+    await expect(field).toHaveAttribute("type", "password");
+    await expect(field).toHaveAttribute("autocomplete", "new-password");
+    await field.fill("first-share-pass-1");
+    const show = dialog.getByRole("button", { name: "Show password", exact: true });
+    await expect(show).toHaveAttribute("aria-pressed", "false");
+    await show.click();
+    await expect(show).toHaveAttribute("aria-pressed", "true");
+    await expect(field).toHaveAttribute("type", "text");
+    await expect(field).toHaveValue("first-share-pass-1");
+    await show.click();
+    await expect(field).toHaveAttribute("type", "password");
+    // Shown, then the dialog closed and opened again: hidden again
+    await show.click();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    dialog = await share();
+    field = dialog.getByLabel("Password (optional)");
+    await expect(field).toHaveAttribute("type", "password");
+    await field.fill("first-share-pass-1");
+    const created = answer(page, "POST", "/api/shares");
+    await dialog.getByRole("button", { name: "Create link", exact: true }).click();
+    const link = (await (await created).json()).id as string;
+    const visitor = await browser.newContext({ baseURL });
+    const opens = async (password: string) => (await visitor.request.post(`/api/public/shares/${link}/unlock`, { data: { password } })).ok();
+    expect(await opens("first-share-pass-1")).toBe(true);
+
+    const edit = async (change: (dialog: ReturnType<typeof page.getByRole>) => Promise<void>) => {
+      await dialog.getByRole("button", { name: "Edit link", exact: true }).click();
+      const editing = page.getByRole("dialog", { name: "Edit link for “plan.txt”" });
+      const replacement = editing.getByLabel("New password (leave blank to keep the current one)");
+      await expect(replacement).toHaveAttribute("type", "password");
+      await expect(replacement).toHaveValue("");
+      await change(editing);
+      const saved = answer(page, "PATCH", `/api/shares/${link}`);
+      await editing.getByRole("button", { name: "Save", exact: true }).click();
+      expect((await saved).ok()).toBe(true);
+      await expect(editing).toBeHidden();
+    };
+    // Left blank: the password stays
+    await edit(async () => {});
+    expect(await opens("first-share-pass-1")).toBe(true);
+    // A new one, checked with Show before saving
+    await edit(async (editing) => {
+      const replacement = editing.getByLabel("New password (leave blank to keep the current one)");
+      await replacement.fill("second-share-pass-2");
+      await editing.getByRole("button", { name: "Show password", exact: true }).click();
+      await expect(replacement).toHaveAttribute("type", "text");
+      await expect(replacement).toHaveValue("second-share-pass-2");
+    });
+    expect(await opens("first-share-pass-1")).toBe(false);
+    expect(await opens("second-share-pass-2")).toBe(true);
+    // Removed: the field and its Show button can't be used
+    await edit(async (editing) => {
+      await editing.getByText("Remove the password", { exact: true }).click();
+      await expect(editing.getByLabel("New password (leave blank to keep the current one)")).toBeDisabled();
+      await expect(editing.getByRole("button", { name: "Show password", exact: true })).toBeDisabled();
+    });
+    // Asked of a visitor who hasn't unlocked it before
+    const fresh = await browser.newContext({ baseURL });
+    expect((await (await fresh.request.get(`/api/public/shares/${link}`)).json()).needs_password).toBe(false);
+    await fresh.close();
+    if (phone) expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await visitor.close();
+  });
+}
+
 test("Share with… picks a person with the keyboard alone", async ({ page }) => {
   await signIn(page);
   const kim = await makeUser(page, "kim");

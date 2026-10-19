@@ -42,10 +42,15 @@ test("administrators configure receive folders and manage device credentials on 
   await create.getByRole("button", { name: "Create", exact: true }).click();
   await expect(create.getByText("Save the device password now. It is shown only once.")).toBeVisible();
   expect(await create.getByLabel("Device username").inputValue()).toMatch(/^ftp-/);
-  const secret = await create.getByLabel("Device password").inputValue();
+  const password = create.getByLabel("Device password", { exact: true });
+  // Shown once, but as dots until Show is pressed
+  await expect(password).toHaveAttribute("type", "password");
+  await create.getByRole("button", { name: "Show device password", exact: true }).click();
+  await expect(password).toHaveAttribute("type", "text");
+  const secret = await password.inputValue();
   expect(secret.length).toBeGreaterThan(30);
   await create.getByRole("button", { name: "Done", exact: true }).click();
-  await expect(page.getByLabel("Device password")).toHaveCount(0);
+  await expect(page.getByLabel("Device password", { exact: true })).toHaveCount(0);
   await page.keyboard.press("Escape");
   await page.goto("/admin/ftp");
   await page.getByLabel("Search receive folders").fill(device);
@@ -72,7 +77,8 @@ test("administrators configure receive folders and manage device credentials on 
   if (process.env.E2E_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.E2E_SCREENSHOT_DIR, "ftp-rotate-mobile.png"), animations: "disabled" });
   await rotate.getByLabel("Your current password").fill(PASSWORD);
   await rotate.getByRole("button", { name: "Rotate password", exact: true }).click();
-  await expect(rotate.getByLabel("Device password")).not.toHaveValue(secret);
+  await expect(rotate.getByLabel("Device password", { exact: true })).not.toHaveValue(secret);
+  await expect(rotate.getByLabel("Device password", { exact: true })).toHaveAttribute("type", "password");
   await rotate.getByRole("button", { name: "Done", exact: true }).click();
   await card.getByRole("button", { name: "Delete", exact: true }).click();
   const remove = page.getByRole("dialog", { name: "Delete FTP receive folder?", exact: true });
