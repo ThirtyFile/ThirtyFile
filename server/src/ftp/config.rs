@@ -29,6 +29,8 @@ pub struct Info {
     pub passive_ports: String,
     pub passive_host: String,
     pub tls_ready: bool,
+    /// When the certificate the listener serves ends (Unix seconds)
+    pub cert_expires_at: Option<i64>,
     pub listening: bool,
     pub error: Option<String>,
 }
@@ -41,6 +43,7 @@ pub async fn get(State(st): State<AppState>, _: Admin) -> AppResult<Json<Info>> 
         passive_ports: status.passive_ports,
         passive_host: status.passive_host,
         tls_ready: status.tls_ready,
+        cert_expires_at: status.cert_expires_at,
         listening: status.listening,
         error: status.error,
     }))

@@ -161,6 +161,7 @@ pub async fn alert(st: &AppState, a: Alert<'_>, t: i64) -> AppResult<()> {
     let kind = if a.state.is_empty() { "recovered" } else { a.state };
     let mut data = a.data;
     data["state"] = kind.into();
+    let (notice, problem, for_alerts) = (a.notice, !a.state.is_empty(), data.clone());
     let emails = {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
@@ -185,6 +186,8 @@ pub async fn alert(st: &AppState, a: Alert<'_>, t: i64) -> AppResult<()> {
         crate::db::settle(tx, res).await?
     };
     crate::notify::send_later(st, emails);
+    // Also by the channels of Control panel › Administrator alerts, when chosen there
+    crate::alerts::notice(st, notice, problem, &for_alerts).await;
     Ok(())
 }
 

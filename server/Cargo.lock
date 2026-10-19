@@ -4597,6 +4597,7 @@ dependencies = [
  "tracing-subscriber",
  "unftp-core",
  "uuid",
+ "x509-parser",
 ]
 
 [[package]]

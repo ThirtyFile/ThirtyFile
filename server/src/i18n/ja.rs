@@ -45,6 +45,23 @@ pub(super) const TEXTS: &[(Text, &str)] = &[
     (BackupNewest, "\n最新の完全なスナップショット：{since}。\n"),
     (DatabaseBackup, "データベース"),
     (BackupSee, "\n「コントロールパネル › バックアップ」を確認してください。\n"),
+    // Administrator alerts
+    (AlertFiringSubject, "アラート：{what}"),
+    (AlertFiringBody, "{what}。\n{reason}\n送信するアラートは、コントロールパネル › 管理者アラートで選べます。\n"),
+    (AlertResolvedSubject, "解消：{what}"),
+    (AlertResolvedBody, "解消しました：{what}。\n"),
+    (AlertReason, "原因：{error}\n"),
+    (AlertTestSubject, "{site} のテストアラート"),
+    (AlertTestBody, "このメールが読めていれば、{site} の管理者アラートはメールで届いています。\n"),
+    (AlertWhatUsageDisk, "保存場所「{location}」の使用率が {percent}% です"),
+    (AlertWhatDataDisk, "データフォルダーのディスクの使用率が {percent}% です"),
+    (AlertWhatErrors, "保存場所「{location}」の操作の {percent}% が失敗しています"),
+    (AlertWhatOffline, "保存場所「{location}」に接続できません"),
+    (AlertWhatSignInsIp, "直近 {minutes} 分間に {ip} からのサインイン失敗が {count} 回ありました"),
+    (AlertWhatSignInsUser, "直近 {minutes} 分間にアカウント「{username}」のサインイン失敗が {count} 回ありました"),
+    (AlertWhatCertificate, "FTP の証明書は {days} 日後に期限が切れます"),
+    (AlertWhatBackup, "バックアップ「{name}」の確認が必要です"),
+    (AlertWhatReplica, "ミラー「{name}」の確認が必要です"),
     // Replicas
     (ReplicaDegradedSubject, "ミラー「{policy}」の一部が保持されていません"),
     (

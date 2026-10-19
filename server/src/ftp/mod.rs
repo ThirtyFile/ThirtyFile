@@ -34,6 +34,8 @@ pub struct Status {
     pub passive_ports: String,
     pub passive_host: String,
     pub tls_ready: bool,
+    /// When the certificate the listener serves ends (Unix seconds)
+    pub cert_expires_at: Option<i64>,
     pub listening: bool,
     pub error: Option<String>,
 }
@@ -106,6 +108,12 @@ fn passive_ports(value: &str) -> AppResult<std::ops::RangeInclusive<u16>> {
         return Err(AppError::bad_request("Use 1–1000 FTP passive ports"));
     }
     Ok(from..=to)
+}
+/// When the first certificate of a PEM file ends (Unix seconds)
+fn certificate_ends(path: &std::path::Path) -> Option<i64> {
+    let first = CertificateDer::pem_reader_iter(std::fs::File::open(path).ok()?).next()?.ok()?;
+    let (_, cert) = x509_parser::parse_x509_certificate(&first).ok()?;
+    Some(cert.validity().not_after.timestamp())
 }
 fn tls(settings: &Settings, private_plain: bool) -> AppResult<Option<Arc<rustls::ServerConfig>>> {
     let (cert, key) = match (&settings.cert, &settings.key) {
@@ -216,6 +224,7 @@ pub async fn start(st: AppState, settings: Settings, cfg: config::Config) -> App
         let mut status = st.part::<Memory>().status.write();
         status.address = socket.local_addr()?.to_string();
         status.tls_ready = tls.is_some();
+        status.cert_expires_at = settings.cert.as_deref().filter(|_| tls.is_some()).and_then(certificate_ends);
     }
     let (stop, mut stopped) = tokio::sync::watch::channel(false);
     let task = tokio::spawn(async move {

@@ -9,6 +9,7 @@
 mod access;
 mod access_review;
 mod admin;
+mod alerts;
 pub mod app;
 mod archive;
 mod auth;

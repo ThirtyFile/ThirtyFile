@@ -83,6 +83,7 @@
             <li><a href="#groups">Groups</a></li>
             <li><a href="#spaces">Spaces</a></li>
             <li><a href="#email">Notification emails</a></li>
+            <li><a href="#alerts">Administrator alerts</a></li>
             <li><a href="#privacy">What administrators can see</a></li>
             <li><a href="#password">Forgotten passwords</a></li>
             <li><a href="#guests">Guest accounts</a></li>
@@ -154,6 +155,18 @@
           <li>Switch on <strong>Send notifications by email</strong> and <strong>Save</strong>. <strong>Send test email</strong> tries the settings on the page, saved or not, and says what went wrong.</li>
         </ul>
         <p>Emails go to the address each person entered in their notification settings. Accounts that sign in with single sign-on get the verified address of that account the first time they sign in after this is set up. Links in emails use the <strong>Site URL</strong> under <strong>Control panel › General</strong>; without it, emails have no link. Emails that can't be sent are written to the server log.</p>
+
+        <h2 id="alerts">Administrator alerts</h2>
+        <p>Small teams don't watch the dashboard. <strong>Control panel › Administrator alerts</strong> sends what needs an administrator's attention by email, to every administrator who has an address, and if you like to a webhook as well:</p>
+        <ul>
+          <li>a storage location over its usage threshold or failing (the thresholds are those of <a href="storage.html#usage">Storage usage</a>), and one that can't be reached;</li>
+          <li>the disk of the data folder nearly full;</li>
+          <li>failed sign-ins: one address or one account passing a limit (10 in 10 minutes at first). Only accounts that exist are named;</li>
+          <li>a backup or replica that fails or is overdue, which is also told in the app;</li>
+          <li>an FTPS certificate that ends within 14 days.</li>
+        </ul>
+        <p>Each can be turned off. A problem is told once when it starts and once when it is over, and one that keeps coming and going waits for a cooldown (30 minutes at first) before it is told again. Messages hold names of locations, addresses, accounts and numbers, never the name of a file or folder. Emails use the email server of <strong>Control panel › Email</strong> and are written in each administrator's language.</p>
+        <p>A <strong>webhook</strong> gets a JSON body (<code>event</code>, <code>state</code> as <code>firing</code> or <code>resolved</code>, <code>kind</code>, <code>key</code>, <code>title</code>, <code>params</code>, <code>site</code>, <code>at</code>), signed so the receiver can check it: the headers <code>X-ThirtyFile-Timestamp</code> and <code>X-ThirtyFile-Signature: sha256=…</code>, the HMAC-SHA256 of the timestamp, a full stop and the body, with the shared secret you set. Refuse messages with an old timestamp. Webhooks on the internet must use https; one on the private network or on this computer needs <strong>Allow a webhook on the private network</strong>. A message that can't be delivered is tried again after 1 minute, 5 minutes, 30 minutes, 2 hours and 6 hours, then given up on, and the page shows how each went. <strong>Send a test</strong> tries the email and the webhook at once.</p>
 
         <h2 id="privacy">What administrators can see</h2>
         <p>Administrators manage every team space and the company space, including their trash. They cannot open personal spaces or see what is in them, only their size, but when they <a href="#delete">delete an account</a> or <a href="#personal">remove its "My files"</a> they can move its files to a space they can open. They can also <a href="storage.html#per-space">move a "My files" to another storage location</a>: the move lists files it couldn't copy without their names.</p>

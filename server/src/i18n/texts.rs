@@ -81,6 +81,24 @@ texts! {
     DatabaseBackup = "Database",
     BackupSee = "\nSee Control panel › Backups.\n",
 
+    // ───── Administrator alerts ─────
+    AlertFiringSubject = "Alert: {what}",
+    AlertFiringBody = "{what}.\n{reason}\nWhich alerts are sent is chosen under Control panel › Administrator alerts.\n",
+    AlertResolvedSubject = "Resolved: {what}",
+    AlertResolvedBody = "This is over: {what}.\n",
+    AlertReason = "Reason: {error}\n",
+    AlertTestSubject = "Test alert from {site}",
+    AlertTestBody = "If you can read this, administrator alerts from {site} reach you by email.\n",
+    AlertWhatUsageDisk = "The storage location “{location}” is {percent}% full",
+    AlertWhatDataDisk = "The disk of the data folder is {percent}% full",
+    AlertWhatErrors = "The storage location “{location}” fails {percent}% of its operations",
+    AlertWhatOffline = "The storage location “{location}” can't be reached",
+    AlertWhatSignInsIp = "{count} failed sign-ins from {ip} in the last {minutes} minutes",
+    AlertWhatSignInsUser = "{count} failed sign-ins for the account “{username}” in the last {minutes} minutes",
+    AlertWhatCertificate = "The FTP certificate ends in {days} days",
+    AlertWhatBackup = "The backup “{name}” needs attention",
+    AlertWhatReplica = "The replicas “{name}” need attention",
+
     // ───── Replicas (administrators) ─────
     ReplicaDegradedSubject = "The replicas “{policy}” aren't all kept",
     ReplicaDegradedBody = "“{policy}” keeps {current} of the {wanted} copies it should: a target can't be reached, failed, holds damaged copies or is behind.\n",
