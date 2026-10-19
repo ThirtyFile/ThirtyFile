@@ -369,4 +369,5 @@ export default {
   "Unlink": "取消連結",
   "Link": "連結",
   "Before unlinking all accounts, make sure you remember your username and password; otherwise, you'll need an administrator to reset your password to sign in.": "取消所有連結前，請確認你記得帳號密碼，否則需要請管理員重設密碼才能登入。",
+  "Show private key": "顯示私鑰",
 } satisfies Record<string, string>;

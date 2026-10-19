@@ -219,4 +219,5 @@ export default {
   "Downloading…": "下載中…",
   "Download incomplete. Please try again.": "下載不完整，請再試一次",
   "Download interrupted (network or storage connection lost)": "下載中斷（網路或儲存服務連線中斷）",
+  "Show password": "顯示密碼",
 } satisfies Record<string, string>;

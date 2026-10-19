@@ -88,4 +88,5 @@ export default {
   "{name} · {n} Access Key|{name} · {n} Access Keys": "{name} · アクセスキー {n} 個",
   "Search buckets": "バケットを検索",
   "No buckets match \"{query}\"": "「{query}」に一致するバケットはありません",
+  "Show Secret Key": "Secret Key を表示",
 };

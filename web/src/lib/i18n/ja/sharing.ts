@@ -219,4 +219,5 @@ export default {
   "Downloading…": "ダウンロード中…",
   "Download incomplete. Please try again.": "ダウンロードが完了しませんでした。もう一度お試しください",
   "Download interrupted (network or storage connection lost)": "ダウンロードが中断されました（ネットワークまたはストレージとの接続が切断されました）",
+  "Show password": "パスワードを表示",
 } satisfies Record<string, string>;

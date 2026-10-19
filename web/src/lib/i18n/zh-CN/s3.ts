@@ -88,4 +88,5 @@ export default {
   "{name} · {n} Access Key|{name} · {n} Access Keys": "{name} · {n} 个 Access Key",
   "Search buckets": "搜索存储桶",
   "No buckets match \"{query}\"": "没有符合“{query}”的存储桶",
+  "Show Secret Key": "显示 Secret Key",
 };

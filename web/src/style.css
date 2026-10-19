@@ -202,6 +202,16 @@
  * be rounded; its focus ring is an outline, drawn over them.
  */
 @layer components {
+  /* A secret of several lines, hidden until shown (SecretField.tsx): dots where the browser draws them, blurred where it
+     can't */
+  .tf-secret-text {
+    -webkit-text-security: disc;
+  }
+  @supports not (-webkit-text-security: disc) {
+    .tf-secret-text {
+      filter: blur(5px);
+    }
+  }
   .tf-row {
     outline: none;
   }

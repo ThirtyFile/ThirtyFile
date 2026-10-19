@@ -80,4 +80,5 @@ export default {
   "End date: {date} · Last used: {when}": "結束日期：{date} · 上次使用：{when}",
   "Search receive folders": "搜尋接收資料夾",
   "No receive folders match \"{query}\"": "沒有符合「{query}」的接收資料夾",
+  "Show device password": "顯示裝置密碼",
 };

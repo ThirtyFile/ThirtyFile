@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { SecretInput } from "@/components/SecretField";
 import { Label } from "@/components/ui/label";
 import { ErrorText } from "@/components/dialogs";
 import { useConfirmIdentity } from "@/components/ConfirmIdentity";
@@ -100,7 +101,7 @@ export function AppPasswordsDialog({ onClose }: { onClose(): void }) {
             <div className="text-sm font-medium">{t('App password "{name}" created', { name: created.name })}</div>
             <p className="text-xs text-muted-foreground">{t("Copy it now. It won't be shown again.")}</p>
             <div className="flex gap-2">
-              <Input readOnly value={created.token} className="font-mono text-xs" aria-label={t("App password")} onFocus={(e) => e.target.select()} />
+              <SecretInput readOnly value={created.token} className="font-mono text-xs" aria-label={t("App password")} revealLabel={t("Show app password")} autoComplete="off" />
               <Button type="button" variant="outline" onClick={() => copyAndSay(created.token)} title={t("Copy")} aria-label={t("Copy")}>
                 <CopyIcon />
               </Button>

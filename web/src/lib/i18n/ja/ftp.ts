@@ -80,4 +80,5 @@ export default {
   "End date: {date} · Last used: {when}": "終了日：{date} · 最終使用：{when}",
   "Search receive folders": "受信フォルダーを検索",
   "No receive folders match \"{query}\"": "「{query}」に一致する受信フォルダーはありません",
+  "Show device password": "機器用パスワードを表示",
 };

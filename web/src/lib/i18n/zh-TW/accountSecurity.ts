@@ -88,4 +88,5 @@ export default {
   "Wrong two-factor code": "兩步驟驗證碼錯誤",
   "Two-factor sign-in reset by an administrator": "管理員重設兩步驟驗證",
   "Recovery code used": "使用復原碼",
+  "Show app password": "顯示應用程式密碼",
 } satisfies Record<string, string>;
