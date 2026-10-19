@@ -42,6 +42,10 @@ pub enum Command {
     /// Write a consistent copy of the database to a new file, also while ThirtyFile is running
     /// (e.g. `docker exec thirtyfile thirtyfile backup /data/backups/drive.db`)
     Backup { file: PathBuf },
+    /// Restore the database from an encrypted copy that database backups made (Control panel › Backups), into a new
+    /// data folder: copy the file from its location first. The passphrase is read from THIRTYFILE_BACKUP_PASSPHRASE,
+    /// else from the input. Then put secret.key back, start ThirtyFile, and restore the files from their backups
+    RestoreDatabase { file: PathBuf },
     /// Shrink the database file to what it holds, and keep giving back the space it no longer uses from then on (new
     /// databases do so already). Stop ThirtyFile first
     Compact,
@@ -109,6 +113,12 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         let folders: Vec<&std::path::Path> =
             [cfg.server.data.as_path(), storage.as_path()].into_iter().filter(|f| *f == cfg.server.data.as_path() || f.exists()).collect();
         privileges::drop_to(user, &folders)?;
+    }
+
+    // Before the database is opened, which would make a new one: the restored copy takes its place (as the user the
+    // server runs as, so it can write it)
+    if let Some(Command::RestoreDatabase { file }) = &cfg.command {
+        return runtime()?.block_on(crate::backups::database::restore_cli(file, &cfg.server.data));
     }
 
     runtime()?.block_on(start(cfg, storage))

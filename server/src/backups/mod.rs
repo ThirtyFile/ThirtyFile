@@ -15,12 +15,15 @@
 //! Copies are ThirtyFile's own: removing unused content and deleting content nothing uses only look at a location's
 //! content store, never in `.thirtyfile-backups`, and a location holding copies can't be deleted.
 //!
+//! The database itself is copied on a schedule of its own (database.rs), encrypted with a passphrase.
+//!
 //! Administrators see which spaces a copy holds (a personal space as "My files" and its owner), never names inside
 //! personal spaces: failures don't name their items, and a personal space is only restored whole, into its owner's
 //! personal space.
 
 pub mod api;
 pub(crate) mod capture;
+pub mod database;
 pub mod layout;
 pub mod policy;
 mod restore;

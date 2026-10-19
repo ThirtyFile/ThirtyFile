@@ -21,6 +21,7 @@ export const ADMIN_NOTIFICATION_KINDS: NotificationKind[] = ["backup", "replica"
 
 /** The name as the app shows it elsewhere: spaces the system named itself are translated */
 function shownName(n: AppNotification) {
+  if (n.kind === "backup" && n.data.database) return t("Database");
   const name = n.data.name ?? "";
   const space = n.kind === "space_full" || n.data.item === "space";
   return space && n.data.drive_kind ? driveName({ kind: n.data.drive_kind, name }) : name;

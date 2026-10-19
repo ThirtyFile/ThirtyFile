@@ -427,6 +427,43 @@ export interface BackupSet {
 /** When a policy makes snapshots on a schedule: every N minutes, daily at a time, or on some days of the week */
 export type BackupSchedule = { every: number } | { daily: string } | { weekly: string; days: number[] };
 
+/** Copies of the database on a schedule (Control panel › Backups › Database backups) */
+export interface DatabaseBackupSettings {
+  enabled: boolean;
+  /** The storage location the copies are kept on */
+  location: string;
+  schedule: BackupSchedule;
+  tz: string;
+  keep_last: number;
+  keep_daily: number;
+  keep_weekly: number;
+  keep_monthly: number;
+  /** Tell administrators when there is no new copy for this many hours (0: never) */
+  alert_hours: number;
+}
+
+export interface DatabaseBackup extends DatabaseBackupSettings {
+  has_passphrase: boolean;
+  /** A copy is being made now */
+  running: boolean;
+  status: {
+    next_run_at: number | null;
+    last_attempt_at: number | null;
+    last_success_at: number | null;
+    last_file: string | null;
+    last_size: number | null;
+    last_duration_ms: number | null;
+    error: string | null;
+  };
+}
+
+/** A copy of the database on its location */
+export interface DatabaseCopy {
+  name: string;
+  size: number;
+  at: number;
+}
+
 export type BackupHealthState = "protected" | "catching_up" | "running" | "waiting" | "failing" | "overdue" | "paused" | "never";
 
 /** A backup policy's settings */
@@ -827,6 +864,8 @@ export type NotificationKind = "shared" | "space_full" | "access_expiring" | "ap
 export interface NotificationData {
   /** The folder, file or space */
   name?: string;
+  /** A backup notice about the database backups (`name` is then "Database") */
+  database?: boolean;
   /** Whether a whole space was shared ("space"), or a folder or file */
   item?: "space" | "folder" | "file";
   drive_kind?: DriveKind;

@@ -77,6 +77,8 @@ texts! {
     BackupOkSubject = "The backup “{backup}” works again",
     BackupOkBody = "“{backup}” made a complete snapshot again.\n",
     BackupNewest = "\nNewest complete snapshot: {since}.\n",
+    /// The name of the database backups, in a backup notice
+    DatabaseBackup = "Database",
     BackupSee = "\nSee Control panel › Backups.\n",
 
     // ───── Replicas (administrators) ─────

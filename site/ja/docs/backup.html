@@ -81,6 +81,7 @@
             <li><a href="#upgrade">アップグレード</a></li>
             <li><a href="#backup">バックアップ</a></li>
             <li><a href="#file-backups">別の場所へのファイルバックアップ</a></li>
+            <li><a href="#database-backups">データベースのバックアップ</a></li>
             <li><a href="#restore">復元</a></li>
             <li><a href="#database-size">データベースの容量</a></li>
             <li><a href="#key">保存パスワードの暗号化キー</a></li>
@@ -173,7 +174,26 @@ docker start thirtyfile</code></pre>
           <li>バックアップの場所を同じ設定で追加します。<code>.thirtyfile-location</code> は旧サーバーの場所を示すため、新しい登録を拒否します。旧サーバーがなくなっているので、先にそのファイルをフォルダー、バケット最上位、サーバーフォルダーから削除します。</li>
           <li><strong>コントロールパネル › バックアップ</strong> の <strong>保存場所からバックアップを検索…</strong> でその場所を選びます。検出分を一覧にし、バックグラウンドで検証後、完全なスナップショットから復元できます。</li>
         </ol>
-        <p>戻るのはファイルです。アカウント、グループ、権限、共有リンク、設定、ログは <code>data</code> のバックアップから（<a href="#backup">バックアップ</a>）、保存場所やシングルサインオンのパスワードは <code>secret.key</code>（<a href="#key">以下</a>）または再入力が必要です。場所のキーとパスワードを ThirtyFile の外に安全に保管してください。ときどき新しいフォルダーに復元し、数ファイルを確認して練習してください。</p>
+        <p><a href="#database-backups">データベースのバックアップ</a>がある場合は、先にデータベースを復元してください。データベースがバックアップを知っているので、探す必要はありません。戻るのはファイルです。アカウント、グループ、権限、共有リンク、設定、ログは <code>data</code> のバックアップから（<a href="#backup">バックアップ</a>）、保存場所やシングルサインオンのパスワードは <code>secret.key</code>（<a href="#key">以下</a>）または再入力が必要です。場所のキーとパスワードを ThirtyFile の外に安全に保管してください。ときどき新しいフォルダーに復元し、数ファイルを確認して練習してください。</p>
+        <h2 id="database-backups">データベースのバックアップ</h2>
+        <p>ファイルのバックアップがコピーするのはスペースのファイルだけです。それ以外はデータベースにあります：フォルダー構成、アカウントとグループ、アクセス権、共有リンク、タグ、お気に入り、S3 バケットとキー、FTP 受信フォルダー、バージョン、アクティビティログ。<strong>コントロールパネル › バックアップ</strong>の<strong>データベースのバックアップ…</strong>で、ThirtyFile を止めずにスケジュールに従って保存場所へコピーできます。</p>
+        <ul>
+          <li><strong>保存先：</strong>保存場所の 1 つ。<code>data</code> フォルダーとは別のディスクやサーバーが最適です。コピーはその中の <code>.thirtyfile-backups/database</code> フォルダーに、作成時刻（UTC）の名前で保存されます。</li>
+          <li><strong>パスフレーズで暗号化：</strong>12 文字以上のパスフレーズを決め、2 回入力します。<code>secret.key</code> ではなく、コピーにも <code>secret.key</code> は含まれません。コピーにはパスワードのハッシュ、IP アドレス、<code>secret.key</code> で暗号化された保存パスワードが入っています。パスフレーズはサーバーとは別の安全な場所に保管してください。パスフレーズがないとコピーは復元できず、誰も取り戻せません。</li>
+          <li><strong>保持：</strong>最新のコピー（既定 7 件）と、直近の日・週・月ごとの最新のコピー（既定 7・4・12）。古いコピーは新しいコピーの保存後にだけ削除されます。</li>
+          <li><strong>確認：</strong>ダイアログに前回のコピー、サイズ、所要時間が表示されます。失敗したときや 48 時間新しいコピーがないときは、ファイルのバックアップの問題と同じように管理者に通知され、直ったときも通知されます。<strong>今すぐバックアップ</strong>ですぐに作成できます。</li>
+        </ul>
+        <h3 id="database-restore">サーバーを復元する</h3>
+        <ol>
+          <li>最新のコピーを保存場所から新しいサーバーにコピーします（例：<code>/srv/restore</code>）。</li>
+          <li>新しい空の <code>data</code> フォルダーで復元し、求められたらパスフレーズを入力します（<code>THIRTYFILE_BACKUP_PASSPHRASE</code> で渡すこともできます）：
+            <pre><code>docker run --rm -it -v /srv/thirtyfile/data:/data -v /srv/restore:/restore:ro \
+  ghcr.io/thirtyfile/thirtyfile restore-database /restore/thirtyfile-20261019-023000Z.tfdb</code></pre></li>
+          <li>保管しておいた <code>secret.key</code> を <code>data</code> フォルダーに戻すか（<a href="#key">下記</a>を参照）、<code>THIRTYFILE_SECRET_KEY</code> を設定します。</li>
+          <li>ThirtyFile を起動します。古いバージョンのコピーは起動時にアップグレードされ、新しいバージョンのコピーは拒否されます。</li>
+          <li>ファイルを戻します：<code>storage</code> やほかの保存場所も失われた場合は、復元したデータベースに載っている<a href="#file-backups">ファイルのバックアップ</a>からスペースを復元します。</li>
+        </ol>
+
         <h2 id="restore">復元</h2>
         <ol>
           <li>停止して元の場所へ展開します。<code>sudo tar xzf thirtyfile-backup.tar.gz -C /srv/thirtyfile</code>（Compose は <code>compose.yaml</code> の場所）。</li>

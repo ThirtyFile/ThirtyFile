@@ -82,6 +82,7 @@
             <li><a href="#upgrade">升级</a></li>
             <li><a href="#backup">备份</a></li>
             <li><a href="#file-backups">将文件备份到其他位置</a></li>
+            <li><a href="#database-backups">数据库备份</a></li>
             <li><a href="#restore">还原</a></li>
             <li><a href="#database-size">数据库大小</a></li>
             <li><a href="#key">已保存密码的加密密钥</a></li>
@@ -179,7 +180,26 @@ docker start thirtyfile</code></pre>
           <li>使用相同设置将备份位置添加为存储位置。原 <code>.thirtyfile-location</code> 文件属于旧服务器，因此新服务器会拒绝；确认原服务器已不存在后，先删除该文件（在文件夹、存储桶顶层或服务器文件夹顶层）。</li>
           <li>在<strong>控制面板 › 备份</strong>选择<strong>在位置上查找备份…</strong>和该位置。找到的备份会列出并在后台检查，之后可从完整快照还原。</li>
         </ol>
-        <p>这只恢复文件，不恢复服务器：账号、用户组、权限、分享链接、设置和日志来自 <code>data</code> 备份（参阅<a href="#backup">备份</a>）；存储位置和单点登录保存的密码需要 <code>secret.key</code>（参阅<a href="#key">下方</a>），否则必须重新输入。请在 ThirtyFile 以外安全保存备份位置的配置（密钥、密码），以便重新添加。定期演练：将某个文件夹还原到新文件夹，并检查几个文件。</p>
+        <p>若有<a href="#database-backups">数据库备份</a>，请先改为还原数据库：数据库知道有哪些备份，无需再查找。这只恢复文件，不恢复服务器：账号、用户组、权限、分享链接、设置和日志来自 <code>data</code> 备份（参阅<a href="#backup">备份</a>）；存储位置和单点登录保存的密码需要 <code>secret.key</code>（参阅<a href="#key">下方</a>），否则必须重新输入。请在 ThirtyFile 以外安全保存备份位置的配置（密钥、密码），以便重新添加。定期演练：将某个文件夹还原到新文件夹，并检查几个文件。</p>
+        <h2 id="database-backups">数据库备份</h2>
+        <p>文件备份只复制各空间的文件，其余内容都在数据库中：文件夹结构、账号与群组、访问权限、分享链接、标签、收藏、S3 存储桶与密钥、FTP 接收文件夹、版本与活动日志。在<strong>控制面板 › 备份</strong>选择<strong>数据库备份…</strong>，即可按计划将数据库复制到存储位置，无需停止 ThirtyFile。</p>
+        <ul>
+          <li><strong>存放位置：</strong>一个存储位置，最好与 <code>data</code> 文件夹位于不同的磁盘或服务器。副本保存在其中的 <code>.thirtyfile-backups/database</code> 文件夹，以制作时间（UTC）命名。</li>
+          <li><strong>以密语加密：</strong>密语由您自定，需输入两次，至少 12 个字符。它不是 <code>secret.key</code>，副本中也不含 <code>secret.key</code>。副本内有密码哈希、IP 地址，以及以 <code>secret.key</code> 加密的已保存密码。请将密语妥善保存在服务器以外的地方：没有密语就无法还原副本，也没有人能找回它。</li>
+          <li><strong>保留：</strong>最新的几份副本（默认 7 份），以及最近几天、几周、几个月中每个期间最新的一份（默认 7、4、12）。只有在新副本保存好之后，才会删除较旧的副本。</li>
+          <li><strong>跟踪：</strong>对话框会显示上次副本、大小与耗时。失败或 48 小时内没有新副本时，会像文件备份的问题一样通知管理员，恢复正常时也会再通知。点<strong>立即备份</strong>可马上制作一份。</li>
+        </ul>
+        <h3 id="database-restore">还原服务器</h3>
+        <ol>
+          <li>从存储位置将最新的副本复制到新服务器，例如放到 <code>/srv/restore</code>。</li>
+          <li>准备一个全新的空白 <code>data</code> 文件夹并执行还原，按提示输入密语（或通过 <code>THIRTYFILE_BACKUP_PASSPHRASE</code> 提供）：
+            <pre><code>docker run --rm -it -v /srv/thirtyfile/data:/data -v /srv/restore:/restore:ro \
+  ghcr.io/thirtyfile/thirtyfile restore-database /restore/thirtyfile-20261019-023000Z.tfdb</code></pre></li>
+          <li>从您保存的地方将 <code>secret.key</code> 放回 <code>data</code> 文件夹（参阅<a href="#key">下方</a>），或设置 <code>THIRTYFILE_SECRET_KEY</code>。</li>
+          <li>启动 ThirtyFile。旧版本的副本会在启动时升级；新版本的副本会被拒绝。</li>
+          <li>还原文件：若 <code>storage</code> 与其他存储位置也已丢失，请从其<a href="#file-backups">文件备份</a>还原各空间，还原后的数据库会列出这些备份。</li>
+        </ol>
+
         <h2 id="restore">还原</h2>
         <ol>
           <li>停止 ThirtyFile，在目录原位置解压归档：<code>sudo tar xzf thirtyfile-backup.tar.gz -C /srv/thirtyfile</code>（Docker Compose 在 <code>compose.yaml</code> 文件夹）。</li>

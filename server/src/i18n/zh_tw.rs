@@ -34,6 +34,7 @@ pub(super) const TEXTS: &[(Text, &str)] = &[
     (BackupOkSubject, "備份「{backup}」恢復正常"),
     (BackupOkBody, "「{backup}」又完成了快照。\n"),
     (BackupNewest, "\n最新的完整快照：{since}。\n"),
+    (DatabaseBackup, "資料庫"),
     (BackupSee, "\n請到「控制台 › 備份」查看。\n"),
     // Replicas
     (ReplicaDegradedSubject, "鏡像規則「{policy}」沒有全部保持"),

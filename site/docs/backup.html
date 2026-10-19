@@ -81,6 +81,7 @@
             <li><a href="#upgrade">Upgrading</a></li>
             <li><a href="#backup">Backing up</a></li>
             <li><a href="#file-backups">Backups of files to another location</a></li>
+            <li><a href="#database-backups">Database backups</a></li>
             <li><a href="#restore">Restoring</a></li>
             <li><a href="#database-size">The size of the database</a></li>
             <li><a href="#key">The key for saved passwords</a></li>
@@ -182,7 +183,26 @@ docker start thirtyfile</code></pre>
           <li>Add the backup's location as a storage location with the same settings. Its <code>.thirtyfile-location</code> file names the old server's location, so a new one is refused: delete that file (in the folder, or at the top of the bucket or server folder) first, since the server it named is gone.</li>
           <li>Under <strong>Control panel › Backups</strong>, choose <strong>Find backups on a location…</strong> and that location. The backups found are listed and checked in the background; their complete snapshots can then be restored from.</li>
         </ol>
-        <p>This brings files back, not the server: accounts, groups, access, share links, settings and logs come from a backup of the <code>data</code> folder (see <a href="#backup">Backing up</a>), and the passwords saved for storage locations and single sign-on need <code>secret.key</code> (see <a href="#key">below</a>) or entering again. Keep the settings of the backup's location (keys, passwords) somewhere safe outside ThirtyFile, so you can add it again. Practise it now and then: restore a folder into a new folder, and check a few files.</p>
+        <p>With a <a href="#database-backups">database backup</a>, restore the database first instead: it knows the backups, so they needn't be found. This brings files back, not the server: accounts, groups, access, share links, settings and logs come from a backup of the <code>data</code> folder (see <a href="#backup">Backing up</a>), and the passwords saved for storage locations and single sign-on need <code>secret.key</code> (see <a href="#key">below</a>) or entering again. Keep the settings of the backup's location (keys, passwords) somewhere safe outside ThirtyFile, so you can add it again. Practise it now and then: restore a folder into a new folder, and check a few files.</p>
+
+        <h2 id="database-backups">Database backups</h2>
+        <p>File backups copy the spaces' files. The database holds the rest: the folder tree, accounts and groups, access, share links, tags, favorites, S3 buckets and keys, FTP receive folders, versions and the activity log. Under <strong>Control panel › Backups</strong>, <strong>Database backups…</strong> copies it on a schedule to a storage location, without stopping ThirtyFile.</p>
+        <ul>
+          <li><strong>Where:</strong> a storage location, best on another disk or server than the <code>data</code> folder. Copies are kept in its folder <code>.thirtyfile-backups/database</code>, named by the time they were made (UTC).</li>
+          <li><strong>Encrypted with a passphrase</strong> you choose, typed twice, at least 12 characters. It isn't <code>secret.key</code>, which isn't in the copy. A copy holds password hashes, IP addresses and the saved passwords encrypted with <code>secret.key</code>. Keep the passphrase somewhere safe, apart from the server: without it a copy can't be restored, and nobody can recover it.</li>
+          <li><strong>Kept:</strong> the newest copies (7 by default), and the newest copy of each of the last days, weeks and months (7, 4 and 12). Older copies are deleted only after a new one is stored.</li>
+          <li><strong>Followed:</strong> the dialog shows the last copy, its size and how long it took. A failure, or no new copy for 48 hours, is told to administrators as file backups' problems are, and again when it works. <strong>Back up now</strong> makes one at once.</li>
+        </ul>
+        <h3 id="database-restore">Restoring a server</h3>
+        <ol>
+          <li>Copy the newest copy from its location to the new server, for example into <code>/srv/restore</code>.</li>
+          <li>With a new, empty <code>data</code> folder, restore it, and type the passphrase when asked (or give it in <code>THIRTYFILE_BACKUP_PASSPHRASE</code>):
+            <pre><code>docker run --rm -it -v /srv/thirtyfile/data:/data -v /srv/restore:/restore:ro \
+  ghcr.io/thirtyfile/thirtyfile restore-database /restore/thirtyfile-20261019-023000Z.tfdb</code></pre></li>
+          <li>Put <code>secret.key</code> back in the <code>data</code> folder from where you kept it (see <a href="#key">below</a>), or set <code>THIRTYFILE_SECRET_KEY</code>.</li>
+          <li>Start ThirtyFile. A copy from an older version is upgraded on the way; one from a newer version is refused.</li>
+          <li>Bring the files back: if <code>storage</code> and the other locations are gone too, restore their spaces from their <a href="#file-backups">file backups</a>, which the restored database lists.</li>
+        </ol>
 
         <h2 id="restore">Restoring</h2>
         <ol>

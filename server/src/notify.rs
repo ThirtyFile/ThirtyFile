@@ -497,7 +497,9 @@ fn space_full_text(d: &Value, name: &str, lang: Lang) -> (String, String) {
 
 /// A backup policy fails, waits for its location or is overdue, or works again
 fn backup_text(d: &Value, tz_offset: i64, lang: Lang) -> (String, String) {
-    let backup = d["name"].as_str().unwrap_or_default();
+    // The database backups' name is in each person's language
+    let database = (d["database"] == true).then(|| tr(lang, Text::DatabaseBackup, &[]));
+    let backup = database.as_deref().unwrap_or_else(|| d["name"].as_str().unwrap_or_default());
     let error = d["error"].as_str().unwrap_or_default();
     let since = d["since"].as_i64().map(|t| local_time(t, tz_offset));
     let (subject, text) = match d["state"].as_str().unwrap_or_default() {
@@ -770,6 +772,16 @@ mod tests {
     use super::*;
     use crate::testutil;
     use axum::extract::{Path, Query, State};
+
+    #[test]
+    fn a_database_backup_notice_names_the_database_in_each_language() {
+        let d = serde_json::json!({ "name": "Database", "database": true, "state": "failing", "error": "Disk full" });
+        assert_eq!(backup_text(&d, 0, Lang::En).0, "The backup “Database” failed");
+        assert!(backup_text(&d, 0, Lang::ZhTw).0.contains("資料庫"), "{}", backup_text(&d, 0, Lang::ZhTw).0);
+        // A file backup keeps its own name
+        let d = serde_json::json!({ "name": "Database", "state": "failing" });
+        assert!(backup_text(&d, 0, Lang::ZhTw).0.contains("Database"));
+    }
 
     async fn bell(env: &testutil::TestEnv, user: &User) -> Value {
         list(State(env.st.clone()), user.clone(), HeaderMap::new(), Query(ListQuery { tz: None })).await.unwrap().0
