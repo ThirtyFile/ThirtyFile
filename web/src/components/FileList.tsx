@@ -78,7 +78,7 @@ export interface FileListProps {
   dateLabel?: string;
   dateOf?(n: Item): number;
   /** One more text column after the size (list view), e.g. who deleted each item in the trash */
-  extraColumn?: { label: string; value(n: Item): string };
+  extraColumn?: { label: string; value(n: Item): ReactNode; /** Its width when the person hasn't changed it (px) */ width?: number };
   /** Items in groups, each with a heading (see lib/listView.ts) */
   groupBy?: GroupBy;
   /** The groups the other way round (the list is sorted the other way by what it's grouped by) */
@@ -404,7 +404,8 @@ export function FileList(p: FileListProps) {
     .filter((c) => columnShown(prefs, c.id, mac))
     .map((c) => c.id)
     .join();
-  const widthOf = (id: ColumnId) => prefs.widths[id] ?? (mac && (id === "date" || id === "created") ? 230 : COLUMN_WIDTH[id]);
+  const defaultWidth = (id: ColumnId) => (id === "extra" && p.extraColumn?.width) || COLUMN_WIDTH[id];
+  const widthOf = (id: ColumnId) => prefs.widths[id] ?? (mac && (id === "date" || id === "created") ? 230 : defaultWidth(id));
   // Too narrow for every column (e.g. with the details pane open): Type, then Size, make room before the list scrolls sideways
   const hide =
     wide && geo.room > 0
@@ -552,7 +553,7 @@ export function FileList(p: FileListProps) {
       onReset={() => setColumnWidth(id, undefined, scope)}
       min={id === "name" ? MIN_NAME : MIN_COLUMN}
       max={MAX_COLUMN}
-      defaultWidth={id === "name" ? MIN_NAME : COLUMN_WIDTH[id]}
+      defaultWidth={id === "name" ? MIN_NAME : defaultWidth(id)}
       edge="right"
       label={t('Resize the "{name}" column', { name: label })}
     />

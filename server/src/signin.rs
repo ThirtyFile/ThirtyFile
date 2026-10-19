@@ -56,6 +56,8 @@ pub struct Me {
     pub s3_enabled: bool,
     pub ftp_enabled: bool,
     pub sftp_keys: bool,
+    /// Searches can look inside files
+    pub content_search: bool,
 }
 
 async fn me_of(st: &AppState, user: User, headers: &HeaderMap) -> AppResult<Me> {
@@ -73,6 +75,7 @@ async fn me_of(st: &AppState, user: User, headers: &HeaderMap) -> AppResult<Me> 
     let s3_enabled = crate::s3::config::routing(st).await?.enabled;
     let ftp_enabled = crate::ftp::config::load(st).await?.enabled;
     let sftp_keys = crate::sftp::settings::load(st).await?.keys();
+    let content_search = crate::contentsearch::enabled(&mut *st.db.acquire().await?).await?;
     Ok(Me {
         user,
         used_bytes,
@@ -90,6 +93,7 @@ async fn me_of(st: &AppState, user: User, headers: &HeaderMap) -> AppResult<Me> 
         s3_enabled,
         ftp_enabled,
         sftp_keys,
+        content_search,
     })
 }
 

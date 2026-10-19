@@ -87,6 +87,9 @@ pub struct SmartQuery {
     /// With all of these tags of the owner's
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<i64>,
+    /// The name is looked for inside files too (when searching inside files is on)
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub content: bool,
 }
 
 impl SmartQuery {
@@ -187,6 +190,8 @@ impl SmartQuery {
             owner: None,
             tags: self.tags.clone(),
             tagged_by: user.id,
+            // Asked for, and still on: turned off, the smart folder lists what its name matches
+            content: self.content && crate::contentsearch::enabled(conn).await?,
         }))
     }
 }

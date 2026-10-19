@@ -1165,4 +1165,12 @@ export default {
   "Too many wrong passwords for this link. Try again in {n} seconds.": "このリンクのパスワードの誤りが多すぎます。{n} 秒後にもう一度お試しください",
   // Email settings (mail.rs)
   "Enter the password again: the email server or account changed": "メールサーバーまたはアカウントが変更されたため、パスワードをもう一度入力してください",
+  "Choose email or webhook": "メールか webhook を選んでください",
+  "Enter the webhook address as a full URL, such as https://example.com/hook": "webhook のアドレスは https://example.com/hook のような完全な URL で入力してください",
+  "Failed sign-ins: 3 to 1,000 in 1 to 1,440 minutes": "サインイン失敗：1〜1,440 分間に 3〜1,000 回",
+  "The cooldown is at most 1,440 minutes": "クールダウンは最大 1,440 分です",
+  "The webhook address must be http or https, without a user name or password in it": "webhook のアドレスは http または https で、ユーザー名やパスワードを含めないでください",
+  "Search inside files is off": "ファイル内検索はオフです",
+  "The largest file read is 1 to 100 MB": "読み取るファイルの最大サイズは 1〜100 MB です",
+  "The text kept is 10 to 100,000 MB in all": "保存する文字の合計は 10〜100,000 MB です",
 } satisfies Record<string, string>;

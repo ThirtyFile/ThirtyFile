@@ -23,4 +23,8 @@ export default {
   "Updating: {done} of {total} changes…": "正在更新：{total} 项更改中已完成 {done} 项…",
   "Clear search": "清除搜索",
   "Type in the search box to find files": "在搜索框中输入文字来查找文件",
+  "Also search inside files": "也搜索文件内容",
+  "Found in": "找到的内容",
+  "Name or text contains \"{term}\"": "名称或内容包含“{term}”",
+  "Also look inside files": "也搜索文件内容",
 } satisfies Record<string, string>;

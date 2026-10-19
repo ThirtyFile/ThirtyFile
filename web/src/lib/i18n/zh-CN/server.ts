@@ -1165,4 +1165,12 @@ export default {
   "Too many wrong passwords for this link. Try again in {n} seconds.": "此链接的密码错误次数过多，请 {n} 秒后再试",
   // Email settings (mail.rs)
   "Enter the password again: the email server or account changed": "邮件服务器或账号已更改，请重新输入密码",
+  "Choose email or webhook": "请选择电子邮件或 webhook",
+  "Enter the webhook address as a full URL, such as https://example.com/hook": "请输入完整的 webhook 地址，例如 https://example.com/hook",
+  "Failed sign-ins: 3 to 1,000 in 1 to 1,440 minutes": "登录失败：3 至 1,000 次，于 1 至 1,440 分钟内",
+  "The cooldown is at most 1,440 minutes": "冷却时间最多 1,440 分钟",
+  "The webhook address must be http or https, without a user name or password in it": "Webhook 地址必须是 http 或 https，且不能包含用户名或密码",
+  "Search inside files is off": "文件内容搜索未开启",
+  "The largest file read is 1 to 100 MB": "读取的文件大小上限为 1 至 100 MB",
+  "The text kept is 10 to 100,000 MB in all": "文字存储总量为 10 至 100,000 MB",
 } satisfies Record<string, string>;

@@ -274,6 +274,8 @@ fn admin_api() -> Router<AppState> {
         .route("/admin/access-review", get(crate::access_review::get))
         .route("/admin/access-review/reminder", axum::routing::put(crate::access_review::set_reminder))
         .route("/admin/access-review/reviewed", post(crate::access_review::reviewed))
+        .route("/admin/content-search", get(crate::contentsearch::get).put(crate::contentsearch::save))
+        .route("/admin/content-search/rebuild", post(crate::contentsearch::rebuild))
         .route("/admin/alerts", get(crate::alerts::get).put(crate::alerts::save))
         .route("/admin/alerts/test", post(crate::alerts::test))
         .route("/admin/backups", get(backups::api::list))

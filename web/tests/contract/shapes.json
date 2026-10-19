@@ -123,6 +123,18 @@
     "name": "",
     "scope": ""
   },
+  "ContentSearchInfo": {
+    "bytes": 0,
+    "enabled": false,
+    "failed": 0,
+    "full": false,
+    "indexed": 0,
+    "max_file_mb": 0,
+    "max_total_mb": 0,
+    "paused": false,
+    "queued": 0,
+    "skipped": 0
+  },
   "Device": {
     "created_at": 0,
     "current": false,
@@ -327,6 +339,7 @@
     "can_delete": false,
     "can_share": false,
     "can_write": false,
+    "content_search": false,
     "display_name": "",
     "ftp_enabled": false,
     "guest": false,

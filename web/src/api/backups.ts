@@ -13,6 +13,8 @@ import type {
   ReviewState,
   AlertSettings,
   AlertsInfo,
+  ContentSearchInfo,
+  ContentSearchSettings,
   RestorePreview,
   RestoreRequest,
   SnapshotItem,
@@ -27,6 +29,10 @@ export const backupsApi = {
   accessReview: (signal?: AbortSignal) => get<AccessReview>("/admin/access-review", signal),
   setReviewReminder: (everyDays: number) => request<ReviewState>("PUT", "/admin/access-review/reminder", { every_days: everyDays }),
   markReviewed: () => post<ReviewState>("/admin/access-review/reviewed"),
+  contentSearch: (signal?: AbortSignal) => get<ContentSearchInfo>("/admin/content-search", signal),
+  saveContentSearch: (settings: ContentSearchSettings) => request<ContentSearchInfo>("PUT", "/admin/content-search", settings),
+  /** Deletes what was read and reads every file again */
+  rebuildContentSearch: () => post<ContentSearchInfo>("/admin/content-search/rebuild"),
   alerts: (signal?: AbortSignal) => get<AlertsInfo>("/admin/alerts", signal),
   /** `secret`: a new shared secret for the webhook; the one saved stays when left out */
   saveAlerts: (settings: AlertSettings & { secret?: string }) => request<AlertsInfo>("PUT", "/admin/alerts", settings),

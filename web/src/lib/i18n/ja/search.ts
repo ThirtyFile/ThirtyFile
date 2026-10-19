@@ -23,4 +23,8 @@ export default {
   "Updating: {done} of {total} changes…": "更新しています：{total} 件中 {done} 件の変更が完了…",
   "Clear search": "検索をクリア",
   "Type in the search box to find files": "検索ボックスに入力してファイルを探します",
+  "Also search inside files": "ファイルの中身も検索",
+  "Found in": "見つかった箇所",
+  "Name or text contains \"{term}\"": "名前または本文に「{term}」を含む",
+  "Also look inside files": "ファイルの中身も検索する",
 } satisfies Record<string, string>;

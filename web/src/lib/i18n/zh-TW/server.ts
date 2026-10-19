@@ -1165,4 +1165,12 @@ export default {
   "Too many wrong passwords for this link. Try again in {n} seconds.": "此連結的密碼錯誤次數過多，請 {n} 秒後再試",
   // Email settings (mail.rs)
   "Enter the password again: the email server or account changed": "郵件伺服器或帳號已變更，請重新輸入密碼",
+  "Choose email or webhook": "請選擇電子郵件或 webhook",
+  "Enter the webhook address as a full URL, such as https://example.com/hook": "請輸入完整的 webhook 網址，例如 https://example.com/hook",
+  "Failed sign-ins: 3 to 1,000 in 1 to 1,440 minutes": "登入失敗：3 至 1,000 次，於 1 至 1,440 分鐘內",
+  "The cooldown is at most 1,440 minutes": "冷卻時間最多 1,440 分鐘",
+  "The webhook address must be http or https, without a user name or password in it": "Webhook 網址必須是 http 或 https，且不能包含使用者名稱或密碼",
+  "Search inside files is off": "檔案內容搜尋未開啟",
+  "The largest file read is 1 to 100 MB": "讀取的檔案大小上限為 1 至 100 MB",
+  "The text kept is 10 to 100,000 MB in all": "文字儲存總量為 10 至 100,000 MB",
 } satisfies Record<string, string>;

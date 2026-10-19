@@ -30,6 +30,7 @@ import { LANGUAGES, t } from "@/lib/i18n";
 import { invalidateFiles } from "@/lib/queries";
 import { Toggle, Section, SettingsFrame } from "@/admin/SettingsFrame";
 import { SftpSettings } from "@/admin/system/SftpSettings";
+import { ContentSearchSettings } from "@/admin/system/ContentSearchSettings";
 
 import { S3Settings } from "@/admin/system/S3Settings";
 import { FtpSettings } from "@/admin/system/FtpSettings";
@@ -432,6 +433,7 @@ export function GeneralSettingsPage() {
           </div>
         </Section>
       )}
+      {q.data && <ContentSearchSettings />}
       {q.data && (
         <Section title={t("Share links")}>
           <div className="flex items-start gap-4 p-4">

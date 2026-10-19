@@ -19,6 +19,7 @@ mod branding;
 mod check;
 pub mod cli;
 mod content;
+mod contentsearch;
 mod dav;
 mod db;
 mod downloads;
