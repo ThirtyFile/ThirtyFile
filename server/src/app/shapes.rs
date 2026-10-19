@@ -139,6 +139,10 @@ async fn api_shapes_match_the_recorded_ones() {
     saved["recent"] = json!([{ "id": 1, "channel": "webhook", "recipient": null, "state": "firing", "kind": "offline", "params": { "location": "NAS" }, "created_at": 1, "attempts": 0, "done_at": null, "failed": false, "error": null }]);
     record("AlertsInfo", &saved);
 
+    // Search inside files: the settings and how far the reading has got
+    let search = json!({ "enabled": true, "paused": false, "max_file_mb": 25, "max_total_mb": 500 });
+    record("ContentSearchInfo", &call(&app, &me, Method::PUT, "/api/admin/content-search", Some(search)).await);
+
     let now = serde_json::to_string_pretty(&Value::Object(shapes)).unwrap() + "\n";
     if std::env::var_os("THIRTYFILE_UPDATE_SHAPES").is_some() {
         std::fs::write(SHAPES, &now).unwrap();

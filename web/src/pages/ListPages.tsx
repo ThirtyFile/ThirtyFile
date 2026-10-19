@@ -5,11 +5,13 @@ import { ClockIcon, FolderSearchIcon, PencilIcon, SearchIcon, SearchXIcon, StarI
 import { api, type Located, type SearchFilter, type SortKey, type SortOrder, type TagColor } from "@/api";
 import { keys } from "@/api/queryKeys";
 import { Explorer } from "@/components/Explorer";
+import { Snippet } from "@/components/Snippet";
 import { TagDot, askToDeleteTag, recolor } from "@/components/tags";
 import { Button } from "@/components/ui/button";
 import { TAG_COLORS, editTag, useTags } from "@/lib/tags";
 import { DAY, SEARCH_DATES, SEARCH_SIZES, SEARCH_TYPES } from "@/lib/searchFilters";
 import { editSmartFolder, queryFromSearch, smartPath } from "@/lib/smartFolders";
+import { useMe } from "@/lib/session";
 import { useSort } from "@/lib/sort";
 import { t } from "@/lib/i18n";
 import { extOf, nameCollator } from "@/lib/utils";
@@ -156,6 +158,9 @@ export function SearchPage() {
   const term = params.get("q") ?? "";
   const within = params.get("in") ?? undefined;
   const [type, date, size, tag] = [params.get("type") ?? "", params.get("date") ?? "", params.get("size") ?? "", params.get("tag") ?? ""];
+  const me = useMe();
+  // Inside files too: asked for in the address (a search from the address bar looks at names)
+  const content = me.content_search && params.get("content") === "1";
   const { tags } = useTags();
   const set = (key: string, value: string) =>
     setParams(
@@ -173,6 +178,7 @@ export function SearchPage() {
     ...SEARCH_TYPES.find((x) => x.id === type)?.filter,
     ...SEARCH_SIZES.find((x) => x.id === size)?.filter,
     tags: tag || undefined,
+    content: content || undefined,
   };
   const days = SEARCH_DATES.find((x) => x.id === date)?.days;
   // Rounded to the hour, so the query key stays the same while the page is open
@@ -228,6 +234,12 @@ export function SearchPage() {
           ))}
         </NativeSelect>
       </label>
+      {me.content_search && (
+        <label className="flex items-center gap-1.5">
+          <input type="checkbox" className="size-3.5 accent-brand" checked={content} onChange={(e) => set("content", e.target.checked ? "1" : "")} />
+          {t("Also search inside files")}
+        </label>
+      )}
       {(tags.length > 0 || tag) && (
         <label className="flex items-center gap-1.5">
           {t("Tag")}
@@ -248,7 +260,7 @@ export function SearchPage() {
         className="ml-auto"
         disabled={!term.trim() && !tag}
         onClick={async () => {
-          const query = queryFromSearch({ term, within, type, date, size, tag });
+          const query = queryFromSearch({ term, within, type, date, size, tag, content });
           const saved = await editSmartFolder(undefined, { name: term.trim() || (tags.find((x) => String(x.id) === tag)?.name ?? ""), query });
           if (saved) navigate(smartPath(saved));
         }}
@@ -268,6 +280,7 @@ export function SearchPage() {
       onSort={onSort}
       onSortChange={setSort}
       notice={filters}
+      extraColumn={content ? { label: t("Found in"), width: 340, value: (n) => (q.data?.snippets[n.id] ? <Snippet pieces={q.data.snippets[n.id]} /> : "") } : undefined}
       // A new search from here looks where this one does
       searchPlaceholder={within ? t("Search {name}", { name: folderName || "…" }) : undefined}
       crumbs={crumbs(term ? t('Search results for "{term}"', { term: shown.current }) : t("Search"))}

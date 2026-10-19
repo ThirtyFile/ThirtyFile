@@ -40,6 +40,8 @@ pub struct SearchQuery {
     /// Only items with all of these tags of the person's own (tag ids, comma separated); with tags, the name may be left
     /// out to find every item that has them
     pub(super) tags: Option<String>,
+    /// Look inside files too (when an administrator turned that on)
+    pub(super) content: Option<bool>,
 }
 
 impl SearchQuery {
@@ -58,6 +60,9 @@ pub struct SearchResult {
     pub(super) items: Vec<Located>,
     /// More matches than returned
     pub(super) truncated: bool,
+    /// For items found by what is inside them: the text around the match, as pieces (the odd ones are the match), by
+    /// item. Only for the items returned.
+    pub(super) snippets: HashMap<String, Vec<String>>,
 }
 
 /// Extensions as a search takes them (comma separated, with or without the dot): lowercase, without the dot
@@ -109,6 +114,8 @@ pub(super) struct Criteria {
     /// With all of these tags of `tagged_by`'s own
     pub(super) tags: Vec<i64>,
     pub(super) tagged_by: i64,
+    /// The term is also looked for inside files (the caller has checked that searching inside files is on)
+    pub(super) content: bool,
 }
 
 impl Criteria {
@@ -146,14 +153,28 @@ impl Criteria {
         let term = self.term.trim();
         // Whether an index narrows the items down (else every item in reach is read: `Held::turn`)
         let mut indexed = self.below.is_some() || !self.tags.is_empty() || narrowed;
+        // In the name, or (when asked to) in the text read from the file: either is a match
+        let mut by_name = None;
         if term.chars().count() >= 3 {
             indexed = true;
             // The trigram index: the term as one phrase (quotes inside it doubled)
             let phrase = arg(Arg::Text(format!("\"{}\"", term.replace('"', "\"\""))));
-            sql += &format!(" AND n.rowid IN (SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH {phrase})");
+            by_name = Some(format!("n.rowid IN (SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH {phrase})"));
         } else if !term.is_empty() {
             let escaped = crate::util::like_escape(&term.to_lowercase());
-            sql += &format!(" AND unicode_lower(n.name) LIKE {} ESCAPE '\\'", arg(Arg::Text(format!("%{escaped}%"))));
+            by_name = Some(format!("unicode_lower(n.name) LIKE {} ESCAPE '\\'", arg(Arg::Text(format!("%{escaped}%")))));
+        }
+        let by_content = if self.content { crate::contentsearch::match_expr(term) } else { None }.map(|expr| {
+            indexed = true;
+            format!(
+                "n.id IN (SELECT ci.node_id FROM content_fts CROSS JOIN content_index ci ON ci.fts_rowid = content_fts.rowid WHERE content_fts MATCH {})",
+                arg(Arg::Text(expr))
+            )
+        });
+        match (by_name, by_content) {
+            (Some(name), Some(content)) => sql += &format!(" AND ({name} OR {content})"),
+            (Some(only), None) | (None, Some(only)) => sql += &format!(" AND {only}"),
+            (None, None) => {}
         }
         match self.kind.as_deref() {
             Some("folder") => sql += " AND n.kind = 'folder'",
@@ -201,7 +222,7 @@ pub async fn search(State(st): State<AppState>, user: User, Query(q): Query<Sear
     check_terms(term, &exts)?;
     let tags = q.tag_ids()?;
     if term.is_empty() && tags.is_empty() {
-        return Ok(Json(SearchResult { items: Vec::new(), truncated: false }));
+        return Ok(Json(SearchResult { items: Vec::new(), truncated: false, snippets: HashMap::new() }));
     }
     let mut c = st.db.acquire().await?;
     crate::tags::check_own(&mut c, &user, &tags).await?;
@@ -210,6 +231,7 @@ pub async fn search(State(st): State<AppState>, user: User, Query(q): Query<Sear
         Some(within) => Some(tree::folder_for(&mut c, &user, within, Need::Read).await?.id),
         None => None,
     };
+    let content = q.content.unwrap_or(false) && crate::contentsearch::enabled(&mut c).await?;
     let criteria = Criteria {
         term: term.to_string(),
         below,
@@ -223,6 +245,7 @@ pub async fn search(State(st): State<AppState>, user: User, Query(q): Query<Sear
         owner: q.owner.clone(),
         tags,
         tagged_by: user.id,
+        content,
     };
     let held = criteria.held(drives, folders);
     drop(c);
@@ -235,7 +258,14 @@ pub async fn search(State(st): State<AppState>, user: User, Query(q): Query<Sear
     .await?;
     let truncated = nodes.len() as i64 > SEARCH_LIMIT;
     nodes.truncate(SEARCH_LIMIT as usize);
-    Ok(Json(SearchResult { items: locate(&st, &user, nodes).await?, truncated }))
+    // Only for items that are returned: what the person can't open is not in `nodes`
+    let snippets = if content {
+        let ids: Vec<String> = nodes.iter().filter(|n| n.kind == "file").map(|n| n.id.clone()).collect();
+        crate::contentsearch::snippets(&mut *st.db.acquire().await?, term, &ids).await?
+    } else {
+        HashMap::new()
+    };
+    Ok(Json(SearchResult { items: locate(&st, &user, nodes).await?, truncated, snippets }))
 }
 
 #[derive(Deserialize)]
@@ -311,7 +341,7 @@ pub async fn tagged(State(st): State<AppState>, user: User, Path(tag): Path<i64>
     drop(c);
     let truncated = nodes.len() as i64 > TAGGED_LIMIT;
     nodes.truncate(TAGGED_LIMIT as usize);
-    Ok(Json(SearchResult { items: locate(&st, &user, nodes).await?, truncated }))
+    Ok(Json(SearchResult { items: locate(&st, &user, nodes).await?, truncated, snippets: HashMap::new() }))
 }
 
 /// Files listed in Recent

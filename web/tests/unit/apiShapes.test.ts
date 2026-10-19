@@ -7,6 +7,7 @@ import type {
   AccessInfo,
   AlertsInfo,
   AppPassword,
+  ContentSearchInfo,
   Activity,
   Device,
   Drive,
@@ -55,6 +56,7 @@ function agrees<D extends { missing: never; unknown: never }>(): D | undefined {
 const checked: { [K in keyof Shapes]: unknown } = {
   AccessInfo: agrees<Drift<Shapes["AccessInfo"], AccessInfo>>(),
   AlertsInfo: agrees<Drift<Shapes["AlertsInfo"], AlertsInfo>>(),
+  ContentSearchInfo: agrees<Drift<Shapes["ContentSearchInfo"], ContentSearchInfo>>(),
   AppPassword: agrees<Drift<Shapes["AppPassword"], AppPassword>>(),
   Activity: agrees<Drift<Shapes["Activity"], Activity>>(),
   Device: agrees<Drift<Shapes["Device"], Device>>(),

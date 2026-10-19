@@ -197,7 +197,7 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
     tone: "bg-brand/12 text-brand",
     category: "system",
     keywords:
-      "網址 網域 url domain 分享連結 全部檔案 公司 共用 團隊空間 建立 新使用者 我的檔案 個人空間 儲存位置 預設 空間大小 配額 容量 語言 中文 英文 預設語言 兩步驟驗證 驗證碼 密碼長度 安全 版本 較早版本 歷程 general site address share link all files company shared team space create new user my files personal space storage location default size quota language english chinese two-factor 2fa totp authenticator password length security versions history", // i18n-ignore: bilingual search keywords
+      "網址 網域 url domain 分享連結 全部檔案 公司 共用 團隊空間 建立 新使用者 我的檔案 個人空間 儲存位置 預設 空間大小 配額 容量 語言 中文 英文 預設語言 兩步驟驗證 驗證碼 密碼長度 安全 版本 較早版本 歷程 general site address share link all files company shared team space create new user my files personal space storage location default size quota language english chinese two-factor 2fa totp authenticator password length security versions history 搜尋 檔案內容 全文 索引 search inside files full text content index", // i18n-ignore: bilingual search keywords
   },
   {
     key: "branding",

@@ -6,6 +6,7 @@ import type {
   Node,
   Job,
   SearchFilter,
+  SearchSnippets,
   Located,
   FolderContents,
   NodeInfo,
@@ -61,9 +62,9 @@ export const filesApi = {
   emptyTrash: () => post<Job>("/trash/empty"),
   /** What Empty trash would delete: items per space */
   emptyTrashPreview: () => get<{ kind: string; name: string; items: number }[]>("/trash/empty"),
-  /** Names containing `q`; at most 300 (`truncated` when there were more) */
+  /** Names containing `q`, and with `content` text inside files too; at most 300 (`truncated` when there were more) */
   search: (q: string, f: SearchFilter = {}, signal?: AbortSignal) =>
-    get<{ items: Located[]; truncated: boolean }>(`/search${qs(toParams({ q, ...f }))}`, signal).then((r) => ({ ...r, items: r.items.map(localizeLocated) })),
+    get<{ items: Located[]; truncated: boolean; snippets: SearchSnippets }>(`/search${qs(toParams({ q, ...f }))}`, signal).then((r) => ({ ...r, items: r.items.map(localizeLocated) })),
   recent: () => get<Located[]>("/recent").then((l) => l.map(localizeLocated)),
   favorites: (sort?: SortKey, order?: SortOrder) => get<Located[]>(`/favorites${qs({ sort, order })}`).then((l) => l.map(localizeLocated)),
   setFavorite: (ids: string[], favorite: boolean) => post("/nodes/favorite", { ids, favorite }),

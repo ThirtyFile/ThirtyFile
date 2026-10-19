@@ -106,6 +106,7 @@ export const keys = {
   databaseBackup: () => ["database-backup"],
   accessReview: () => ["access-review"],
   alerts: () => ["admin-alerts"],
+  contentSearch: () => ["content-search"],
   databaseCopies: () => ["database-backup", "copies"],
   copyPreview: (source: string, dest: string) => ["copy-preview", source, dest],
   backupNextRuns: (schedule: string, tz: string) => ["backup-next-runs", schedule, tz],

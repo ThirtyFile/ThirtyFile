@@ -19,6 +19,7 @@ import { useDrives } from "@/lib/drives";
 import { t } from "@/lib/i18n";
 import { SEARCH_DATES, SEARCH_SIZES, SEARCH_TYPES } from "@/lib/searchFilters";
 import { MAX_SMART_NAME, createSmartFolder, deleteSmartFolder, formOf, queryOf, scopeValue, smartDialog, updateSmartFolder, type SmartForm } from "@/lib/smartFolders";
+import { useMe } from "@/lib/session";
 import { useStore } from "@/lib/store";
 import { useTags } from "@/lib/tags";
 import { useSubmit } from "@/lib/useSubmit";
@@ -52,7 +53,7 @@ export function QuerySummary({ query }: { query: SmartQuery }) {
   const scope = useScopeLabel(query);
   const f = formOf("", query);
   const parts: ReactNode[] = [];
-  if (f.term) parts.push(t('Name contains "{term}"', { term: f.term }));
+  if (f.term) parts.push(f.content ? t('Name or text contains "{term}"', { term: f.term }) : t('Name contains "{term}"', { term: f.term }));
   if (f.type === "file") parts.push(t("Files"));
   else if (f.type === "custom") parts.push(t("File types: {types}", { types: f.ext }));
   else if (f.type) {
@@ -129,6 +130,7 @@ const RANGE = "range";
 function SmartFolderDialog({ folder, draft, onDone }: { folder?: SmartFolder; draft?: { name: string; query: SmartQuery }; onDone(f: SmartFolder | null): void }) {
   const qc = useQueryClient();
   const [form, setForm] = useState<SmartForm>(() => formOf(folder?.name ?? draft?.name ?? "", folder?.query ?? draft?.query ?? { scope: { kind: "all" } }));
+  const me = useMe();
   const set = <K extends keyof SmartForm>(key: K, value: SmartForm[K]) => setForm((f) => ({ ...f, [key]: value }));
   const { tags } = useTags();
   const drives = useDrives();
@@ -170,6 +172,12 @@ function SmartFolderDialog({ folder, draft, onDone }: { folder?: SmartFolder; dr
             <div className="grid gap-1.5">
               <Label htmlFor={ids.term}>{t("Name contains")}</Label>
               <Input id={ids.term} value={form.term} onChange={(e) => set("term", e.target.value)} autoComplete="off" />
+              {(me.content_search || form.content) && (
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <input type="checkbox" className="size-3.5 accent-brand" checked={form.content} disabled={!me.content_search} onChange={(e) => set("content", e.target.checked)} />
+                  {t("Also look inside files")}
+                </label>
+              )}
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor={ids.scope}>{t("Look in")}</Label>

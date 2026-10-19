@@ -27,6 +27,16 @@ describe("a search saved as a smart folder", () => {
     // A tag alone
     expect(queryFromSearch({ term: "", tag: "5" })).toEqual({ scope: { kind: "all" }, tags: [5] });
   });
+
+  test("keeps looking inside files, only while there is a term to look for", () => {
+    expect(queryFromSearch({ term: "budget", content: true })).toEqual({ name: "budget", content: true, scope: { kind: "all" } });
+    expect(queryFromSearch({ term: "budget", content: false })).toEqual({ name: "budget", scope: { kind: "all" } });
+    // The dialog gives it up when the name is emptied: there is nothing to look for inside files
+    const q: SmartQuery = { name: "budget", content: true, scope: { kind: "all" } };
+    expect(formOf("B", q).content).toBe(true);
+    expect(queryOf(formOf("B", q))).toEqual(q);
+    expect(queryOf({ ...formOf("B", q), term: "  ", tags: [1] })).toEqual({ scope: { kind: "all" }, tags: [1] });
+  });
 });
 
 describe("the dialog's fields", () => {

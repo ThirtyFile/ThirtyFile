@@ -60,6 +60,8 @@ export interface ExplorerProps {
   showLocation?: boolean;
   /** Show the uploader column (shared directories) */
   showOwner?: boolean;
+  /** One more text column after the size (list view), e.g. where a search found each item */
+  extraColumn?: FileListProps["extraColumn"];
   emptyHint?: string;
   sort?: { key: SortKey; order: SortOrder };
   /** Column header clicked: toggle sorting */
@@ -138,6 +140,7 @@ export function Explorer(p: ExplorerProps) {
     groupReversed: s.groupBy === "date" ? p.sort?.key === "updated" && p.sort.order === "asc" : s.groupBy === "type" && p.sort?.key === "type" && p.sort.order === "desc",
     showLocation: p.showLocation,
     showOwner: p.showOwner,
+    extraColumn: p.extraColumn,
     showCheckboxes,
     touchMenu: !phone,
     dimmed,

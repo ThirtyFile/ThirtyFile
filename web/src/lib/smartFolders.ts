@@ -85,6 +85,8 @@ export interface SearchChoices {
   date?: string;
   size?: string;
   tag?: string;
+  /** Also looked for inside files */
+  content?: boolean;
 }
 
 /** A search as a smart folder's query; a period ("Last 7 days") stays one, counted whenever the folder is opened */
@@ -102,6 +104,7 @@ export function queryFromSearch(s: SearchChoices): SmartQuery {
     modified_days: days,
     scope: s.within ? { kind: "folder", id: s.within } : { kind: "all" },
     tags: s.tag && Number.isInteger(tag) ? [tag] : undefined,
+    content: s.content || undefined,
   });
 }
 
@@ -117,6 +120,8 @@ export interface SmartForm {
   name: string;
   /** In the name */
   term: string;
+  /** And inside files */
+  content: boolean;
   /** "all", "space:<id>" or "folder:<id>" */
   scope: string;
   /** "", "file", one of SEARCH_TYPES, or "custom" (`ext`) */
@@ -167,6 +172,7 @@ export function formOf(name: string, q: SmartQuery): SmartForm {
   return {
     name,
     term: q.name ?? "",
+    content: !!q.content,
     scope: scopeValue(q.scope ?? { kind: "all" }),
     type,
     ext: type === "custom" ? (q.ext ?? "") : "",
@@ -195,6 +201,7 @@ export function queryOf(f: SmartForm): SmartQuery {
   const to = f.date === "range" ? dayStart(f.to) : undefined;
   return clean({
     name: f.term.trim() || undefined,
+    content: (f.content && f.term.trim() !== "") || undefined,
     kind: f.type === "file" ? "file" : type?.kind,
     ext: f.type === "custom" ? f.ext.trim() || undefined : type?.ext,
     min_size: f.size === "range" ? bytes(f.minMb) : size?.min_size,

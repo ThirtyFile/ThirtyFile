@@ -69,7 +69,12 @@ export interface SearchFilter {
   max_size?: number;
   /** Only items with all of these tags of the person's own (ids, comma separated); with tags, the search term may be empty */
   tags?: string;
+  /** Look inside files too (when an administrator turned that on) */
+  content?: boolean;
 }
+
+/** A search's results: the text around the match for the files found by what is inside them, as pieces (the odd ones are the match), by item id */
+export type SearchSnippets = Record<string, string[]>;
 
 /** Where a smart folder looks: everywhere the person has access, one space, or a folder and its subfolders */
 export type SmartScope = { kind: "all" } | { kind: "space"; id: string } | { kind: "folder"; id: string };
@@ -92,6 +97,8 @@ export interface SmartQuery {
   scope: SmartScope;
   /** With all of these tags of the person's own */
   tags?: number[];
+  /** The name is looked for inside files too (when an administrator turned that on) */
+  content?: boolean;
 }
 
 /** One of the signed-in person's smart folders: a saved search that shows as a folder; only they see it */
@@ -428,6 +435,32 @@ export interface BackupSet {
 export type BackupSchedule = { every: number } | { daily: string } | { weekly: string; days: number[] };
 
 // ───────────── Administrator alerts (Control panel › Administrator alerts) ─────────────
+
+/** Control panel › General › Search: searching inside files */
+export interface ContentSearchSettings {
+  enabled: boolean;
+  /** Nothing new is read; what was read stays searchable */
+  paused: boolean;
+  /** The largest file read, in MB */
+  max_file_mb: number;
+  /** The most text kept in all, in MB */
+  max_total_mb: number;
+}
+
+export interface ContentSearchInfo extends ContentSearchSettings {
+  /** Files waiting to be read */
+  queued: number;
+  /** Files whose text is searchable */
+  indexed: number;
+  /** Files with nothing to read in them (other kinds, too large, no text) */
+  skipped: number;
+  /** Files that could not be read */
+  failed: number;
+  /** Bytes of text kept */
+  bytes: number;
+  /** The limit for all the text was reached: files wait in the queue */
+  full: boolean;
+}
 
 export interface AlertSettings {
   /** Email to the administrators with an address */
@@ -1274,6 +1307,8 @@ export interface Me {
   s3_enabled: boolean;
   ftp_enabled: boolean;
   sftp_keys: boolean;
+  /** Searches can look inside files */
+  content_search: boolean;
   id: number;
   /** An administrator chose the password: the person must choose their own before anything else */
   must_change_password: boolean;

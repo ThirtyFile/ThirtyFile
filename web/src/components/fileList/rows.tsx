@@ -87,7 +87,7 @@ export interface Handlers {
   doubleClick(n: Item): void;
   openInNewTab?(n: Item): void;
   dateOf(n: Item): number;
-  extra?(n: Item): string;
+  extra?(n: Item): ReactNode;
   rename(item: Item, name: string): Promise<void>;
   renameDone(item: Item, byKey: boolean): void;
   /** A folder's triangle, in a list whose folders expand in place: expands it, or collapses it */

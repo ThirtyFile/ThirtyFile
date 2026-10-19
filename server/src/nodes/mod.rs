@@ -259,6 +259,9 @@ async fn locate(st: &AppState, user: &User, mut nodes: Vec<Node>) -> AppResult<V
 }
 
 #[cfg(test)]
+mod content_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::{logs, testutil, util::now};
@@ -732,6 +735,7 @@ mod tests {
                 max_size: None,
                 owner: None,
                 tags: None,
+                content: None,
             };
             async move {
                 let Json(r) = search(State(st), amy, Query(q)).await.unwrap();
