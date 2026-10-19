@@ -3,7 +3,7 @@
 use crate::{
     auth::{self, User},
     error::{AppError, AppResult},
-    tree::{self, LinkMakers, Need, Node, Role, SpaceKind},
+    tree::{Need, Node},
 };
 use serde::Serialize;
 use std::sync::{
@@ -40,29 +40,9 @@ pub struct Folder {
     pub last_used_at: Option<i64>,
 }
 
+/// The folder `id`, when `user` may publish it as a receive folder (`crate::publish::publisher`)
 pub async fn publisher(conn: &mut sqlx::SqliteConnection, user: &User, id: &str, managers: bool) -> AppResult<Node> {
-    let current = auth::current_user(conn, user).await?;
-    let user = &current;
-    if user.guest {
-        return Err(AppError::forbidden("Guest accounts can't publish receive folders"));
-    }
-    let node = tree::get_node(conn, id).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
-    let drive = tree::get_drive(conn, node.drive()).await?.ok_or_else(|| AppError::not_found("Space not found"))?;
-    if !node.is_folder() || drive.kind == SpaceKind::Personal || drive.disabled || drive.link_makers == LinkMakers::Nobody {
-        return Err(AppError::forbidden("This folder can't be published as an FTP receive folder"));
-    }
-    let (trashed,): (bool,) = sqlx::query_as("WITH RECURSIVE up(id,parent_id,trash) AS (SELECT id,parent_id,trashed_at IS NOT NULL FROM nodes WHERE id=? UNION ALL SELECT n.id,n.parent_id,n.trashed_at IS NOT NULL FROM nodes n JOIN up ON n.id=up.parent_id) SELECT COALESCE(MAX(trash),1) FROM up").bind(id).fetch_one(&mut *conn).await?;
-    if trashed {
-        return Err(AppError::not_found("Folder not found"));
-    }
-    if !user.is_admin() && (!managers || !user.can_share || !tree::live_role_on(conn, user, &node).await?.is_some_and(|r| r >= Role::Manager)) {
-        return Err(AppError::forbidden("Only allowed space managers can publish FTP receive folders"));
-    }
-    if node.space_read_only {
-        return Err(tree::read_only_space());
-    }
-    tree::allows(user, Role::Manager, Need::Add)?;
-    Ok(node)
+    crate::publish::publisher(conn, user, id, crate::publish::Publication::FtpReceiveFolder, managers).await
 }
 
 pub async fn actor_in_transaction(conn: &mut sqlx::SqliteConnection, actor: &User, need: Need) -> AppResult<User> {

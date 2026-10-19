@@ -552,13 +552,12 @@ pub async fn access(State(st): State<AppState>, user: User, Path(id): Path<Strin
     }
     let sql = format!("SELECT {GRANT_COLS} FROM grants g WHERE g.node_id = ? ORDER BY g.created_at");
     let direct: Vec<GrantInfo> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(&node.id).fetch_all(&mut *c).await?;
+    // The grants of the folders above that reach it (its own are `direct`)
     let sql = format!(
-        "WITH RECURSIVE up(id, parent_id, name, depth, restricted, inherited) AS (
-           SELECT id, parent_id, name, 0, restricted, NOT (SELECT restricted FROM nodes WHERE id = ?1) FROM nodes WHERE id = (SELECT parent_id FROM nodes WHERE id = ?1)
-           UNION ALL SELECT n.id, n.parent_id, n.name, up.depth + 1, n.restricted, up.inherited AND NOT up.restricted FROM nodes n JOIN up ON n.id = up.parent_id
-         )
-         SELECT {GRANT_COLS}, CASE WHEN up.parent_id IS NULL THEN ?2 ELSE up.name END AS inherited_from
-         FROM grants g JOIN up ON g.node_id = up.id WHERE up.inherited OR (up.parent_id IS NULL AND g.role = 'owner') ORDER BY up.depth DESC, g.created_at"
+        "WITH RECURSIVE {} SELECT {GRANT_COLS}, CASE WHEN up.parent_id IS NULL THEN ?2 ELSE up.name END AS inherited_from
+         FROM grants g JOIN up ON g.node_id = up.id WHERE up.depth > 0 AND {} ORDER BY up.depth DESC, g.created_at",
+        tree::walk_up("up", "?1"),
+        tree::reaches("up")
     );
     let mut inherited: Vec<GrantInfo> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(&node.id).bind(&drive.name).fetch_all(&mut *c).await?;
     // Someone who only has the folder shared with them (not a member of the space) sees the grants from the shared

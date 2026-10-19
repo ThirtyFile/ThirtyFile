@@ -197,7 +197,7 @@ pub async fn compress(State(st): State<AppState>, user: User, Json(req): Json<Co
         let dest = tree::folder_for(&mut c, &user, &req.parent_id, Need::Add).await?;
         let mut roots = Vec::with_capacity(ids.len());
         for id in ids {
-            let node = tree::owned_node(&mut c, &user, id).await?;
+            let node = tree::readable_node(&mut c, &user, id).await?;
             tree::require_subtree(&mut c, &user, &node, Need::Read).await?;
             roots.push(node);
         }
@@ -346,7 +346,7 @@ pub fn is_zip(n: &Node) -> bool {
 pub async fn extract(State(st): State<AppState>, user: User, Json(req): Json<ExtractReq>) -> AppResult<Json<Job>> {
     let (zip, parent) = {
         let mut c = st.db.acquire().await?;
-        let zip = tree::owned_node(&mut c, &user, &req.id).await?;
+        let zip = tree::readable_node(&mut c, &user, &req.id).await?;
         if !is_zip(&zip) {
             return Err(AppError::bad_request("Only ZIP files can be extracted"));
         }

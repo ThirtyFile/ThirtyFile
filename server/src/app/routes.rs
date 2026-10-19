@@ -192,13 +192,11 @@ fn sharing_api() -> Router<AppState> {
         .route("/s3/buckets/{id}/keys", post(crate::s3::manage::new_key))
         .route("/s3/buckets/{id}/keys/{key}", patch(crate::s3::manage::revoke_key).delete(crate::s3::manage::delete_key))
         .route("/admin/s3", get(crate::s3::config::get).put(crate::s3::config::save))
-        .route("/admin/s3/buckets", get(crate::s3::manage::admin_list))
         .route("/ftp/options", get(crate::ftp::config::options))
         .route("/ftp/folders", get(crate::ftp::manage::list).post(crate::ftp::manage::create))
         .route("/ftp/folders/{id}", patch(crate::ftp::manage::update).delete(crate::ftp::manage::delete))
         .route("/ftp/folders/{id}/password", post(crate::ftp::manage::rotate))
         .route("/admin/ftp", get(crate::ftp::config::get).put(crate::ftp::config::save))
-        .route("/admin/ftp/folders", get(crate::ftp::manage::admin_list))
         // Listing the spaces works with an app password too
         .route("/drives", get(drives::list).layer(middleware::from_fn(auth::app_passwords::allow)).post(drives::create))
         .route("/drives/{id}", patch(drives::update).delete(drives::delete))

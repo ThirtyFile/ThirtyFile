@@ -72,7 +72,7 @@ async fn me_of(st: &AppState, user: User, headers: &HeaderMap) -> AppResult<Me> 
     let personal_pending = !user.guest && personal_pending;
     let s3_enabled = crate::s3::config::routing(st).await?.enabled;
     let ftp_enabled = crate::ftp::config::load(st).await?.enabled;
-    let sftp_keys = crate::sftp::settings::flag(st, "sftp_enabled").await? && crate::sftp::settings::flag(st, "sftp_keys_enabled").await?;
+    let sftp_keys = crate::sftp::settings::load(st).await?.keys();
     Ok(Me {
         user,
         used_bytes,

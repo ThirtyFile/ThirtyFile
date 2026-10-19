@@ -44,6 +44,7 @@ mod paths;
 mod personal;
 #[cfg(unix)]
 mod privileges;
+mod publish;
 mod redact;
 mod replicas;
 mod reset;

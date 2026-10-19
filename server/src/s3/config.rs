@@ -20,11 +20,7 @@ pub struct Config {
 }
 
 pub async fn load(st: &AppState) -> AppResult<Config> {
-    let mut config: Config = db::get_setting(&st.db, "s3").await?.and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default();
-    if config.region.is_empty() {
-        config.region = "us-east-1".into();
-    }
-    Ok(config)
+    from_connection(&mut *st.db.acquire().await?).await
 }
 
 pub async fn get(State(st): State<AppState>, _admin: Admin) -> AppResult<Json<Config>> {
@@ -53,7 +49,7 @@ pub async fn save(State(st): State<AppState>, Admin(user): Admin, Json(mut confi
     }
     let mut tx = db::begin_write(&st.db).await?;
     crate::auth::require_admin(&mut tx, &user).await?;
-    db::set_setting(&mut tx, "s3", &serde_json::to_string(&config).map_err(AppError::internal)?).await?;
+    db::set_json_setting(&mut tx, "s3", &config).await?;
     let detail = if config.enabled { format!("S3 access is on at {}", config.hostname) } else { "S3 access is off".to_string() };
     crate::logs::record_activity(&mut tx, &user, None, "settings", &detail).await?;
     tx.commit().await?;
@@ -80,9 +76,9 @@ pub async fn routing(st: &AppState) -> AppResult<Config> {
     Ok(st.part::<Memory>().config.write().get_or_insert(config).clone())
 }
 
+/// The setting as saved (in the transaction of `conn`), with the default region
 pub async fn from_connection(conn: &mut sqlx::SqliteConnection) -> AppResult<Config> {
-    let stored: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key='s3'").fetch_optional(conn).await?;
-    let mut config: Config = stored.and_then(|(value,)| serde_json::from_str(&value).ok()).unwrap_or_default();
+    let mut config: Config = db::json_setting(conn, "s3").await?;
     if config.region.is_empty() {
         config.region = "us-east-1".into();
     }

@@ -6,7 +6,7 @@ use axum::http::StatusCode;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use rustls::pki_types::{PrivateKeyDer, pem::PemObject};
 
-use super::{Settings, tls};
+use crate::ftp::{Settings, tls};
 
 struct Files {
     dir: PathBuf,

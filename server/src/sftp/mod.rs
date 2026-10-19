@@ -73,7 +73,8 @@ impl Login {
             };
             *CHECKS.lock().entry(name).or_default() += 1;
         }
-        if !settings::flag(st, "sftp_enabled").await? {
+        let cfg = settings::load(st).await?;
+        if !cfg.enabled {
             return Err(AppError::unauthorized());
         }
         let mut user = match self {
@@ -91,7 +92,7 @@ impl Login {
                 user
             }
             Self::Key { username, key_id } => {
-                if !settings::flag(st, "sftp_keys_enabled").await? {
+                if !cfg.keys() {
                     return Err(AppError::unauthorized());
                 }
                 let row: Option<(i64, String)> = sqlx::query_as(
@@ -174,7 +175,7 @@ pub fn supervise(st: AppState, address: &str) -> Listener {
                 _ = tokio::time::sleep(wait) => (),
                 _ = st.part::<Memory>().changed.notified() => (),
             }
-            enabled = settings::flag(&st, "sftp_enabled").await.unwrap_or(false);
+            enabled = settings::load(&st).await.is_ok_and(|c| c.enabled);
             if !enabled {
                 if let Some(listener) = active.take() {
                     listener.finish().await;

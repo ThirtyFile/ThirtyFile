@@ -1,56 +1,65 @@
+//! SFTP's two switches, kept as one JSON setting (`sftp`) as S3's and FTP's are. The listener reads them when they
+//! change (`Memory::changed`) and every few seconds; every sign-in and request checks them again.
+
 use crate::{
     auth::Admin,
+    db,
     error::{AppError, AppResult},
     state::AppState,
 };
 use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize)]
-pub struct Info {
+#[derive(Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct Config {
     pub enabled: bool,
     pub keys_enabled: bool,
+}
+
+impl Config {
+    /// SSH keys sign in only while SFTP is on as well
+    pub fn keys(&self) -> bool {
+        self.enabled && self.keys_enabled
+    }
+}
+
+/// The setting as saved (in the transaction of `conn`)
+pub async fn from_connection(conn: &mut sqlx::SqliteConnection) -> AppResult<Config> {
+    Ok(db::json_setting(conn, "sftp").await?)
+}
+
+pub async fn load(st: &AppState) -> AppResult<Config> {
+    from_connection(&mut *st.db.acquire().await?).await
+}
+
+#[derive(Serialize)]
+pub struct Info {
+    #[serde(flatten)]
+    pub config: Config,
     pub address: String,
     pub fingerprint: String,
     pub error: Option<String>,
 }
 
-pub async fn flag(st: &AppState, key: &str) -> AppResult<bool> {
-    let value: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key = ?").bind(key).fetch_optional(&st.db).await?;
-    Ok(value.is_some_and(|(v,)| v == "1"))
-}
-
 pub async fn get(State(st): State<AppState>, _: Admin) -> AppResult<Json<Info>> {
     let memory = st.part::<super::Memory>();
     Ok(Json(Info {
-        enabled: flag(&st, "sftp_enabled").await?,
-        keys_enabled: flag(&st, "sftp_keys_enabled").await?,
+        config: load(&st).await?,
         address: memory.address.read().clone(),
         fingerprint: memory.fingerprint.read().clone(),
         error: memory.error.read().clone(),
     }))
 }
 
-#[derive(Deserialize)]
-pub struct Change {
-    enabled: bool,
-    keys_enabled: bool,
-}
-
-pub async fn update(State(st): State<AppState>, Admin(user): Admin, Json(req): Json<Change>) -> AppResult<Json<Info>> {
+pub async fn update(State(st): State<AppState>, Admin(user): Admin, Json(req): Json<Config>) -> AppResult<Json<Info>> {
     if req.enabled && st.part::<super::Memory>().fingerprint.read().is_empty() {
         return Err(AppError::conflict("The SFTP listener is unavailable. Check the server log."));
     }
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     crate::auth::require_admin(&mut tx, &user).await?;
-    for (key, value) in [("sftp_enabled", req.enabled), ("sftp_keys_enabled", req.keys_enabled)] {
-        sqlx::query("INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
-            .bind(key)
-            .bind(if value { "1" } else { "0" })
-            .execute(&mut *tx)
-            .await?;
-    }
+    db::set_json_setting(&mut tx, "sftp", &req).await?;
     crate::logs::record_activity(&mut tx, &user, None, "settings", "Updated SFTP settings").await?;
     tx.commit().await?;
     drop(_w);

@@ -347,6 +347,19 @@ pub async fn get_setting(db: &SqlitePool, key: &str) -> Result<Option<String>, s
     Ok(sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = ?").bind(key).fetch_optional(db).await?.map(|(v,)| v))
 }
 
+/// A setting kept as one JSON object (S3's, FTP's and SFTP's): what was saved, or the defaults when nothing was or it
+/// can't be read
+pub async fn json_setting<T: serde::de::DeserializeOwned + Default>(conn: &mut SqliteConnection, key: &str) -> Result<T, sqlx::Error> {
+    let row: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key = ?").bind(key).fetch_optional(conn).await?;
+    Ok(row.and_then(|(v,)| serde_json::from_str(&v).ok()).unwrap_or_default())
+}
+
+/// Saves a setting kept as one JSON object (`json_setting`)
+pub async fn set_json_setting<T: serde::Serialize>(conn: &mut SqliteConnection, key: &str, value: &T) -> crate::error::AppResult<()> {
+    set_setting(conn, key, &serde_json::to_string(value).map_err(crate::error::AppError::internal)?).await?;
+    Ok(())
+}
+
 pub async fn set_setting(conn: &mut SqliteConnection, key: &str, value: &str) -> Result<(), sqlx::Error> {
     sqlx::query("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
         .bind(key)
@@ -1261,8 +1274,8 @@ mod tests {
         sqlx::migrate::Migrator::new(dir).await.unwrap()
     }
 
-    /// The structure is frozen at 0.4.0 (CI checks that 0001_init.sql is the file of v0.4.0): later changes are new
-    /// migration files. A data folder made by 0.4.0 is copied before they run, then upgraded with its data kept.
+    /// Upgraded from 0.4.0, a database keeps its items, gets S3 buckets and keys turned off, and queues the files of
+    /// a deleted bucket's unfinished uploads for removal
     #[tokio::test]
     async fn a_database_from_0_4_0_keeps_nodes_and_adds_opt_in_s3_credentials_and_cleanup() {
         let dir = scratch("thirtyfile-040-s3");
@@ -1294,6 +1307,37 @@ mod tests {
         db.close().await;
     }
 
+    /// SFTP's two switches, saved as two settings before 0034, are one JSON setting after it, as they were
+    #[tokio::test]
+    async fn sftp_switches_saved_before_0034_become_its_json_setting() {
+        let mut ours: Vec<_> = std::fs::read_dir("migrations").unwrap().map(|e| e.unwrap().path()).collect();
+        ours.sort();
+        let before = ours.iter().position(|f| f.file_name().unwrap().to_string_lossy().starts_with("0034_")).unwrap();
+        for (saved, expected) in [
+            (vec![("sftp_enabled", "1"), ("sftp_keys_enabled", "0")], Some(r#"{"enabled":true,"keys_enabled":false}"#)),
+            (vec![("sftp_enabled", "0"), ("sftp_keys_enabled", "1")], Some(r#"{"enabled":false,"keys_enabled":true}"#)),
+            (vec![], None),
+        ] {
+            let dir = scratch("thirtyfile-0034");
+            let path = dir.join("drive.db");
+            let old = migrations_in(&dir.join("old"), &ours[..before], None).await;
+            let db = open(&path, 16, &old).await.unwrap();
+            for (key, value) in &saved {
+                set_setting(&mut db.acquire().await.unwrap(), key, value).await.unwrap();
+            }
+            db.close().await;
+            let db = connect(&path, 16).await.unwrap();
+            assert_eq!(get_setting(&db, "sftp").await.unwrap().as_deref(), expected, "{saved:?}");
+            let (left,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM settings WHERE key IN ('sftp_enabled', 'sftp_keys_enabled')").fetch_one(&db).await.unwrap();
+            assert_eq!(left, 0);
+            let config = crate::sftp::settings::from_connection(&mut db.acquire().await.unwrap()).await.unwrap();
+            assert_eq!(config.enabled, saved.contains(&("sftp_enabled", "1")));
+            db.close().await;
+        }
+    }
+
+    /// The structure is frozen at 0.4.0 (CI checks that 0001_init.sql is the file of v0.4.0): later changes are new
+    /// migration files. A data folder made by 0.4.0 is copied before they run, then upgraded with its data kept.
     #[tokio::test]
     async fn a_database_from_0_4_0_is_copied_then_upgraded_when_a_migration_file_is_added() {
         let dir = scratch("thirtyfile-upgrade");

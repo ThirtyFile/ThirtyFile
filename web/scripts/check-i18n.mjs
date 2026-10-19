@@ -150,16 +150,31 @@ for (const [f, r] of files) {
   });
 }
 
-// 4. Messages the server sends (AppError::…("…") in server/src, outside tests and the file protocols: WebDAV and
-//    the access layer the protocols share, whose clients show no translations): each has an entry, shown with
-//    tServer(). Placeholders count as the same whatever their names.
+// 4. Messages the server sends (AppError::…("…") in server/src, outside tests and the file protocols: WebDAV, the
+//    access layer the protocols share, and the parts of S3, FTP and SFTP that answer their own clients, whose
+//    clients show no translations): each has an entry, shown with tServer(). Placeholders count as the same whatever
+//    their names. What S3 and FTP say about publishing and managing (manage.rs, config.rs) reaches the web, and is
+//    checked.
 const serverMessages = [];
+/** Files of S3, FTP and SFTP whose messages only their clients get: their sessions, and the checks of their credentials */
+const PROTOCOL_CLIENTS = [
+  "/auth/sftp.rs",
+  "/ftp/credentials.rs",
+  "/ftp/login.rs",
+  "/ftp/storage.rs",
+  "/s3/credentials.rs",
+  "/s3/listing.rs",
+  "/s3/multipart.rs",
+  "/s3/objects.rs",
+  "/sftp/mod.rs",
+  "/sftp/session.rs",
+];
 const serverDir = toPath("../../server/src/");
 if (!only) {
   const call = new RegExp(String.raw`AppError::(?:bad_request|forbidden|conflict|not_found|new\(\s*[\w:]+\s*,)\(?\s*(?:format!\(\s*)?("(?:[^"\\]|\\.)*")`, "g");
   for (const f of walk(serverDir, /\.rs$/)) {
     const rel = "server/src/" + relative(serverDir, f).replace(/\\/g, "/");
-    if (rel.endsWith("/dav.rs") || rel.includes("/dav/") || rel.includes("/access/")) continue;
+    if (rel.endsWith("/dav.rs") || rel.includes("/dav/") || rel.includes("/access/") || PROTOCOL_CLIENTS.some((f) => rel.endsWith(f))) continue;
     const full = readFileSync(f, "utf8");
     corpus.push(full);
     // Tests come last in each file

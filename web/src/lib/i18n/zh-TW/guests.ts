@@ -39,7 +39,6 @@ export default {
   "Guests can't have My files": "訪客無法擁有「我的檔案」",
   "Review and confirm the guest conversion before saving": "請先檢閱並確認訪客轉換，再儲存",
   "Guests can't create spaces": "訪客無法建立空間",
-  "Guests can't publish protocol folders": "訪客無法發布通訊協定資料夾",
   "Your account couldn't join its configured groups. Ask an administrator to check guest access.": "帳號無法加入設定的群組，請管理員檢查訪客存取設定。",
   "Guest access must end within 1 to 3650 days": "訪客存取期限必須介於 1 到 3650 天",
   "People may share only within their groups": "使用者只能在自己的群組內分享",
@@ -48,4 +47,5 @@ export default {
   "changed to guest": "改為訪客",
   "changed to standard account": "改為一般帳號",
   "This account's type changed. Reload it and confirm your identity again before saving.": "帳號類型已變更，請重新載入並再次確認身分後再儲存。",
+  "Guest accounts can't publish folders": "訪客帳號無法發布資料夾",
 };

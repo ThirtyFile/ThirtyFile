@@ -72,12 +72,14 @@ httpdate = "1"
 # has none
 jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
 s3s = "0.17"
-async-trait = "0.1.92"
+async-trait = "0.1"
 # Share one TLS session cache between control and passive connections; do not accept proxy-protocol headers.
+# libunftp is vendored with local patches (vendor/libunftp, from 0.23.1), until they are in a release (#612). unftp-core is
+# the version that libunftp release needs: both are exact, and change together.
 libunftp = { version = "=0.23.1", path = "vendor/libunftp", default-features = false, features = ["aws_lc_rs", "experimental"] }
-unftp-core = "0.1.0"
+unftp-core = "=0.1.0"
 md-5 = "0.11"
-http-body-util = "0.1.5"
+http-body-util = "0.1"
 
 [target.'cfg(unix)'.dependencies]
 # Switching to an unprivileged user in the Docker image (privileges.rs)

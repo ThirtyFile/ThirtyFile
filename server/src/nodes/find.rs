@@ -253,7 +253,7 @@ pub async fn set_favorite(State(st): State<AppState>, user: User, Json(req): Jso
     {
         let mut c = st.db.acquire().await?;
         for id in &req.ids {
-            let node = tree::owned_node(&mut c, &user, id).await?;
+            let node = tree::readable_node(&mut c, &user, id).await?;
             not_root(&node)?;
             ids.push(node.id);
         }

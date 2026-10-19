@@ -219,5 +219,4 @@ pub async fn convert(conn: &mut SqliteConnection, id: i64, revision: Option<&str
 }
 
 #[cfg(test)]
-#[path = "guests/tests.rs"]
 mod tests;

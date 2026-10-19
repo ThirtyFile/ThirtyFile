@@ -64,10 +64,13 @@ async fn token(env: &TestEnv, user: &User, scope: &str) -> String {
         .unwrap();
     token
 }
+/// Turns SFTP and its SSH keys on or off, as the control panel saves them
+async fn switch(env: &TestEnv, on: bool) {
+    let config = super::settings::Config { enabled: on, keys_enabled: on };
+    crate::db::set_json_setting(&mut env.st.db.acquire().await.unwrap(), "sftp", &config).await.unwrap();
+}
 async fn on(env: &TestEnv) -> super::Listener {
-    for key in ["sftp_enabled", "sftp_keys_enabled"] {
-        crate::db::set_setting(&mut env.st.db.acquire().await.unwrap(), key, "1").await.unwrap();
-    }
+    switch(env, true).await;
     super::start(env.st.clone(), "127.0.0.1:0").await.unwrap()
 }
 async fn connection(env: &TestEnv) -> client::Handle<Client> {
@@ -219,7 +222,7 @@ async fn disabled_and_wrong_credentials_fail_and_session_limit_is_enforced() {
     }
     let mut extra = connection(&env).await;
     assert!(!extra.authenticate_password("amy", &token).await.unwrap().success());
-    crate::db::set_setting(&mut env.st.db.acquire().await.unwrap(), "sftp_enabled", "0").await.unwrap();
+    switch(&env, false).await;
     assert!(held[0].1.read_dir("/").await.is_err());
 }
 
@@ -399,7 +402,7 @@ async fn optional_listener_does_not_bind_until_enabled_and_retries_a_conflicting
     .await
     .unwrap();
     assert!(env.st.part::<super::Memory>().error.read().is_none(), "a disabled feature does not try to bind an occupied port");
-    crate::db::set_setting(&mut env.st.db.acquire().await.unwrap(), "sftp_enabled", "1").await.unwrap();
+    switch(&env, true).await;
     env.st.part::<super::Memory>().changed.notify_one();
     tokio::time::timeout(std::time::Duration::from_secs(2), async {
         while env.st.part::<super::Memory>().error.read().is_none() {
@@ -417,7 +420,7 @@ async fn optional_listener_does_not_bind_until_enabled_and_retries_a_conflicting
     .await
     .unwrap();
     assert!(tokio::net::TcpStream::connect(&address).await.is_ok());
-    crate::db::set_setting(&mut env.st.db.acquire().await.unwrap(), "sftp_enabled", "0").await.unwrap();
+    switch(&env, false).await;
     env.st.part::<super::Memory>().changed.notify_one();
     tokio::time::timeout(std::time::Duration::from_secs(3), async {
         loop {

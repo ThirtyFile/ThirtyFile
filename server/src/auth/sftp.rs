@@ -13,8 +13,8 @@ pub enum SftpCredential {
 
 pub async fn current_user(conn: &mut SqliteConnection, user: &User, write: bool) -> AppResult<Option<User>> {
     let Some(credential) = &user.sftp_credential else { return Ok(None) };
-    let (enabled,): (bool,) = sqlx::query_as("SELECT EXISTS(SELECT 1 FROM settings WHERE key = 'sftp_enabled' AND value = '1')").fetch_one(&mut *conn).await?;
-    if !enabled {
+    let cfg = crate::sftp::settings::from_connection(conn).await?;
+    if !cfg.enabled {
         return Err(AppError::unauthorized());
     }
     let active = match credential {
@@ -31,9 +31,9 @@ pub async fn current_user(conn: &mut SqliteConnection, user: &User, write: bool)
             active
         }
         SftpCredential::Key(id) => {
-            let (active,): (bool,) = sqlx::query_as("SELECT EXISTS(SELECT 1 FROM sftp_keys WHERE id = ? AND user_id = ?) AND EXISTS(SELECT 1 FROM settings WHERE key = 'sftp_keys_enabled' AND value = '1')")
-                .bind(id).bind(user.id).fetch_one(&mut *conn).await?;
-            active
+            let (known,): (bool,) =
+                sqlx::query_as("SELECT EXISTS(SELECT 1 FROM sftp_keys WHERE id = ? AND user_id = ?)").bind(id).bind(user.id).fetch_one(&mut *conn).await?;
+            known && cfg.keys()
         }
     };
     if !active {

@@ -799,7 +799,6 @@ pub async fn purge_expired(st: &AppState) -> AppResult<usize> {
 }
 
 #[cfg(test)]
-#[path = "upload_tests.rs"]
 mod more_tests;
 
 #[cfg(test)]

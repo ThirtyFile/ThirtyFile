@@ -151,8 +151,8 @@ pub(super) async fn trash_root(conn: &mut SqliteConnection, user: &User, id: &st
     if !is_root {
         return Err(not_found());
     }
-    let role = trash_role(conn, user, &node).await?.ok_or_else(not_found)?;
-    tree::allows_on(conn, user, role, need, &node).await?;
+    trash_role(conn, user, &node).await?.ok_or_else(not_found)?;
+    tree::allows_on(conn, user, need, &node).await?;
     tree::require_subtree(conn, user, &node, need).await?;
     if node.space_read_only {
         return Err(tree::read_only_error(&node));

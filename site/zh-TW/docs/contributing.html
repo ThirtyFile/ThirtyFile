@@ -143,6 +143,7 @@ cd web &amp;&amp; pnpm format</code></pre>
           <li>0.4.0 的資料庫結構已凍結，確保舊版本建立的資料繼續有效。結構修改必須新增 <code>server/migrations/0002_&lt;name&gt;.sql</code> 及後續編號的遷移檔案，以升級 0.4.0 資料庫。禁止修改 <code>0001_init.sql</code> 和此前版本已發布的遷移檔案，檢查會阻止這種修改。</li>
           <li>網頁應用程式的 API 型別（<code>web/src/api/types.ts</code>）是手寫的。伺服器有一項測試把主要回應的結構記錄在 <code>web/tests/contract/shapes.json</code>，結構一改就會失敗：在 <code>server/</code> 執行 <code>THIRTYFILE_UPDATE_SHAPES=1 cargo test api_shapes</code>，再修改型別直到 <code>pnpm typecheck</code> 通過。</li>
           <li>會更改使用者檔案的邏輯（公式、活頁簿儲存、文字編碼）須在 <code>web/tests/unit/</code> 中新增單元測試。</li>
+          <li>伺服器的測試放在程式碼旁：<code>x.rs</code> 的測試在 <code>x/tests.rs</code>，模組資料夾的測試在其 <code>tests.rs</code>，同一模組的其他測試檔則是其子模組（<code>x/tests/&lt;主題&gt;.rs</code>）。</li>
         </ul>
         <p>每個 Pull Request 都執行上述檢查，約需數分鐘：<code>scripts/check.sh quick</code>、<code>cargo deny</code>，以及變更伺服器時的伺服器測試。完整測試與映像建置在正式發布和預發布前執行，也可在 <strong>Actions › Build › Run workflow</strong> 手動執行；手動驗證不發布任何內容。發布前，兩種架構的映像都會使用 <code>compose.yaml</code> 在最新已發布版本的資料上啟動。CodeQL 在合併後、每週及發布前掃描 <code>main</code>。合併到 <code>main</code> 不發布任何內容，網站也不發布：指南隨版本發布，以描述使用者實際可安裝的功能。對目前已發布版本也正確的指南修復可手動發布：在 <strong>Actions › Website › Run workflow</strong> 中選擇 <code>main</code> 為要發布的分支或標籤。</p>
         <h2 id="translations">其他語言的網站</h2>

@@ -627,5 +627,4 @@ pub async fn conflicts(State(st): State<AppState>, user: User, Json(req): Json<C
 }
 
 #[cfg(test)]
-#[path = "trash_batch_tests.rs"]
 mod trash_batch_tests;

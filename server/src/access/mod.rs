@@ -1,11 +1,13 @@
-//! What every file protocol needs, whatever it speaks: WebDAV now, then SFTP, S3 buckets and FTP receive folders
-//! (#553). A protocol turns its requests into these calls and their answers into its own; the calls go through the
-//! same code as the web, so permissions, read-only spaces, folder spaces, quotas, the upload size limit, name rules,
-//! versions, the trash and the activity log are the same everywhere.
+//! What every file protocol needs, whatever it speaks: WebDAV, SFTP, S3 buckets and FTP receive folders. A protocol
+//! turns its requests into these calls and their answers into its own; the calls go through the same code as the web,
+//! so permissions, read-only spaces, folder spaces, quotas, the upload size limit, name rules, versions, the trash and
+//! the activity log are the same everywhere. Who may publish a folder to S3 or FTP is `crate::publish`.
 //!
 //! - `paths`: the folder a new item goes into, and the item a path names (the tree is `crate::paths`: the user's
 //!   spaces and Shared with me, as the address bar shows them)
-//! - `write`: receiving a file within the limits, and storing it as a new file or new content
+//! - `scope`: items within the folder a credential is for (a bucket, a receive folder)
+//! - `read`: a file's content to send, whole or in part
+//! - `write`: receiving a file within the limits (`Upload::fits`), and storing it as a new file or new content
 //! - `changes`: new folders, renames, moves, copies, the trash, through the web's handlers
 //! - `space_room`: what a space has used and has left
 //!

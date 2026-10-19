@@ -8,7 +8,7 @@ use axum::{
 };
 use serde_json::json;
 
-use super::{
+use crate::backups::{
     api,
     policy::{self, Schedule},
     runner,
@@ -227,18 +227,18 @@ async fn a_policy_backs_up_changes_one_snapshot_at_a_time_and_keeps_the_last_one
     sqlx::query("UPDATE backup_objects SET created_at = created_at - 3 * 86400 WHERE set_id = ?").bind(&set).execute(&env.st.db).await.unwrap();
     let before = complete(&env, &set).await;
     assert_eq!(before.len(), 2);
-    let set_row = super::load_set(&env.st.db, &set).await.unwrap();
+    let set_row = crate::backups::load_set(&env.st.db, &set).await.unwrap();
     policy::prune(&env.st, &set_row).await.unwrap();
     let after = complete(&env, &set).await;
     assert_eq!(after, before[..1].to_vec(), "only the newest, although it is older than a day too");
     // Content only the deleted snapshot held is gone; what the kept one holds stays ("first" is an earlier version)
     let object = |content: &[u8]| {
         let h = crate::util::sha256_hex(content);
-        nas.join(super::layout::object_key(&set, &h))
+        nas.join(crate::backups::layout::object_key(&set, &h))
     };
     assert!(!object(b"only in the first snapshot").exists());
     assert!(object(b"first").exists() && object(b"second").exists() && object(b"third").exists());
-    assert!(!nas.join(super::layout::complete_key(&set, &before[1].0)).exists());
+    assert!(!nas.join(crate::backups::layout::complete_key(&set, &before[1].0)).exists());
     // Everything is captured: nothing waits
     policy::tick(&env.st, t + 3 * crate::backups::scheduler::BATCH_SECONDS).await.unwrap();
     assert!(open_jobs(&env, &set).await.is_empty(), "{:?}", open_jobs(&env, &set).await);
@@ -304,7 +304,7 @@ async fn a_failing_or_unreachable_backup_keeps_what_it_had_is_retried_and_admini
     assert_eq!(complete(&env, &set).await.len(), 3);
 }
 
-/// Backups and replicas share their scheduler (scheduler.rs): a retry only tries a run again, and a run waiting for a
+/// Backups and replicas share their scheduler (backups/scheduler.rs): a retry only tries a run again, and a run waiting for a
 /// location is tried again as soon as the location works, as replicas did before
 #[tokio::test]
 async fn a_retry_never_queues_a_new_snapshot_and_one_waiting_goes_once_its_location_is_back() {

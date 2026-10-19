@@ -13,10 +13,7 @@ use axum::{
     extract::{Path, State},
 };
 
-#[path = "regressions_limits.rs"]
 mod regressions_limits;
-
-#[path = "restricted_regressions.rs"]
 mod restricted_regressions;
 
 struct Server {
@@ -784,6 +781,12 @@ async fn only_the_publisher_or_an_administrator_hands_out_keys_and_every_change_
     // Their own bucket is theirs to hand out
     let Json(own) = publish(&manager, "manager-exports", password()).await.unwrap();
     let _ = super::manage::new_key(st(), manager.clone(), Path(own.id.clone()), key("Mine", password())).await.unwrap();
+    // A writable key takes files as its creator: an account that may not change files gives read-only keys only, as
+    // an FTP receive folder needs a publisher who may add files
+    sqlx::query("UPDATE users SET can_write = 0 WHERE id = ?").bind(manager.id).execute(&env.st.db).await.unwrap();
+    assert!(refused(super::manage::new_key(st(), manager.clone(), Path(own.id.clone()), key("Writer", password())).await.map(|_| ())));
+    let reader = Json(super::manage::NewKey { password: password(), code: None, description: "Reader".into(), writable: false, expires_at: None });
+    let _ = super::manage::new_key(st(), manager.clone(), Path(own.id.clone()), reader).await.unwrap();
 
     let details: Vec<(String,)> = sqlx::query_as("SELECT detail FROM activity WHERE action = 'settings' ORDER BY id").fetch_all(&env.st.db).await.unwrap();
     let details: Vec<&str> = details.iter().map(|(d,)| d.as_str()).collect();
@@ -1021,7 +1024,7 @@ async fn administrators_find_buckets_by_their_name_creator_or_folder() {
     let s = server(false).await;
     let search = async |text: &str| {
         let q = axum::extract::Query(super::manage::ListQuery { node_id: None, search: Some(text.into()) });
-        let Json(list) = super::manage::admin_list(State(s.env.st.clone()), crate::auth::Admin(s.admin.clone()), q).await.unwrap();
+        let Json(list) = super::manage::list(State(s.env.st.clone()), s.admin.clone(), q).await.unwrap();
         list.buckets.len()
     };
     assert_eq!((search("backups").await, search(&s.admin.username.to_uppercase()).await, search("published").await, search("nothing").await), (1, 1, 1, 0));

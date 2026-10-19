@@ -1,4 +1,6 @@
 use super::*;
+mod tls;
+
 use crate::{
     auth::User,
     testutil::{self, TestEnv},
@@ -458,6 +460,18 @@ async fn only_the_publisher_or_an_administrator_rotates_or_opens_up_a_receive_fo
     let _ = edit(&admin, true, true).await.unwrap();
     let _ = rotate(&admin).await.unwrap();
 
+    // A receive folder only takes files: not published by an account that may not change files, nor in a read-only
+    // space, even by an administrator
+    let other = env.folder(&admin, &env.st.shared_root().unwrap(), "More scans").await;
+    env.grant(&other, &manager, "manager").await;
+    let create = |who: &crate::auth::User| {
+        manage::create(st(), who.clone(), Json(manage::Create { node_id: other.clone(), change: change(true, false), password: password(), code: None }))
+    };
+    sqlx::query("UPDATE users SET can_write = 0 WHERE id = ?").bind(manager.id).execute(&env.st.db).await.unwrap();
+    assert!(refused(create(&manager).await.map(|_| ())));
+    sqlx::query("UPDATE drives SET read_only = 1 WHERE id = (SELECT drive_id FROM nodes WHERE id = ?)").bind(&other).execute(&env.st.db).await.unwrap();
+    assert!(create(&admin).await.is_err());
+
     // The entries name the receive folder
     let (named,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM activity WHERE detail LIKE '%Office printer%'").fetch_one(&env.st.db).await.unwrap();
     assert!(named >= 3, "{named}");
@@ -548,7 +562,7 @@ async fn an_ended_receive_folder_can_be_renamed_with_its_end_date_kept_and_found
     // Searched for on the server: by its name, its creator, its folder; nothing else
     let search = async |text: &str| {
         let q = axum::extract::Query(manage::ListQuery { node_id: None, search: Some(text.into()) });
-        let Json(list) = manage::admin_list(State(env.st.clone()), crate::auth::Admin(admin.clone()), q).await.unwrap();
+        let Json(list) = manage::list(State(env.st.clone()), admin.clone(), q).await.unwrap();
         list.folders.len()
     };
     assert_eq!((search("OLD").await, search(&admin.username).await, search("incoming").await, search("nothing like it").await), (1, 1, 1, 0));

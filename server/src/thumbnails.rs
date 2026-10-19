@@ -341,7 +341,7 @@ pub async fn upload_thumbnail(State(st): State<AppState>, user: User, Path(id): 
 }
 
 pub async fn thumbnail(State(st): State<AppState>, user: User, Path(id): Path<String>, headers: HeaderMap) -> AppResult<Response> {
-    let node = tree::owned_node(&mut *st.db.acquire().await?, &user, &id).await?;
+    let node = tree::readable_node(&mut *st.db.acquire().await?, &user, &id).await?;
     thumbnail_response(&st, &headers, &node).await
 }
 

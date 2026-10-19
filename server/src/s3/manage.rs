@@ -2,7 +2,7 @@
 
 use super::credentials::{Bucket, Key, publisher};
 use crate::{
-    auth::{Admin, User},
+    auth::User,
     error::{AppError, AppResult},
     state::AppState,
     util::{new_id, now, random_token},
@@ -148,8 +148,7 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Publ
 
 async fn managed(st: &AppState, conn: &mut sqlx::SqliteConnection, user: &User, id: &str) -> AppResult<Bucket> {
     let current = crate::auth::user_by_id(st, conn, user.id).await?.ok_or_else(|| AppError::forbidden("The account no longer has access"))?;
-    let stored: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key='s3'").fetch_optional(&mut *conn).await?;
-    let config: super::config::Config = stored.and_then(|(value,)| serde_json::from_str(&value).ok()).unwrap_or_default();
+    let config = super::config::from_connection(conn).await?;
     let bucket: Bucket =
         sqlx::query_as("SELECT * FROM s3_buckets WHERE id = ?").bind(id).fetch_optional(&mut *conn).await?.ok_or_else(|| AppError::not_found("Bucket not found"))?;
     if !current.is_admin() {
@@ -218,13 +217,12 @@ pub async fn new_key(State(st): State<AppState>, user: User, Path(bucket_id): Pa
     let bucket = managed(&st, &mut conn, &user, &bucket_id).await?;
     let current = crate::auth::current_user(&mut conn, &user).await?;
     crate::tokens::may_hand_out(&current, bucket.creator_id)?;
-    let stored: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key='s3'").fetch_optional(&mut *conn).await?;
-    let config: super::config::Config = stored.and_then(|(value,)| serde_json::from_str(&value).ok()).unwrap_or_default();
+    let config = super::config::from_connection(&mut conn).await?;
     let creator =
         crate::auth::user_by_id(&st, &mut conn, bucket.creator_id).await?.ok_or_else(|| AppError::forbidden("The bucket's creator no longer has access"))?;
     let root = publisher(&mut conn, &creator, &bucket.node_id, config.managers_publish).await?;
-    if req.writable && root.space_read_only {
-        return Err(crate::tree::read_only_space());
+    if req.writable {
+        crate::publish::may_receive(&creator, &root)?;
     }
     if req.description.trim().is_empty() || req.description.len() > 160 || req.description.chars().any(char::is_control) {
         return Err(AppError::bad_request("Enter a key description of at most 160 characters"));
@@ -314,8 +312,4 @@ pub async fn delete_key(State(st): State<AppState>, user: User, Path((bucket, ke
     tx.commit().await?;
     super::multipart::cleanup_later(st.clone());
     Ok(Json(serde_json::json!({"ok": true})))
-}
-
-pub async fn admin_list(st: State<AppState>, Admin(user): Admin, q: Query<ListQuery>) -> AppResult<Json<FolderBuckets>> {
-    list(st, user, q).await
 }
