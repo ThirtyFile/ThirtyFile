@@ -7,7 +7,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { makeFolder, openFolder, signIn, uploadFinished } from "./helpers";
 
 const MB = 1024 * 1024;
-/** tus-js-client sends 32 MB per request (uploads.ts) */
+/** The upload client sends 32 MB per request (uploads.ts) */
 const CHUNK = 32 * MB;
 
 // Each upload is a few changes on the server, and each may wait its turn behind a large change made by another test at

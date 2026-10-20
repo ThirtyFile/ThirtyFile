@@ -141,7 +141,7 @@ describe("telling files apart", () => {
     expect(m.sessionsOf(fp)).toEqual([{ key: `tus::${fp}::1`, url: "/api/uploads/abc" }]);
   });
 
-  test("tus-js-client's records expire with the upload records, and those of earlier versions go when the page loads", async () => {
+  test("The upload client's records expire with the upload records, and those of earlier versions go when the page loads", async () => {
     const m = await load();
     const fp = m.fingerprintOf("/api/uploads", "r1");
     const at = (ms: number) => JSON.stringify({ uploadUrl: "/api/uploads/x", creationTime: new Date(ms).toString() });

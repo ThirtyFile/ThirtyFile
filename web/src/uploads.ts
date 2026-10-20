@@ -1,9 +1,9 @@
 import { useMemo, useSyncExternalStore } from "react";
-import * as tus from "tus-js-client";
 import { toast } from "sonner";
 import { ApiError, api, errorFromBody, type NameConflict } from "@/api";
 import { CONFLICT_NAMES, applyToUpload, resolveConflicts, topLevel } from "@/lib/conflicts";
 import { chunks } from "@/lib/span";
+import { TusError, TusUpload } from "@/lib/tus";
 import { reportShown } from "@/lib/errorReport";
 import { t } from "@/lib/i18n";
 import { createStore, useStore } from "@/lib/store";
@@ -23,6 +23,7 @@ import {
   saveLive,
   scopeOf,
   sessionState,
+  sessionsOf,
   subscribeRecords,
   type RecoveredBatch,
   type UploadRecord,
@@ -48,7 +49,7 @@ export interface UploadTask {
   error?: string;
   /** The server refused it for good (an invalid name, no permission, discarded): it isn't kept to continue after a reload */
   refused?: boolean;
-  upload?: tus.Upload;
+  upload?: TusUpload;
   file: File;
   /** When the name is taken: give that file the new content, or keep both (the new one gets a number) */
   onConflict: "replace" | "keep";
@@ -375,10 +376,10 @@ export function refusedForGood(e: ApiError): boolean {
   return e.code === "upload_discarded" || [400, 403, 404, 410, 422].includes(e.status);
 }
 
-function uploadError(err: Error): ApiError {
-  const res = (err as tus.DetailedError).originalResponse;
+function uploadError(err: TusError): ApiError {
+  const res = err.response;
   // Handled like api.request: the server's message translated, and an expired session sends the user to sign in
-  if (res) return errorFromBody(res.getStatus(), res.getBody() ?? "", "/api/uploads", t("Upload failed ({status})", { status: res.getStatus() }), res.getHeader("x-request-id") || undefined);
+  if (res) return errorFromBody(res.status, res.body, "/api/uploads", t("Upload failed ({status})", { status: res.status }), res.header("x-request-id") || undefined);
   return new ApiError(unreachable(), 0, "unreachable");
 }
 
@@ -395,11 +396,10 @@ export function savedName(header: string | undefined, uploaded: string): string 
 
 function start(task: UploadTask) {
   const fingerprint = fingerprintOf(task.endpoint, task.recordId);
-  const upload = new tus.Upload(task.file, {
+  const upload = new TusUpload(task.file, {
     endpoint: task.endpoint,
     chunkSize: 32 * 1024 * 1024,
     retryDelays: [0, 1000, 3000, 5000, 10000, 20000],
-    removeFingerprintOnSuccess: true,
     metadata: {
       filename: task.file.name,
       parentId: task.parentId,
@@ -409,7 +409,7 @@ function start(task: UploadTask) {
       onConflict: task.onConflict,
     },
     // An upload continues only its own server session: another one of the same file, here or elsewhere, never does
-    fingerprint: async () => fingerprint,
+    fingerprint,
     onProgress: (sent) => {
       if (task.upload !== upload || task.status !== "uploading") return;
       setSent(task, sent);
@@ -418,7 +418,7 @@ function start(task: UploadTask) {
     },
     onSuccess: ({ lastResponse }) => {
       if (task.upload !== upload || task.status !== "uploading") return;
-      task.savedAs = savedName(lastResponse.getHeader("x-node-name"), task.name);
+      task.savedAs = savedName(lastResponse.header("x-node-name") ?? undefined, task.name);
       setSent(task, task.size);
       setStatus(task, "done");
       task.upload = undefined;
@@ -435,7 +435,7 @@ function start(task: UploadTask) {
       fail(task, e.message);
     },
     onShouldRetry: (err) => {
-      const status = (err as tus.DetailedError).originalResponse?.getStatus() ?? 0;
+      const status = err.response?.status ?? 0;
       // Errors like permission denied, out of space or file too large don't need a retry
       return status === 0 || status === 409 || status === 423 || status >= 500;
     },
@@ -483,7 +483,7 @@ function identify(task: UploadTask) {
  * answer was lost) is done, and one it no longer has starts again, unless everything had been sent, which is then
  * reported rather than sent a second time.
  */
-async function begin(task: UploadTask, upload: tus.Upload) {
+async function begin(task: UploadTask, upload: TusUpload) {
   // The user may pause or cancel meanwhile: abort() has no effect before start(), so check after each step
   const current = () => byId.get(task.id) === task && task.status === "uploading" && task.upload === upload;
   const release = await acquire(`tf-upload:${task.recordId}`);
@@ -496,12 +496,12 @@ async function begin(task: UploadTask, upload: tus.Upload) {
   if (!current()) return releaseLock(task);
   identify(task);
   const fingerprint = fingerprintOf(task.endpoint, task.recordId);
-  let previous = await upload.findPreviousUploads().catch(() => []);
+  let previous = sessionsOf(fingerprint);
   if (!current()) return releaseLock(task);
   const recovered = task.recovered;
   task.recovered = undefined;
   if (recovered && !recovered.fresh) {
-    const state = previous.length ? await sessionState(previous[0].uploadUrl ?? "") : null;
+    const state = previous.length ? await sessionState(previous[0].url) : null;
     if (!current()) return releaseLock(task);
     if (state?.kind === "finished") {
       await forgetSessions(fingerprint);
@@ -528,7 +528,7 @@ async function begin(task: UploadTask, upload: tus.Upload) {
     previous = [];
     if (!current()) return releaseLock(task);
   }
-  if (previous.length > 0) upload.resumeFromPreviousUpload(previous[0]);
+  if (previous.length > 0) upload.resume(previous[0].url);
   upload.start();
 }
 
@@ -650,7 +650,7 @@ export async function uploadFiles(files: PickedFile[], parentId: string) {
 export function pause(id: string) {
   const t = byId.get(id);
   if (t?.status === "uploading") {
-    t.upload?.abort();
+    void t.upload?.abort();
     releaseLock(t);
     setStatus(t, "paused");
     pump();

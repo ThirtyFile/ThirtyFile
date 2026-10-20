@@ -1,5 +1,5 @@
 //! tus 1.0 resumable uploads (core + creation + termination).
-//! The frontend uses tus-js-client; after an interruption (including a browser refresh) the upload resumes where it left off.
+//! The frontend speaks it with its own small client (web/src/lib/tus.ts); after an interruption (including a browser refresh) the upload resumes where it left off.
 //! Visitors of a share link that accepts files upload the same way (see `shares`): their files belong to the link's creator.
 
 use std::{io::SeekFrom, path::PathBuf};
