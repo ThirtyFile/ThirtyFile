@@ -50,7 +50,6 @@ skip = [
   { crate = "hashbrown@0.14.5", reason = "dashmap" },
   { crate = "hashbrown@0.16.1", reason = "hashlink and sqlx-core" },
   { crate = "miniz_oxide@0.8.9", reason = "png" },
-  { crate = "quick-xml@0.41.0", reason = "object_store" },
   { crate = "spin@0.9.9", reason = "flume (through sqlx)" },
   { crate = "syn@2.0.119", reason = "most derive macros, next to syn 3" },
   { crate = "tower-http@0.6.11", reason = "reqwest" },

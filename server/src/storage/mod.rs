@@ -23,9 +23,6 @@ use std::{
 };
 
 use futures_util::{StreamExt, TryStreamExt, future::BoxFuture};
-use object_store::{
-    BackoffConfig, ClientOptions, GetOptions, ObjectStore, ObjectStoreExt, PutPayload, RetryConfig, WriteMultipart, aws::AmazonS3Builder, path::Path as ObjectPath,
-};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::StreamReader;
