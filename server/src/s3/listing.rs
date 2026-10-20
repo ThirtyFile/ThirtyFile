@@ -95,11 +95,20 @@ struct Walk<'a> {
     prefix: &'a str,
     after: &'a str,
     skip_group: bool,
+    /// Where the walk goes on when `after` is a group: the first key that is not in it (names are looked up from there, not read one by one)
+    seek: String,
     /// Items looked at so far, of `PAGE_BUDGET`
     looked_at: usize,
     /// The last key looked at, and whether the walk stopped there for its budget
     last_key: String,
     stopped: bool,
+}
+
+/// The first name after everything that starts with `group`: the group with its last character one on ("a-" is "a."). Empty when there is none
+fn after_group(group: &str) -> String {
+    let Some(last) = group.chars().next_back() else { return String::new() };
+    let Some(next) = (last as u32 + 1..=char::MAX as u32).find_map(char::from_u32) else { return String::new() };
+    format!("{}{next}", &group[..group.len() - last.len_utf8()])
 }
 
 impl<'a> Walk<'a> {
@@ -111,6 +120,7 @@ impl<'a> Walk<'a> {
             prefix,
             after,
             skip_group,
+            seek: if skip_group { after_group(after) } else { String::new() },
             looked_at: 0,
             last_key: String::new(),
             stopped: false,
@@ -132,7 +142,7 @@ impl<'a> Walk<'a> {
                     }
                     frame.scanned = true;
                 }
-                let lower = [self.prefix, self.after]
+                let lower = [self.prefix, self.after, self.seek.as_str()]
                     .into_iter()
                     .filter_map(|bound| bound.strip_prefix(&frame.prefix))
                     .map(|bound| match bound.split_once('/') {
@@ -225,7 +235,7 @@ async fn page(st: &AppState, identity: &Identity, query: Listing<'_>) -> S3Resul
         let group = if delimiter.is_empty() { None } else { key[prefix.len()..].find(delimiter).map(|at| key[..prefix.len() + at + delimiter.len()].to_string()) };
         if let Some(group) = &group {
             walk.skip(group);
-            if *group == previous_group || group.as_bytes() <= after.as_bytes() {
+            if *group == previous_group {
                 continue;
             }
             previous_group = group.clone();
@@ -243,11 +253,18 @@ async fn page(st: &AppState, identity: &Identity, query: Listing<'_>) -> S3Resul
             page.objects.push(ObjectEntry::new(key, super::objects::timestamp(node.updated_at), quoted(&description.etag), description.size));
         }
     }
-    // Stopped for its budget: the next page goes on after the last item looked at (a group already listed is left
-    // out there, as it is before any cursor)
+    // Stopped for its budget: the next page goes on after the last item looked at. When that item is in a group, the group is listed already
+    // (by this page or the one before), so the cursor is the group and the next page leaves the rest of it out
     if walk.stopped && !page.truncated {
         page.truncated = true;
-        page.last = Some((walk.last_key.clone(), false));
+        let last = &walk.last_key;
+        let group = (!delimiter.is_empty() && last.starts_with(prefix) && last.as_bytes() > after.as_bytes())
+            .then(|| last[prefix.len()..].find(delimiter).map(|at| last[..prefix.len() + at + delimiter.len()].to_string()))
+            .flatten();
+        page.last = Some(match group {
+            Some(group) => (group, true),
+            None => (last.clone(), false),
+        });
     }
     Ok(page)
 }
