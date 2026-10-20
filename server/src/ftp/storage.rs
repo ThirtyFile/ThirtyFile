@@ -94,7 +94,6 @@ impl Files {
     }
 }
 
-#[async_trait::async_trait]
 impl Backend for Receive {
     type User = Device;
 
