@@ -98,7 +98,7 @@ fn every_part_of_a_certificate_cut_short_gives_none_and_never_panics() {
     for der in [real((2030, 6, 1)), certificate(true, 300, UTC_TIME, "300101000000Z"), certificate(false, 5, GENERALIZED_TIME, "20510101000000Z")] {
         assert!(not_after(&der).is_some());
         for length in 0..der.len() {
-            assert_eq!(not_after(&der[..length]), None, "cut at {length} of {}", der.len());
+            assert_eq!(not_after(&der[..length]), None, "cut at {length}");
         }
     }
 }
