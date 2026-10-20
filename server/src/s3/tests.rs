@@ -911,13 +911,15 @@ async fn an_unusual_delimiter_lists_a_page_at_a_time_and_each_group_once() {
     let s = server(false).await;
     for i in 0..30 {
         put(&s, Box::leak(format!("a-{i:02}").into_boxed_str()), b"x").await;
+        put(&s, Box::leak(format!("b-{i:02}").into_boxed_str()), b"x").await;
     }
-    put(&s, "b.txt", b"x").await;
+    put(&s, "c.txt", b"x").await;
     let _small = super::listing::small_budget(10);
     let (mut prefixes, mut keys, mut pages, mut token) = (Vec::new(), Vec::new(), 0, None::<String>);
     loop {
         let page = s.client.list_objects_v2().bucket("backups").delimiter("-").set_continuation_token(token.clone()).send().await.unwrap();
         pages += 1;
+        assert!(pages < 20, "the listing does not go on");
         prefixes.extend(page.common_prefixes().iter().filter_map(|p| p.prefix().map(str::to_string)));
         keys.extend(page.contents().iter().filter_map(|o| o.key().map(str::to_string)));
         token = page.next_continuation_token().map(str::to_string);
@@ -925,8 +927,20 @@ async fn an_unusual_delimiter_lists_a_page_at_a_time_and_each_group_once() {
             break;
         }
     }
-    assert_eq!((prefixes, keys), (vec!["a-".to_string()], vec!["b.txt".to_string()]));
+    assert_eq!((prefixes, keys), (vec!["a-".to_string(), "b-".to_string()], vec!["c.txt".to_string()]));
     assert!(pages >= 3, "one request went through all of them: {pages} pages");
+    // The same with ListObjects, which goes on from the group the page before ended with
+    let (mut prefixes, mut keys, mut marker) = (Vec::new(), Vec::new(), None::<String>);
+    for _ in 0..20 {
+        let page = s.client.list_objects().bucket("backups").delimiter("-").set_marker(marker.clone()).send().await.unwrap();
+        prefixes.extend(page.common_prefixes().iter().filter_map(|p| p.prefix().map(str::to_string)));
+        keys.extend(page.contents().iter().filter_map(|o| o.key().map(str::to_string)));
+        marker = page.next_marker().map(str::to_string);
+        if marker.is_none() {
+            break;
+        }
+    }
+    assert_eq!((prefixes, keys), (vec!["a-".to_string(), "b-".to_string()], vec!["c.txt".to_string()]));
 }
 
 #[tokio::test]
@@ -1163,19 +1177,34 @@ async fn a_copy_never_reads_from_another_bucket_and_settings_that_are_not_kept_a
 }
 
 #[tokio::test]
-async fn a_marker_or_start_after_that_is_a_group_does_not_list_the_group_again() {
+async fn a_group_is_left_out_only_when_the_listing_goes_on_from_the_group_itself() {
     let s = server(false).await;
     for key in ["a/1.txt", "a/2.txt", "b.txt", "c/1.txt"] {
         put(&s, key, b"x").await;
     }
-    // ListObjects: the marker is the last key or group of the page before, so a group it ends is done
+    let groups = |prefixes: &[aws_sdk_s3::types::CommonPrefix]| prefixes.iter().map(|p| p.prefix().unwrap().to_string()).collect::<Vec<_>>();
+    let keys = |objects: &[aws_sdk_s3::types::Object]| objects.iter().map(|o| o.key().unwrap().to_string()).collect::<Vec<_>>();
+    // ListObjects: a marker that is the group (what NextMarker says after a group) means the group is done
     let v1 = s.client.list_objects().bucket("backups").delimiter("/").marker("a/").send().await.unwrap();
-    assert_eq!(v1.common_prefixes().iter().map(|p| p.prefix().unwrap()).collect::<Vec<_>>(), ["c/"]);
-    assert_eq!(v1.contents().iter().map(|o| o.key().unwrap()).collect::<Vec<_>>(), ["b.txt"]);
-    // ListObjectsV2 with start-after: the same
-    let v2 = s.client.list_objects_v2().bucket("backups").delimiter("/").start_after("a/").send().await.unwrap();
-    assert_eq!(v2.common_prefixes().iter().map(|p| p.prefix().unwrap()).collect::<Vec<_>>(), ["c/"]);
-    assert_eq!(v2.contents().iter().map(|o| o.key().unwrap()).collect::<Vec<_>>(), ["b.txt"]);
+    assert_eq!((groups(v1.common_prefixes()), keys(v1.contents())), (vec!["c/".to_string()], vec!["b.txt".to_string()]));
+    // ... a marker that is a key in the group is only a key: what comes after it in the group is rolled up, as S3 does
+    let v1 = s.client.list_objects().bucket("backups").delimiter("/").marker("a/1.txt").send().await.unwrap();
+    assert_eq!(groups(v1.common_prefixes()), ["a/", "c/"]);
+    let v1 = s.client.list_objects().bucket("backups").delimiter("/").marker("a/2.txt").send().await.unwrap();
+    assert_eq!(groups(v1.common_prefixes()), ["c/"], "nothing of the group is left after its last key");
+    // ListObjectsV2: start-after is a key and nothing else, "a/" too
+    for start in ["a/", "a/1.txt"] {
+        let v2 = s.client.list_objects_v2().bucket("backups").delimiter("/").start_after(start).send().await.unwrap();
+        assert_eq!((groups(v2.common_prefixes()), keys(v2.contents())), (vec!["a/".to_string(), "c/".to_string()], vec!["b.txt".to_string()]), "{start}");
+    }
+    let v2 = s.client.list_objects_v2().bucket("backups").delimiter("/").start_after("a/2.txt").send().await.unwrap();
+    assert_eq!(groups(v2.common_prefixes()), ["c/"]);
+    // A page that ends on a group goes on after the group, however it is asked for
+    let first = s.client.list_objects_v2().bucket("backups").delimiter("/").max_keys(1).send().await.unwrap();
+    assert_eq!(groups(first.common_prefixes()), ["a/"]);
+    let second =
+        s.client.list_objects_v2().bucket("backups").delimiter("/").max_keys(1).continuation_token(first.next_continuation_token().unwrap()).send().await.unwrap();
+    assert_eq!(keys(second.contents()), ["b.txt"]);
 }
 
 #[tokio::test]
