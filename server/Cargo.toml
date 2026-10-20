@@ -73,11 +73,8 @@ httpdate = "1"
 jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
 s3s = "0.17"
 async-trait = "0.1"
-# Share one TLS session cache between control and passive connections; do not accept proxy-protocol headers.
 # The FTP server for receive folders is our own library, ThirtyFTP (#612)
 thirtyftp = "0.1"
-# Reading when a certificate ends
-x509-parser = { version = "0.18", default-features = false }
 # Text read from files is kept in compatibility form (NFKC): the Chinese and Japanese characters that Chrome's PDFs write
 # as radicals and full-width letters become the ones people type (contentsearch/)
 unicode-normalization = "0.1"
