@@ -44,7 +44,6 @@ tower = { version = "0.5", features = ["util"] }
 hex = "0.4"
 base64 = "0.23"
 argon2 = "0.6"
-crc32fast = "1"
 percent-encoding = "2"
 mime_guess = "2"
 rust-embed = "8"
@@ -67,7 +66,6 @@ data-encoding = "2"
 # WebDAV (dav/): reading the XML requests, and dates in HTTP format; both already used by object_store and hyper.
 # object_store still uses quick-xml 0.41, so two versions are built until it moves to 0.42
 quick-xml = "0.42"
-httpdate = "1"
 # Backup schedules in a named time zone (backups/policy.rs), with the time zone database built in: the Docker image
 # has none
 jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }

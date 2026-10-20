@@ -463,7 +463,7 @@ fn extract_entry(archive: &std::path::Path, entry: &ReadEntry, tmp: PathBuf, pro
     let mut limited = reader.take(entry.size + 1);
     let mut out = std::io::BufWriter::new(std::fs::File::create(&tmp)?);
     let mut sha = Sha256::new();
-    let mut crc = crc32fast::Hasher::new();
+    let mut crc = flate2::Crc::new();
     let mut buf = vec![0u8; 256 * 1024];
     let mut size = 0u64;
     let result = (|| -> AppResult<()> {
@@ -481,7 +481,7 @@ fn extract_entry(archive: &std::path::Path, entry: &ReadEntry, tmp: PathBuf, pro
             out.write_all(&buf[..n])?;
             progress(n as u64);
         }
-        if size != entry.size || crc.finalize() != entry.crc {
+        if size != entry.size || crc.sum() != entry.crc {
             return Err(damaged());
         }
         // On disk before it is stored under its hash or renamed into a folder
@@ -841,6 +841,13 @@ mod tests {
         let liar = env.stored_file(&amy, amy.root(), "liar.zip", &bytes).await;
         assert!(extract_now(&env, &amy, &liar).await.unwrap().error.unwrap().contains("damaged"));
 
+        // An entry whose bytes don't match its CRC
+        let mut bytes = zip_of(&[("x.txt", &[b'x'; 1000])], false).await;
+        let cd = (0..bytes.len() - 4).rev().find(|&i| bytes[i..i + 4] == 0x0201_4b50u32.to_le_bytes()).unwrap();
+        bytes[cd + 16] ^= 1;
+        let wrong = env.stored_file(&amy, amy.root(), "wrong-crc.zip", &bytes).await;
+        assert!(extract_now(&env, &amy, &wrong).await.unwrap().error.unwrap().contains("damaged"));
+
         // What the archive holds counts against the quota before anything is extracted
         sqlx::query("UPDATE users SET quota_bytes = 50000 WHERE id = ?").bind(amy.id).execute(&env.st.db).await.unwrap();
         let big = fails(vec![("big.txt", vec![b'a'; 60_000])], false, "big.zip").await;
@@ -848,7 +855,7 @@ mod tests {
 
         // Nothing was created by any of them, and no temporary files are left
         let names: Vec<String> = listing(&env, amy.root()).await.into_iter().map(|(n, _, _)| n).collect();
-        assert_eq!(names.len(), before + 12, "{names:?}");
+        assert_eq!(names.len(), before + 13, "{names:?}");
         assert!(names.iter().all(|n| n.ends_with(".zip")));
         let left: Vec<_> = std::fs::read_dir(env.st.tmp_dir()).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name()).collect();
         assert!(left.iter().all(|n| !n.to_string_lossy().starts_with("unzip-")), "{left:?}");

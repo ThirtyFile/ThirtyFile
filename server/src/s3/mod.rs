@@ -152,9 +152,7 @@ fn time_ok(req: &Request) -> bool {
             iso.parse::<jiff::Timestamp>().ok().map(|ts| ts.as_second())
         }
         Some(_) => None,
-        None => {
-            header("date").and_then(|d| httpdate::parse_http_date(d).ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64)
-        }
+        None => header("date").and_then(crate::util::parse_http_date),
     };
     at.is_some_and(|at| (crate::util::now() - at).unsigned_abs() <= 900)
 }

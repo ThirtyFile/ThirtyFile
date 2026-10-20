@@ -430,7 +430,7 @@ fn message_text(cfg: &SmtpSettings, sender_name: &str, msg: &Message<'_>) -> Str
         cfg.from,
         msg.to,
         header_text(msg.subject),
-        httpdate::fmt_http_date(std::time::SystemTime::now()),
+        crate::util::http_date(crate::util::now()),
         crate::util::new_id(),
     );
     for line in body.as_bytes().chunks(76) {
