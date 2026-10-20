@@ -57,14 +57,26 @@ pub async fn normalize(kind: &str, config: serde_json::Value) -> serde_json::Val
             cfg.region = "auto".into();
         }
     }
-    if cfg.endpoint.is_empty() && !cfg.bucket.trim().is_empty() {
-        let options = object_store::ClientOptions::new();
-        let lookup = object_store::aws::resolve_bucket_region(cfg.bucket.trim(), &options);
-        if let Ok(Ok(region)) = tokio::time::timeout(std::time::Duration::from_secs(10), lookup).await {
-            cfg.region = region;
-        }
+    if cfg.endpoint.is_empty()
+        && !cfg.bucket.trim().is_empty()
+        && let Some(region) = bucket_region(cfg.bucket.trim()).await
+    {
+        cfg.region = region;
     }
     serde_json::to_value(cfg).unwrap_or(config)
+}
+
+/// The region of an AWS bucket: any request to `https://<bucket>.s3.amazonaws.com` says it in `x-amz-bucket-region`, whatever else it answers
+/// (a bucket that can't be read is told by the same header). None when AWS can't be reached in 10 seconds or doesn't say
+async fn bucket_region(bucket: &str) -> Option<String> {
+    region_at(&format!("https://{bucket}.s3.amazonaws.com")).await
+}
+
+async fn region_at(url: &str) -> Option<String> {
+    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(10)).redirect(reqwest::redirect::Policy::none()).build().ok()?;
+    let answer = client.head(url).send().await.ok()?;
+    let region = answer.headers().get("x-amz-bucket-region")?.to_str().ok()?.trim().to_string();
+    (!region.is_empty()).then_some(region)
 }
 
 /// Unencrypted connections (S3 over http, FTP without TLS) or ones that skip certificate verification (FTPS) are only allowed to private addresses:
@@ -246,5 +258,25 @@ mod tests {
         let cfg = serde_json::json!({ "endpoint": "https://acct.r2.cloudflarestorage.com/files/", "region": "", "bucket": "" });
         let out: S3Config = serde_json::from_value(normalize("s3", cfg).await).unwrap();
         assert_eq!((out.endpoint.as_str(), out.bucket.as_str(), out.region.as_str()), ("https://acct.r2.cloudflarestorage.com", "files", "auto"));
+    }
+
+    #[tokio::test]
+    async fn the_region_of_a_bucket_is_read_from_the_header_whatever_the_status() {
+        use axum::{Router, http::StatusCode, routing::any};
+        let app = Router::new()
+            .route("/open", any(|| async { ([("x-amz-bucket-region", "eu-west-3")], StatusCode::OK) }))
+            .route("/private", any(|| async { ([("x-amz-bucket-region", " ap-southeast-2 ")], StatusCode::FORBIDDEN) }))
+            .route("/elsewhere", any(|| async { ([("x-amz-bucket-region", "us-west-1"), ("location", "/open")], StatusCode::MOVED_PERMANENTLY) }))
+            .route("/silent", any(|| async { StatusCode::OK }))
+            .route("/empty", any(|| async { ([("x-amz-bucket-region", "")], StatusCode::OK) }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        assert_eq!(region_at(&format!("{base}/open")).await.as_deref(), Some("eu-west-3"));
+        assert_eq!(region_at(&format!("{base}/private")).await.as_deref(), Some("ap-southeast-2"));
+        assert_eq!(region_at(&format!("{base}/elsewhere")).await.as_deref(), Some("us-west-1"), "a redirect is not followed");
+        assert_eq!(region_at(&format!("{base}/silent")).await, None);
+        assert_eq!(region_at(&format!("{base}/empty")).await, None);
+        assert_eq!(region_at("http://127.0.0.1:1/").await, None);
     }
 }

@@ -50,7 +50,8 @@ rust-embed = "8"
 # Log archive files (.jsonl.gz)
 flate2 = "1.1"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp"] }
-object_store = { version = "0.14.2", features = ["aws"] }
+# The client for S3 storage locations is our own library, ThirtyS3 (#636)
+thirtys3-client = "0.1"
 russh = "0.64"
 russh-sftp = "3"
 suppaftp = { version = "12", features = ["tokio-rustls-aws-lc-rs"] }
@@ -63,8 +64,7 @@ form_urlencoded = "1"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 sha1 = "0.11"
 data-encoding = "2"
-# WebDAV (dav/): reading the XML requests, and dates in HTTP format; both already used by object_store and hyper.
-# object_store still uses quick-xml 0.41, so two versions are built until it moves to 0.42
+# WebDAV (dav/): reading the XML requests
 quick-xml = "0.42"
 # Backup schedules in a named time zone (backups/policy.rs), with the time zone database built in: the Docker image
 # has none
@@ -112,3 +112,5 @@ opt-level = 3
 tokio = { version = "1", features = ["test-util"] }
 rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs"] }
 aws-sdk-s3 = { version = "1.152.0", default-features = false, features = ["rt-tokio", "default-https-client"] }
+# An S3 service in memory, for the tests of the storage location client
+thirtys3-server = "0.1"
