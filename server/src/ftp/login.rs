@@ -10,7 +10,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
 };
-use unftp_core::auth::{AuthenticationError, Authenticator, ChannelEncryptionState, Credentials, Principal, UserDetail, UserDetailError, UserDetailProvider};
+use thirtyftp::{LoginContext, LoginError};
 
 pub struct Login {
     pub state: AppState,
@@ -20,7 +20,6 @@ pub struct Login {
     pub authenticated: Arc<AtomicBool>,
     /// Told when the device has signed in
     pub signed_in: Arc<tokio::sync::Notify>,
-    pub user: crate::sync::Mutex<Option<Device>>,
 }
 
 /// The address a connection comes from when Docker's port proxy relays it: the default gateway of the system ThirtyFile
@@ -55,22 +54,11 @@ pub struct Device {
     pub username: String,
     pub _permit: Arc<tokio::sync::OwnedSemaphorePermit>,
 }
-impl fmt::Display for Device {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.username)
-    }
-}
 impl fmt::Debug for Device {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("FtpDevice").field("username", &self.username).finish_non_exhaustive()
     }
 }
-impl UserDetail for Device {
-    fn account_enabled(&self) -> bool {
-        self.actor.ftp_credential.as_ref().is_some_and(|c| c.alive.load(Ordering::Acquire))
-    }
-}
-
 pub fn private_peer(ip: IpAddr) -> bool {
     // Docker's port proxy connects from the container's gateway, whoever the client is
     if proxy_address().is_some_and(|proxy| ip.to_canonical() == IpAddr::V4(proxy)) {
@@ -82,11 +70,11 @@ pub fn private_peer(ip: IpAddr) -> bool {
     }
 }
 
-#[async_trait::async_trait]
-impl Authenticator for Login {
-    async fn authenticate(&self, username: &str, creds: &Credentials) -> Result<Principal, AuthenticationError> {
-        let denied = || AuthenticationError::BadPassword;
-        if !self.alive.load(Ordering::Acquire) || creds.source_ip != self.peer || (creds.command_channel_security != ChannelEncryptionState::Tls && !self.plain) {
+impl Login {
+    /// Checks a name and a password: the device that signed in, or why it can't
+    pub async fn sign_in(&self, context: &LoginContext, username: &str, password: &str) -> Result<Device, LoginError> {
+        let denied = || LoginError::Incorrect;
+        if !self.alive.load(Ordering::Acquire) || context.peer.ip() != self.peer || (!context.encrypted && !self.plain) {
             return Err(denied());
         }
         let key = format!("ip:{}", auth::limit_key_ip(&self.peer.to_string()));
@@ -94,13 +82,13 @@ impl Authenticator for Login {
         if !auth::begin_attempt(&self.state, &key, auth::IP_FAIL_LIMIT) {
             return Err(denied());
         }
-        if username.len() > 100 || creds.password.as_ref().is_none_or(|p| p.len() > 256) {
+        if username.len() > 100 || password.len() > 256 {
             return Err(denied());
         }
         let row: Option<Folder> =
             sqlx::query_as("SELECT * FROM ftp_receive_folders WHERE username=?").bind(username).fetch_optional(&self.state.db).await.map_err(|_| denied())?;
         let hash = row.as_ref().map(|r| r.password_hash.clone()).unwrap_or_else(|| auth::DUMMY_HASH.to_string());
-        let valid = auth::verify_password(creds.password.clone().unwrap_or_default(), hash).await.map_err(|_| denied())?;
+        let valid = auth::verify_password(password.to_string(), hash).await.map_err(|_| denied())?;
         let Some(row) = row.filter(|r| valid && r.enabled && r.expires_at.is_none_or(|t| t > crate::util::now())) else {
             crate::logs::record_login_via(&self.state, None, username, "ftp_failed", "ftp", &self.peer.to_string(), &axum::http::HeaderMap::new());
             return Err(denied());
@@ -123,9 +111,10 @@ impl Authenticator for Login {
                 s
             })
         };
-        let permit = semaphore.try_acquire_owned().map_err(|_| AuthenticationError::new("This receive folder already has 5 sessions"))?;
-        let principal = Principal { username: format!("{}:{}", row.id, row.generation) };
-        *self.user.lock() = Some(Device { actor, username: row.username, _permit: Arc::new(permit) });
+        let permit = semaphore.try_acquire_owned().map_err(|_| LoginError::Refused("This receive folder already has 5 sessions".into()))?;
+        let device = Device { actor, username: row.username, _permit: Arc::new(permit) };
+        // The folder must still be allowed to receive
+        super::credentials::access(&self.state, &device.actor, false, false).await.map_err(|_| denied())?;
         self.authenticated.store(true, Ordering::Release);
         self.signed_in.notify_one();
         // Bookkeeping, which never fails a sign-in
@@ -138,21 +127,7 @@ impl Authenticator for Login {
         {
             tracing::debug!("Couldn't note when an FTP receive folder was used: {e}");
         }
-        Ok(principal)
-    }
-}
-#[async_trait::async_trait]
-impl UserDetailProvider for Login {
-    type User = Device;
-    async fn provide_user_detail(&self, principal: &Principal) -> Result<Device, UserDetailError> {
-        let denied = || UserDetailError::new("Receive folder unavailable");
-        let user = self.user.lock().clone().ok_or_else(denied)?;
-        let marker = user.actor.ftp_credential.as_ref().ok_or_else(denied)?;
-        if principal.username != format!("{}:{}", marker.id, marker.generation) {
-            return Err(denied());
-        }
-        super::credentials::access(&self.state, &user.actor, false, false).await.map_err(|_| denied())?;
-        Ok(user)
+        Ok(device)
     }
 }
 

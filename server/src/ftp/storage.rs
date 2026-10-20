@@ -1,6 +1,6 @@
 //! A receive folder is a small virtual filesystem. No device receives the creator's deletion or sharing powers.
 
-use super::login::Device;
+use super::login::{Device, Login};
 use crate::{
     auth::User,
     error::{AppError, AppResult},
@@ -10,11 +10,17 @@ use crate::{
 };
 use std::{
     fmt::Debug,
-    path::{Path, PathBuf},
+    path::PathBuf,
     time::{Duration, SystemTime},
 };
+use thirtyftp::{Backend, Entry, FsError, FtpPath, LoginContext, LoginError};
 use tokio::io::{AsyncRead, AsyncReadExt};
-use unftp_core::storage::{Error, ErrorKind, Fileinfo, Metadata, Permissions, StorageBackend};
+
+/// What one connection hands to the FTP library: its sign-in, and the files
+pub struct Receive {
+    pub login: Login,
+    pub files: Files,
+}
 
 pub struct Files(pub AppState);
 impl Debug for Files {
@@ -29,62 +35,37 @@ pub struct Attributes {
     folder: bool,
     modified: SystemTime,
 }
-impl Metadata for Attributes {
-    fn len(&self) -> u64 {
-        self.size
-    }
-    fn is_dir(&self) -> bool {
-        self.folder
-    }
-    fn is_file(&self) -> bool {
-        !self.folder
-    }
-    fn is_symlink(&self) -> bool {
-        false
-    }
-    fn modified(&self) -> Result<SystemTime, Error> {
-        Ok(self.modified)
-    }
-    fn gid(&self) -> u32 {
-        0
-    }
-    fn uid(&self) -> u32 {
-        0
-    }
-    fn permissions(&self) -> Permissions {
-        Permissions(if self.folder { 0o700 } else { 0o600 })
+impl Attributes {
+    fn entry(&self, name: &str) -> Entry {
+        if self.folder { Entry::directory(name, Some(self.modified)) } else { Entry::file(name, self.size, Some(self.modified)) }
     }
 }
-fn map(e: AppError) -> Error {
-    let kind = match e.status.as_u16() {
-        401 | 403 => ErrorKind::PermissionDenied,
-        404 => ErrorKind::PermanentFileNotAvailable,
-        413 | 507 => ErrorKind::InsufficientStorageSpaceError,
-        _ => ErrorKind::LocalError,
-    };
-    Error::new(kind, std::io::Error::other(e.message))
+fn map(e: AppError) -> FsError {
+    match e.status.as_u16() {
+        401 | 403 => FsError::PermissionDenied,
+        404 => FsError::NotFound,
+        413 | 507 => FsError::QuotaExceeded,
+        _ => FsError::Local(e.message),
+    }
 }
-fn refused() -> Error {
-    Error::new(ErrorKind::PermissionDenied, std::io::Error::other("This FTP receive folder only accepts uploads"))
+/// What a receive folder doesn't do (delete, rename, read in the middle of a file)
+fn refused() -> FsError {
+    FsError::PermissionDenied
 }
-fn parts(path: &Path) -> AppResult<Vec<String>> {
-    let p = path.to_str().ok_or_else(|| AppError::bad_request("Invalid FTP path"))?;
-    // libunftp builds its virtual paths with PathBuf, which uses backslashes for nested paths on Windows.
-    // Every component is still validated and resolved by node identity; this never becomes a disk path.
-    #[cfg(windows)]
-    let normalized = p.replace('\\', "/");
-    #[cfg(windows)]
-    let p = normalized.as_str();
-    if matches!(p, "" | "/" | ".") {
+/// The names of a path, each of them checked
+fn parts(path: &FtpPath) -> AppResult<Vec<String>> {
+    if path.is_root() {
         return Ok(vec![]);
     }
-    crate::access::relative_parts(p.strip_prefix('/').unwrap_or(p))
+    crate::access::relative_parts(&path.components().join("/"))
 }
 impl Files {
-    async fn resolve(&self, user: &User, path: &Path, need: Need) -> AppResult<Node> {
+    async fn resolve(&self, user: &User, path: &FtpPath, need: Need) -> AppResult<Node> {
+        self.resolve_parts(user, parts(path)?, need).await
+    }
+    async fn resolve_parts(&self, user: &User, parts: Vec<String>, need: Need) -> AppResult<Node> {
         let root = user.protocol_root.as_deref().ok_or_else(AppError::unauthorized)?;
         let mut node = tree::folder_for(&mut *self.0.db.acquire().await?, user, root, Need::Read).await?;
-        let parts = parts(path)?;
         let last = parts.len().saturating_sub(1);
         for (i, name) in parts.into_iter().enumerate() {
             if !node.is_folder() {
@@ -106,27 +87,64 @@ impl Files {
         let size = if node.is_folder() { 0 } else { Source::resolve(&self.0, node).await?.describe(node.size as u64).await?.0 };
         Ok(Attributes { size, folder: node.is_folder(), modified: SystemTime::UNIX_EPOCH + Duration::from_secs(node.updated_at.max(0) as u64) })
     }
-    async fn parent(&self, user: &User, path: &Path) -> AppResult<(Node, String)> {
+    async fn parent(&self, user: &User, path: &FtpPath) -> AppResult<(Node, String)> {
         let mut segments = parts(path)?;
         let name = segments.pop().ok_or_else(|| AppError::bad_request("A filename is required"))?;
-        let parent = PathBuf::from(format!("/{}", segments.join("/")));
-        Ok((self.resolve(user, &parent, Need::Add).await?, name))
+        Ok((self.resolve_parts(user, segments, Need::Add).await?, name))
     }
 }
 
 #[async_trait::async_trait]
-impl StorageBackend<Device> for Files {
-    type Metadata = Attributes;
-    async fn metadata<P: AsRef<Path> + Send + Debug>(&self, user: &Device, path: P) -> Result<Attributes, Error> {
-        let actor = super::credentials::access(&self.0, &user.actor, false, true).await.map_err(map)?;
-        let node = self.resolve(&actor, path.as_ref(), Need::Read).await.map_err(map)?;
-        self.attributes(&node).await.map_err(map)
+impl Backend for Receive {
+    type User = Device;
+
+    async fn login(&self, context: &LoginContext, user: &str, password: &str) -> Result<Device, LoginError> {
+        self.login.sign_in(context, user, password).await
     }
-    async fn list<P: AsRef<Path> + Send + Debug>(&self, user: &Device, path: P) -> Result<Vec<Fileinfo<PathBuf, Attributes>>, Error> {
-        let actor = super::credentials::access(&self.0, &user.actor, true, false).await.map_err(map)?;
-        let node = self.resolve(&actor, path.as_ref(), Need::Read).await.map_err(map)?;
+
+    async fn metadata(&self, user: &Device, path: &FtpPath) -> Result<Entry, FsError> {
+        let files = &self.files;
+        let actor = super::credentials::access(&files.0, &user.actor, false, true).await.map_err(map)?;
+        let node = files.resolve(&actor, path, Need::Read).await.map_err(map)?;
+        Ok(files.attributes(&node).await.map_err(map)?.entry(path.file_name().unwrap_or("")))
+    }
+
+    async fn list(&self, user: &Device, path: &FtpPath) -> Result<Vec<Entry>, FsError> {
+        self.files.list(user, path).await
+    }
+
+    async fn read(&self, user: &Device, path: &FtpPath, offset: u64) -> Result<Box<dyn AsyncRead + Send + Unpin>, FsError> {
+        self.files.get(user, path, offset).await
+    }
+
+    async fn write(&self, user: &Device, path: &FtpPath, data: &mut (dyn AsyncRead + Send + Unpin)) -> Result<u64, FsError> {
+        self.files.put(user, data, path).await
+    }
+
+    async fn make_dir(&self, user: &Device, path: &FtpPath) -> Result<(), FsError> {
+        let files = &self.files;
+        let actor = super::credentials::access(&files.0, &user.actor, false, false).await.map_err(map)?;
+        let (parent, name) = files.parent(&actor, path).await.map_err(map)?;
+        crate::access::make_folder(&files.0, &actor, &parent, &name).await.map(|_| ()).map_err(map)
+    }
+
+    async fn change_dir(&self, user: &Device, path: &FtpPath) -> Result<(), FsError> {
+        let files = &self.files;
+        let actor = super::credentials::access(&files.0, &user.actor, false, false).await.map_err(map)?;
+        let node = files.resolve(&actor, path, Need::Read).await.map_err(map)?;
         if !node.is_folder() {
-            return Err(refused());
+            return Err(FsError::WrongType);
+        }
+        Ok(())
+    }
+}
+
+impl Files {
+    async fn list(&self, user: &Device, path: &FtpPath) -> Result<Vec<Entry>, FsError> {
+        let actor = super::credentials::access(&self.0, &user.actor, true, false).await.map_err(map)?;
+        let node = self.resolve(&actor, path, Need::Read).await.map_err(map)?;
+        if !node.is_folder() {
+            return Err(FsError::WrongType);
         }
         let mut out = vec![];
         let mut after = None;
@@ -136,14 +154,14 @@ impl StorageBackend<Device> for Files {
             for child in nodes {
                 examined += 1;
                 if examined > 10000 {
-                    return Err(Error::new(ErrorKind::LocalError, std::io::Error::other("This directory is too large to list through FTP")));
+                    return Err(FsError::Local("This directory is too large to list through FTP".into()));
                 }
                 if tree::node_for(&mut *self.0.db.acquire().await.map_err(|e| map(e.into()))?, &actor, &child.id, Need::Read).await.is_err() {
                     continue;
                 }
-                out.push(Fileinfo { path: PathBuf::from(child.name.clone()), metadata: self.attributes(&child).await.map_err(map)? });
+                out.push(self.attributes(&child).await.map_err(map)?.entry(&child.name));
                 if out.len() > 10000 {
-                    return Err(Error::new(ErrorKind::LocalError, std::io::Error::other("This directory is too large to list through FTP")));
+                    return Err(FsError::Local("This directory is too large to list through FTP".into()));
                 }
             }
             if next.is_none() {
@@ -153,14 +171,14 @@ impl StorageBackend<Device> for Files {
         }
         Ok(out)
     }
-    async fn get<P: AsRef<Path> + Send + Debug>(&self, user: &Device, path: P, start_pos: u64) -> Result<Box<dyn AsyncRead + Send + Sync + Unpin>, Error> {
+    async fn get(&self, user: &Device, path: &FtpPath, start_pos: u64) -> Result<Box<dyn AsyncRead + Send + Unpin>, FsError> {
         if start_pos != 0 {
             return Err(refused());
         }
         let actor = super::credentials::access(&self.0, &user.actor, false, true).await.map_err(map)?;
-        let node = self.resolve(&actor, path.as_ref(), Need::Read).await.map_err(map)?;
+        let node = self.resolve(&actor, path, Need::Read).await.map_err(map)?;
         if node.is_folder() {
-            return Err(refused());
+            return Err(FsError::WrongType);
         }
         // Each bounded read checks credential generation, current permissions and the publication boundary.
         let (mut writer, reader) = tokio::io::duplex(256 * 1024);
@@ -199,22 +217,12 @@ impl StorageBackend<Device> for Files {
         });
         Ok(Box::new(CheckedRead { reader, error }))
     }
-    async fn put<P: AsRef<Path> + Send + Debug, R: AsyncRead + Send + Sync + Unpin + 'static>(
-        &self,
-        user: &Device,
-        input: R,
-        path: P,
-        start_pos: u64,
-    ) -> Result<u64, Error> {
-        // REST/APPE are not advertised. Their offsets must never truncate or append directly to a visible file.
-        if start_pos != 0 {
-            return Err(refused());
-        }
+    async fn put(&self, user: &Device, input: &mut (dyn AsyncRead + Send + Unpin), path: &FtpPath) -> Result<u64, FsError> {
         let mut actor = super::credentials::access(&self.0, &user.actor, false, false).await.map_err(map)?;
         let transfer_alive = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
         let _transfer = Transfer(transfer_alive.clone());
         actor.ftp_credential.as_mut().ok_or_else(refused)?.transfer = Some(transfer_alive);
-        let (parent, name) = self.parent(&actor, path.as_ref()).await.map_err(map)?;
+        let (parent, name) = self.parent(&actor, path).await.map_err(map)?;
         let mut up = crate::access::upload_to(&self.0, &actor, &parent, name).await.map_err(map)?;
         // A receive folder that keeps both: a taken name gives the new file a number, and nothing there is replaced
         let id = actor.ftp_credential.as_ref().map(|c| c.id.clone()).ok_or_else(refused)?;
@@ -236,7 +244,7 @@ impl StorageBackend<Device> for Files {
         let path = self.0.tmp_dir().join(format!("ftp-{}", crate::util::new_id()));
         let temporary = Temporary(path.clone());
         let state = (input, actor.clone(), self.0.clone(), Recheck::new());
-        let stream = futures_util::stream::unfold(state, |(mut input, actor, st, mut recheck)| async move {
+        let stream = futures_util::stream::unfold(state, |(input, actor, st, mut recheck)| async move {
             let mut bytes = vec![0; 64 * 1024];
             let result = tokio::time::timeout(Duration::from_secs(30), async {
                 let read = input.read(&mut bytes);
@@ -288,31 +296,9 @@ impl StorageBackend<Device> for Files {
             result
         })
         .await
-        .map_err(|e| Error::new(ErrorKind::LocalError, e))?
+        .map_err(|e| FsError::Local(e.to_string()))?
         .map_err(map)?;
         Ok(size)
-    }
-    async fn del<P: AsRef<Path> + Send + Debug>(&self, _: &Device, _: P) -> Result<(), Error> {
-        Err(refused())
-    }
-    async fn rename<P: AsRef<Path> + Send + Debug>(&self, _: &Device, _: P, _: P) -> Result<(), Error> {
-        Err(refused())
-    }
-    async fn rmd<P: AsRef<Path> + Send + Debug>(&self, _: &Device, _: P) -> Result<(), Error> {
-        Err(refused())
-    }
-    async fn mkd<P: AsRef<Path> + Send + Debug>(&self, user: &Device, path: P) -> Result<(), Error> {
-        let actor = super::credentials::access(&self.0, &user.actor, false, false).await.map_err(map)?;
-        let (parent, name) = self.parent(&actor, path.as_ref()).await.map_err(map)?;
-        crate::access::make_folder(&self.0, &actor, &parent, &name).await.map(|_| ()).map_err(map)
-    }
-    async fn cwd<P: AsRef<Path> + Send + Debug>(&self, user: &Device, path: P) -> Result<(), Error> {
-        let actor = super::credentials::access(&self.0, &user.actor, false, false).await.map_err(map)?;
-        let node = self.resolve(&actor, path.as_ref(), Need::Read).await.map_err(map)?;
-        if !node.is_folder() {
-            return Err(refused());
-        }
-        Ok(())
     }
 }
 
