@@ -43,8 +43,8 @@ pub fn condition(headers: &HeaderMap, etag: &ETag, modified: i64, copy: bool) ->
         if !etag_matches(v, etag) {
             return Err(s3_error!(PreconditionFailed));
         }
-    } else if let Some(date) = text(unmodified).and_then(|v| httpdate::parse_http_date(v).ok())
-        && timestamp(modified) > Timestamp::from(date)
+    } else if let Some(date) = text(unmodified).and_then(crate::util::parse_http_date)
+        && timestamp(modified) > timestamp(date)
     {
         return Err(s3_error!(PreconditionFailed));
     }
@@ -52,8 +52,8 @@ pub fn condition(headers: &HeaderMap, etag: &ETag, modified: i64, copy: bool) ->
         if etag_matches(v, etag) {
             return if copy { Err(s3_error!(PreconditionFailed)) } else { Ok(Some(StatusCode::NOT_MODIFIED)) };
         }
-    } else if let Some(date) = text(modified_name).and_then(|v| httpdate::parse_http_date(v).ok())
-        && timestamp(modified) <= Timestamp::from(date)
+    } else if let Some(date) = text(modified_name).and_then(crate::util::parse_http_date)
+        && timestamp(modified) <= timestamp(date)
     {
         return if copy { Err(s3_error!(PreconditionFailed)) } else { Ok(Some(StatusCode::NOT_MODIFIED)) };
     }
@@ -370,7 +370,7 @@ fn not_modified(etag: &ETag, modified: i64) -> s3s::S3Error {
     if let Ok(value) = axum::http::HeaderValue::from_str(&format!("\"{}\"", etag.value())) {
         headers.insert("etag", value);
     }
-    if let Ok(value) = axum::http::HeaderValue::from_str(&httpdate::fmt_http_date(std::time::UNIX_EPOCH + std::time::Duration::from_secs(modified.max(0) as u64))) {
+    if let Ok(value) = axum::http::HeaderValue::from_str(&crate::util::http_date(modified)) {
         headers.insert("last-modified", value);
     }
     error.set_headers(headers);

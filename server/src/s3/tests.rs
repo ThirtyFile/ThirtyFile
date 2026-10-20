@@ -1005,7 +1005,7 @@ async fn etags_missing_in_published_buckets_are_worked_out_ahead() {
 fn request_times_come_from_x_amz_date_or_date() {
     let at = |name: &str, value: String| axum::http::Request::builder().uri("/backups/a.txt").header(name, value).body(axum::body::Body::empty()).unwrap();
     let iso = |t: i64| jiff::Timestamp::from_second(t).unwrap().strftime("%Y%m%dT%H%M%SZ").to_string();
-    let http = |t: i64| httpdate::fmt_http_date(std::time::UNIX_EPOCH + std::time::Duration::from_secs(t as u64));
+    let http = crate::util::http_date;
     assert!(super::time_ok(&at("x-amz-date", iso(now()))));
     assert!(super::time_ok(&at("date", http(now()))), "Date, for clients that sign it instead");
     assert!(!super::time_ok(&at("x-amz-date", iso(now() - 3600))));

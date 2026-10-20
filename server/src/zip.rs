@@ -121,7 +121,7 @@ impl<W: AsyncWrite + Unpin> ZipWriter<W> {
         let method = if self.deflate { DEFLATE } else { STORE };
         self.local_header(&name, zip64, false, method, time, date).await?;
 
-        let mut hasher = crc32fast::Hasher::new();
+        let mut hasher = flate2::Crc::new();
         let mut buf = vec![0u8; 256 * 1024];
         let mut written = 0u64;
         let start = self.offset;
@@ -161,7 +161,7 @@ impl<W: AsyncWrite + Unpin> ZipWriter<W> {
         if !zip64 && csize >= U32_MAX {
             return Err(std::io::Error::other(format!("{path}: compressed size out of range")));
         }
-        let crc = hasher.finalize();
+        let crc = hasher.sum();
 
         let mut d = Vec::with_capacity(24);
         d.extend_from_slice(&0x0807_4b50u32.to_le_bytes());
@@ -351,6 +351,12 @@ fn bad(msg: &str) -> std::io::Error {
 fn u16_at(b: &[u8], i: usize) -> u16 {
     u16::from_le_bytes([b[i], b[i + 1]])
 }
+/// The CRC-32 of `data`, as ZIP stores it for each entry
+fn crc32(data: &[u8]) -> u32 {
+    let mut crc = flate2::Crc::new();
+    crc.update(data);
+    crc.sum()
+}
 fn u32_at(b: &[u8], i: usize) -> u32 {
     u32::from_le_bytes(b[i..i + 4].try_into().unwrap())
 }
@@ -452,7 +458,7 @@ pub fn read_entries<R: Read + Seek>(r: &mut R, max_entries: u64, max_directory: 
                     }
                 }
                 // Unicode path: the name in UTF-8, when it belongs to this name (checked by its CRC)
-                0x7075 if n > 5 && data[0] == 1 && u32_at(data, 1) == crc32fast::hash(raw_name) => {
+                0x7075 if n > 5 && data[0] == 1 && u32_at(data, 1) == crc32(raw_name) => {
                     name = String::from_utf8_lossy(&data[5..]).into_owned();
                 }
                 _ => {}
@@ -546,7 +552,7 @@ mod tests {
             let mut out = Vec::new();
             open_entry(&mut cursor, entry).unwrap().read_to_end(&mut out).unwrap();
             assert_eq!(out, data);
-            assert_eq!(crc32fast::hash(&out), entry.crc);
+            assert_eq!(crc32(&out), entry.crc);
         }
         // Too many entries is refused up front
         assert_eq!(read_entries(&mut cursor, 3, 1 << 20).unwrap_err().kind(), std::io::ErrorKind::FileTooLarge);

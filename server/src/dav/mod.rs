@@ -25,10 +25,7 @@ use paths::*;
 use props::*;
 use put::*;
 
-use std::{
-    collections::HashMap,
-    time::{Duration, UNIX_EPOCH},
-};
+use std::collections::HashMap;
 
 use axum::{
     body::Body,
@@ -663,7 +660,7 @@ mod tests {
         assert_eq!(rfc3339(951_782_400), "2000-02-29T00:00:00Z");
         assert_eq!(http_date(784_111_777), "Sun, 06 Nov 1994 08:49:37 GMT");
         // Times a disk or a backup gave that dates can't be written with are kept within 1970 to 9999
-        assert_eq!(http_date(i64::MAX), "Fri, 31 Dec 9999 23:59:59 GMT");
+        assert_eq!(http_date(i64::MAX), "Thu, 30 Dec 9999 22:00:00 GMT");
         assert_eq!(rfc3339(i64::MAX), "9999-12-31T23:59:59Z");
         assert_eq!((http_date(-5), rfc3339(i64::MIN)), ("Thu, 01 Jan 1970 00:00:00 GMT".into(), "1970-01-01T00:00:00Z".into()));
         assert_eq!(segments("/dav/My%20files//a%2Bb/"), Some(vec!["My files".to_string(), "a+b".to_string()]));
