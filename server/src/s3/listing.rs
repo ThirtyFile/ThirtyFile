@@ -1,15 +1,21 @@
 //! A byte-ordered, bounded depth-first walk. Only a small child page per open directory is kept, never a whole tree.
 
-use super::credentials::{Identity, request_identity};
+use super::{
+    S3Result,
+    credentials::{Identity, request_identity},
+    etag::quoted,
+    failed,
+};
 use crate::{
     state::AppState,
     tree::{self, Node},
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use hmac::{Hmac, KeyInit, Mac};
-use s3s::{S3Request, S3Response, S3Result, dto::*, s3_error};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
+use thirtys3_core::{model::ObjectEntry, s3_error::code};
+use thirtys3_server::{Ctx, ListNext, ListPage, ListRequest, ListStart};
 
 #[derive(Serialize, Deserialize)]
 struct Cursor {
@@ -29,17 +35,17 @@ fn token(st: &AppState, cursor: &Cursor) -> S3Result<String> {
 
 fn decode(st: &AppState, value: &str, bucket: &str, prefix: &str, delimiter: &str) -> S3Result<Cursor> {
     if value.len() > 6000 {
-        return Err(s3_error!(InvalidArgument, "Invalid continuation token"));
+        return Err(failed(code::INVALID_ARGUMENT, "Invalid continuation token"));
     }
-    let (data, signature) = value.split_once('.').ok_or_else(|| s3_error!(InvalidArgument))?;
-    let bytes = URL_SAFE_NO_PAD.decode(data).map_err(|_| s3_error!(InvalidArgument))?;
-    let signature = URL_SAFE_NO_PAD.decode(signature).map_err(|_| s3_error!(InvalidArgument))?;
+    let (data, signature) = value.split_once('.').ok_or_else(|| failed(code::INVALID_ARGUMENT, "Invalid argument"))?;
+    let bytes = URL_SAFE_NO_PAD.decode(data).map_err(|_| failed(code::INVALID_ARGUMENT, "Invalid argument"))?;
+    let signature = URL_SAFE_NO_PAD.decode(signature).map_err(|_| failed(code::INVALID_ARGUMENT, "Invalid argument"))?;
     let mut mac = Hmac::<sha2::Sha256>::new_from_slice(&st.secret).map_err(super::internal)?;
     mac.update(&bytes);
-    mac.verify_slice(&signature).map_err(|_| s3_error!(InvalidArgument))?;
-    let cursor: Cursor = serde_json::from_slice(&bytes).map_err(|_| s3_error!(InvalidArgument))?;
+    mac.verify_slice(&signature).map_err(|_| failed(code::INVALID_ARGUMENT, "Invalid argument"))?;
+    let cursor: Cursor = serde_json::from_slice(&bytes).map_err(|_| failed(code::INVALID_ARGUMENT, "Invalid argument"))?;
     if cursor.bucket != bucket || cursor.prefix != prefix || cursor.delimiter != delimiter {
-        return Err(s3_error!(InvalidArgument));
+        return Err(failed(code::INVALID_ARGUMENT, "Invalid argument"));
     }
     Ok(cursor)
 }
@@ -186,15 +192,12 @@ impl<'a> Walk<'a> {
     }
 }
 
-pub struct Page {
-    pub objects: Vec<Object>,
-    pub groups: Vec<CommonPrefix>,
-    pub last: Option<(String, bool)>,
-    pub truncated: bool,
-}
-
-pub fn encode(key: &str, enabled: bool) -> String {
-    if enabled { percent_encoding::utf8_percent_encode(key, percent_encoding::NON_ALPHANUMERIC).to_string() } else { key.into() }
+/// What a page found: the entries, where it ended (and whether that was a group), and whether there is more
+struct Page {
+    objects: Vec<ObjectEntry>,
+    groups: Vec<String>,
+    last: Option<(String, bool)>,
+    truncated: bool,
 }
 
 struct Listing<'a> {
@@ -202,16 +205,15 @@ struct Listing<'a> {
     delimiter: &'a str,
     after: &'a str,
     skip_group: bool,
-    limit: i32,
-    url: bool,
+    limit: usize,
 }
 
 async fn page(st: &AppState, identity: &Identity, query: Listing<'_>) -> S3Result<Page> {
-    let Listing { prefix, delimiter, after, skip_group, limit, url } = query;
+    let Listing { prefix, delimiter, after, skip_group, limit } = query;
     // As AWS does: more than 1000 at once is 1000
     let limit = limit.min(1000);
-    if prefix.len() > 1024 || delimiter.len() > 64 || after.len() > 1024 || limit < 0 {
-        return Err(s3_error!(InvalidArgument));
+    if prefix.len() > 1024 || delimiter.len() > 64 || after.len() > 1024 {
+        return Err(failed(code::INVALID_ARGUMENT, "Invalid argument"));
     }
     let mut page = Page { objects: vec![], groups: vec![], last: None, truncated: false };
     if limit == 0 {
@@ -228,23 +230,17 @@ async fn page(st: &AppState, identity: &Identity, query: Listing<'_>) -> S3Resul
             }
             previous_group = group.clone();
         }
-        if page.objects.len() + page.groups.len() == limit as usize {
+        if page.objects.len() + page.groups.len() == limit {
             page.truncated = true;
             break;
         }
         if let Some(group) = group {
             page.last = Some((group.clone(), true));
-            page.groups.push(CommonPrefix { prefix: Some(encode(&group, url)) });
+            page.groups.push(group);
         } else {
             let description = super::etag::describe_node(st, &node).await?;
             page.last = Some((key.clone(), false));
-            page.objects.push(Object {
-                key: Some(encode(&key, url)),
-                size: Some(description.size as i64),
-                e_tag: Some(description.etag),
-                last_modified: Some(super::objects::timestamp(node.updated_at)),
-                ..Default::default()
-            });
+            page.objects.push(ObjectEntry::new(key, super::objects::timestamp(node.updated_at), quoted(&description.etag), description.size));
         }
     }
     // Stopped for its budget: the next page goes on after the last item looked at (a group already listed is left
@@ -256,61 +252,32 @@ async fn page(st: &AppState, identity: &Identity, query: Listing<'_>) -> S3Resul
     Ok(page)
 }
 
-pub async fn v2(st: &AppState, req: S3Request<ListObjectsV2Input>) -> S3Result<S3Response<ListObjectsV2Output>> {
-    let identity = request_identity(st, &req, Some(&req.input.bucket), false).await?;
-    let i = req.input;
-    let prefix = i.prefix.as_deref().unwrap_or_default();
-    let delimiter = i.delimiter.as_deref().unwrap_or_default();
-    let cursor = i.continuation_token.as_ref().map(|t| decode(st, t, &identity.bucket.id, prefix, delimiter)).transpose()?;
-    let after = cursor.as_ref().map(|c| c.key.as_str()).or(i.start_after.as_deref()).unwrap_or_default();
-    // As AWS does: more than 1000 at once is 1000
-    let limit = i.max_keys.unwrap_or(1000).min(1000);
-    let url = i.encoding_type.is_some();
-    let page = page(st, &identity, Listing { prefix, delimiter, after, skip_group: cursor.as_ref().is_some_and(|c| c.group), limit, url }).await?;
-    let next = if page.truncated {
-        let (key, group) = page.last.clone().ok_or_else(|| s3_error!(InternalError))?;
-        Some(token(st, &Cursor { bucket: identity.bucket.id, prefix: prefix.into(), delimiter: delimiter.into(), key, group })?)
-    } else {
-        None
+/// `ListObjects` (the marker is a key to go on after, and a group it ended is not listed again) and `ListObjectsV2` (a continuation token, or
+/// `start-after`, which only says where to begin)
+pub async fn list(st: &AppState, ctx: &Ctx<'_>, req: ListRequest) -> S3Result<ListPage> {
+    let identity = request_identity(st, ctx, Some(&req.bucket), false).await?;
+    let (prefix, delimiter) = (req.prefix.as_str(), req.delimiter.as_deref().unwrap_or_default());
+    let v2 = ctx.uri.query().is_some_and(|q| form_urlencoded::parse(q.as_bytes()).any(|(name, value)| name == "list-type" && value == "2"));
+    let cursor = match &req.start {
+        ListStart::Continuation(token) => Some(decode(st, token, &identity.bucket.id, prefix, delimiter)?),
+        _ => None,
     };
-    Ok(S3Response::new(ListObjectsV2Output {
-        name: Some(i.bucket),
-        prefix: i.prefix.map(|v| encode(&v, url)),
-        delimiter: i.delimiter.map(|v| encode(&v, url)),
-        max_keys: Some(limit),
-        key_count: Some((page.objects.len() + page.groups.len()) as i32),
-        contents: Some(page.objects),
-        common_prefixes: Some(page.groups),
-        is_truncated: Some(page.truncated),
-        continuation_token: i.continuation_token,
-        next_continuation_token: next,
-        start_after: i.start_after.map(|v| encode(&v, url)),
-        encoding_type: i.encoding_type,
-        ..Default::default()
-    }))
-}
-
-pub async fn v1(st: &AppState, req: S3Request<ListObjectsInput>) -> S3Result<S3Response<ListObjectsOutput>> {
-    let identity = request_identity(st, &req, Some(&req.input.bucket), false).await?;
-    let i = req.input;
-    let prefix = i.prefix.as_deref().unwrap_or_default();
-    let delimiter = i.delimiter.as_deref().unwrap_or_default();
-    let after = i.marker.as_deref().unwrap_or_default();
-    // As AWS does: more than 1000 at once is 1000
-    let limit = i.max_keys.unwrap_or(1000).min(1000);
-    let url = i.encoding_type.is_some();
-    let page = page(st, &identity, Listing { prefix, delimiter, after, skip_group: !delimiter.is_empty() && after.ends_with(delimiter), limit, url }).await?;
-    Ok(S3Response::new(ListObjectsOutput {
-        name: Some(i.bucket),
-        prefix: i.prefix.map(|v| encode(&v, url)),
-        delimiter: i.delimiter.map(|v| encode(&v, url)),
-        marker: i.marker.map(|v| encode(&v, url)),
-        max_keys: Some(limit),
-        contents: Some(page.objects),
-        common_prefixes: Some(page.groups),
-        is_truncated: Some(page.truncated),
-        next_marker: page.last.filter(|_| page.truncated).map(|(key, _)| encode(&key, url)),
-        encoding_type: i.encoding_type,
-        ..Default::default()
-    }))
+    let after = match &req.start {
+        ListStart::After(key) => key.as_str(),
+        _ => cursor.as_ref().map(|c| c.key.as_str()).unwrap_or_default(),
+    };
+    let skip_group = match &cursor {
+        Some(cursor) => cursor.group,
+        None => !v2 && !delimiter.is_empty() && after.ends_with(delimiter),
+    };
+    let page = page(st, &identity, Listing { prefix, delimiter, after, skip_group, limit: req.max_keys as usize }).await?;
+    let next = match page.truncated {
+        true => {
+            let (key, group) = page.last.clone().ok_or_else(|| failed(code::INTERNAL_ERROR, "We encountered an internal error. Please try again."))?;
+            let token = token(st, &Cursor { bucket: identity.bucket.id, prefix: prefix.into(), delimiter: delimiter.into(), key: key.clone(), group })?;
+            Some(ListNext { key, token })
+        }
+        false => None,
+    };
+    Ok(ListPage { objects: page.objects, common_prefixes: page.groups, truncated: page.truncated, next })
 }

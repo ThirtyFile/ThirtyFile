@@ -38,7 +38,6 @@ confidence-threshold = 0.9
 multiple-versions = "warn"
 wildcards = "deny"
 skip = [
-  { crate = "atoi@2.0.0", reason = "sqlx-sqlite" },
   { crate = "base64@0.22.1", reason = "sqlx-core" },
   { crate = "block-buffer@0.10.4", reason = "the 0.10 RustCrypto crates sqlx and crc-fast use" },
   { crate = "cpufeatures@0.2.17", reason = "the 0.10 RustCrypto crates sqlx and crc-fast use" },
