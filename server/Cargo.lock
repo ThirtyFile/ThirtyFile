@@ -4431,6 +4431,8 @@ dependencies = [
 [[package]]
 name = "thirtyftp"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48c8f8f15944289310f7f4b46345efc96d98dcb37f52cfa26176f20c38998a53"
 dependencies = [
  "rustls",
  "thiserror",
