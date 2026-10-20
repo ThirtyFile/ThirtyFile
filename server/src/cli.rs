@@ -70,8 +70,8 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_env_filter(
             EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "thirtyfile=info,tower_http=warn".into())
-                .add_directive("s3s=warn".parse()?)
-                .add_directive("s3s::ops::signature=off".parse()?),
+                .add_directive("thirtys3_server=warn".parse()?)
+                .add_directive("thirtys3_core=warn".parse()?),
         )
         .with_ansi(std::io::stdout().is_terminal());
     if std::env::var("THIRTYFILE_LOG_FORMAT").is_ok_and(|f| f.eq_ignore_ascii_case("json")) {

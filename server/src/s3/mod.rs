@@ -1,7 +1,11 @@
-//! The maintained s3s adapter verifies canonical SigV4, parses bounded XML and streams content. This module supplies
-//! the folder mapping and permission checks; anonymous access, SigV2 and unrelated APIs are never enabled.
+//! The S3 service of ThirtyS3 (protocol, signatures, XML, conditions and ranges) over our folders: this module supplies the mapping of buckets and
+//! keys to folders and the permission checks. Anonymous access, SigV2 and unrelated APIs are never enabled.
 
-mod checksums;
+#![allow(
+    clippy::result_large_err,
+    reason = "`S3Error` is the error of every operation and carries what a response needs, so it is not small; the service's own code allows it too"
+)]
+
 pub mod config;
 pub(crate) mod credentials;
 pub(crate) mod etag;
@@ -21,56 +25,148 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
-use s3s::{
-    S3Error, S3ErrorCode,
-    config::{S3Config, StaticConfigProvider},
-    service::S3ServiceBuilder,
-};
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
+use thirtys3_core::{S3Error, s3_error::code};
+use thirtys3_server::{
+    AuthInfo, AuthOutcome, Backend, BucketInfo, CompleteMultipartUploadOutput, CompleteMultipartUploadRequest, CopyObjectOutput, CopyObjectRequest,
+    CreateMultipartUploadRequest, Credential, Ctx, DeleteTarget, ListBucketsOutput, ListBucketsRequest, ListPage, ListPartsOutput, ListPartsRequest, ListRequest,
+    ListUploadsOutput, ListUploadsRequest, ObjectData, ObjectInfo, PutObjectOutput, PutObjectRequest, S3Service, ServerConfig, UploadPartOutput, UploadPartRequest,
 };
 
-#[derive(Clone)]
-pub struct Service(pub AppState);
-#[derive(Clone)]
-struct Verified(Arc<AtomicBool>);
-struct Access {
-    st: AppState,
-    rate_key: String,
-}
-#[async_trait::async_trait]
-impl s3s::access::S3Access for Access {
-    async fn check(&self, context: &mut s3s::access::S3AccessContext<'_>) -> s3s::S3Result<()> {
-        if context.credentials().is_none() {
-            return Err(s3s::s3_error!(AccessDenied));
-        }
-        if let Some(verified) = context.extensions_mut().get::<Verified>()
-            && !verified.0.swap(true, Ordering::Relaxed)
-        {
-            auth::attempt_succeeded(&self.st, &self.rate_key);
-        }
-        Ok(())
-    }
+pub type S3Result<T> = Result<T, S3Error>;
+
+/// An S3 error with this code and message (the status is that of the code)
+pub fn failed(code: &str, message: &str) -> S3Error {
+    S3Error::new(code, message)
 }
 
 pub fn internal(e: impl std::fmt::Display) -> S3Error {
     tracing::warn!("S3 operation failed: {}", crate::redact::redact(&e.to_string()));
-    s3s::s3_error!(InternalError)
+    failed(code::INTERNAL_ERROR, "We encountered an internal error. Please try again.")
 }
 
 pub fn map_error(e: AppError) -> S3Error {
     let code = match e.status {
-        StatusCode::NOT_FOUND => S3ErrorCode::NoSuchKey,
-        StatusCode::PRECONDITION_FAILED => S3ErrorCode::PreconditionFailed,
-        StatusCode::FORBIDDEN | StatusCode::UNAUTHORIZED => S3ErrorCode::AccessDenied,
-        StatusCode::PAYLOAD_TOO_LARGE => S3ErrorCode::EntityTooLarge,
-        StatusCode::CONFLICT => S3ErrorCode::InvalidRequest,
-        StatusCode::INSUFFICIENT_STORAGE => S3ErrorCode::Custom("QuotaExceeded".into()),
-        StatusCode::BAD_REQUEST | StatusCode::METHOD_NOT_ALLOWED => S3ErrorCode::InvalidArgument,
-        _ => S3ErrorCode::InternalError,
+        StatusCode::NOT_FOUND => code::NO_SUCH_KEY,
+        StatusCode::PRECONDITION_FAILED => code::PRECONDITION_FAILED,
+        StatusCode::FORBIDDEN | StatusCode::UNAUTHORIZED => code::ACCESS_DENIED,
+        StatusCode::PAYLOAD_TOO_LARGE => code::ENTITY_TOO_LARGE,
+        StatusCode::CONFLICT => code::INVALID_REQUEST,
+        StatusCode::INSUFFICIENT_STORAGE => {
+            let mut error = failed("QuotaExceeded", &e.message);
+            error.status = 507;
+            return error;
+        }
+        StatusCode::BAD_REQUEST | StatusCode::METHOD_NOT_ALLOWED => code::INVALID_ARGUMENT,
+        _ => code::INTERNAL_ERROR,
     };
-    S3Error::with_message(code, e.message)
+    failed(code, &e.message)
+}
+
+/// What a request is counted under in the limit on failed sign-ins: its address
+#[derive(Clone)]
+struct RateKey(String);
+
+/// The buckets and keys of this server, as a backend of the S3 service
+pub struct Gateway(pub AppState);
+
+#[async_trait::async_trait]
+impl Backend for Gateway {
+    async fn secret_key(&self, access_key: &str) -> Result<Option<Credential>, S3Error> {
+        credentials::secret(&self.0, access_key).await
+    }
+
+    /// Reserves an attempt of the sign-in limit; it is given back unless the request turns out to be a bad signature or an unknown key
+    async fn before_authentication(&self, info: &AuthInfo<'_>) -> Result<(), S3Error> {
+        let Some(RateKey(key)) = info.extensions.get::<RateKey>() else { return Err(internal("a request came without its address")) };
+        if !auth::begin_attempt(&self.0, key, auth::IP_FAIL_LIMIT) {
+            return Err(failed(code::SLOW_DOWN, "Too many failed sign-ins. Try again later."));
+        }
+        Ok(())
+    }
+
+    async fn after_authentication(&self, info: &AuthInfo<'_>, outcome: AuthOutcome) {
+        let Some(RateKey(key)) = info.extensions.get::<RateKey>() else { return };
+        // A guess at a secret or at a key stays counted. A key that is known and refused, and a request that couldn't be read, are no guess
+        if !matches!(outcome, AuthOutcome::BadSignature | AuthOutcome::UnknownKey) {
+            auth::attempt_succeeded(&self.0, key);
+        }
+    }
+
+    async fn list_buckets(&self, ctx: &Ctx<'_>, request: ListBucketsRequest) -> Result<ListBucketsOutput, S3Error> {
+        let identity = credentials::request_identity(&self.0, ctx, None, false).await?;
+        let buckets = if request.prefix.as_ref().is_none_or(|prefix| identity.bucket.name.starts_with(prefix)) {
+            vec![BucketInfo { name: identity.bucket.name, created: objects::timestamp(identity.bucket.created_at) }]
+        } else {
+            vec![]
+        };
+        Ok(ListBucketsOutput { buckets, ..Default::default() })
+    }
+
+    async fn head_bucket(&self, ctx: &Ctx<'_>, bucket: &str) -> Result<(), S3Error> {
+        credentials::request_identity(&self.0, ctx, Some(bucket), false).await.map(|_| ())
+    }
+
+    async fn get_object(&self, ctx: &Ctx<'_>, bucket: &str, key: &str) -> Result<ObjectData, S3Error> {
+        objects::get(&self.0, ctx, bucket, key).await
+    }
+
+    /// Also what the service reads the source of a copy with: a key that may not read it gets no copy
+    async fn head_object(&self, ctx: &Ctx<'_>, bucket: &str, key: &str) -> Result<ObjectInfo, S3Error> {
+        objects::head(&self.0, ctx, bucket, key).await
+    }
+
+    async fn put_object(&self, ctx: &Ctx<'_>, request: PutObjectRequest) -> Result<PutObjectOutput, S3Error> {
+        objects::put(&self.0, ctx, request).await
+    }
+
+    async fn copy_object(&self, ctx: &Ctx<'_>, request: CopyObjectRequest) -> Result<CopyObjectOutput, S3Error> {
+        objects::copy(&self.0, ctx, request).await
+    }
+
+    async fn delete_object(&self, ctx: &Ctx<'_>, bucket: &str, key: &str) -> Result<(), S3Error> {
+        objects::delete(&self.0, ctx, bucket, key).await
+    }
+
+    async fn delete_objects(&self, ctx: &Ctx<'_>, bucket: &str, targets: &[DeleteTarget]) -> Result<Vec<Result<(), S3Error>>, S3Error> {
+        let identity = credentials::request_identity(&self.0, ctx, Some(bucket), true).await?;
+        let mut results = Vec::with_capacity(targets.len());
+        for target in targets {
+            results.push(if target.version_id.is_some() {
+                Err(failed(code::NOT_IMPLEMENTED, "Versions are not supported"))
+            } else {
+                objects::delete_key(&self.0, &identity, &target.key).await
+            });
+        }
+        Ok(results)
+    }
+
+    async fn list_objects(&self, ctx: &Ctx<'_>, request: ListRequest) -> Result<ListPage, S3Error> {
+        listing::list(&self.0, ctx, request).await
+    }
+
+    async fn create_multipart_upload(&self, ctx: &Ctx<'_>, request: CreateMultipartUploadRequest) -> Result<String, S3Error> {
+        multipart::create(&self.0, ctx, request).await
+    }
+
+    async fn upload_part(&self, ctx: &Ctx<'_>, request: UploadPartRequest) -> Result<UploadPartOutput, S3Error> {
+        multipart::part(&self.0, ctx, request).await
+    }
+
+    async fn complete_multipart_upload(&self, ctx: &Ctx<'_>, request: CompleteMultipartUploadRequest) -> Result<CompleteMultipartUploadOutput, S3Error> {
+        multipart::complete(&self.0, ctx, request).await
+    }
+
+    async fn abort_multipart_upload(&self, ctx: &Ctx<'_>, bucket: &str, key: &str, upload_id: &str) -> Result<(), S3Error> {
+        multipart::abort(&self.0, ctx, bucket, key, upload_id).await
+    }
+
+    async fn list_parts(&self, ctx: &Ctx<'_>, request: ListPartsRequest) -> Result<ListPartsOutput, S3Error> {
+        multipart::list_parts(&self.0, ctx, request).await
+    }
+
+    async fn list_multipart_uploads(&self, ctx: &Ctx<'_>, request: ListUploadsRequest) -> Result<ListUploadsOutput, S3Error> {
+        multipart::list_uploads(&self.0, ctx, request).await
+    }
 }
 
 fn wire_error(status: StatusCode, code: &str, message: &str) -> Response {
@@ -92,147 +188,16 @@ pub async fn dispatch(State(st): State<AppState>, mut req: Request, next: Next) 
     }
     let peer = req.extensions().get::<ConnectInfo<std::net::SocketAddr>>().map(|v| v.0).unwrap_or_else(|| ([127, 0, 0, 1], 0).into());
     let key = format!("ip:{}", auth::limit_key_ip(&auth::client_ip(&st, peer, req.headers())));
-    // A clock out of step is no guess at a key: refused before anything counts
-    if !time_ok(&req) {
-        return wire_error(StatusCode::FORBIDDEN, "RequestTimeTooSkewed", "The request time differs from the server by more than 15 minutes");
-    }
-    // Reserve first; concurrent signature failures cannot all pass the shared sign-in limit. The reservation is given
-    // back unless the request was a bad signature or an unknown key.
-    if !auth::begin_attempt(&st, &key, auth::IP_FAIL_LIMIT) {
-        return wire_error(StatusCode::TOO_MANY_REQUESTS, "SlowDown", "Too many failed sign-ins. Try again later.");
-    }
-    let mut config = S3Config::default();
-    config.xml_max_body_size = 1024 * 1024;
-    config.aws_chunked_stream_max_chunk_size = 8 * 1024 * 1024;
-    config.expected_region = cfg.region.parse().ok();
-    config.sig_v4_allowed_services = vec!["s3".into()];
-    // Browser form uploads (POST policy) aren't offered: refused by s3s rather than left to its default
-    config.allow_post_signature = false;
-    config.put_object_max_size = Some(if st.max_upload > 0 { st.max_upload.min(5 * 1024 * 1024 * 1024) } else { 5 * 1024 * 1024 * 1024 });
-    let mut builder = S3ServiceBuilder::new(Service(st.clone()));
-    let refused = Arc::new(AtomicBool::new(false));
-    builder.set_auth(credentials::Auth(st.clone(), refused.clone()));
-    builder.set_access(Access { st: st.clone(), rate_key: key.clone() });
-    builder.set_config(Arc::new(StaticConfigProvider::new(Arc::new(config))));
-    let verified = Verified(Arc::new(AtomicBool::new(false)));
-    req.extensions_mut().insert(verified.clone());
-    let (parts, body) = req.into_parts();
-    let req = axum::http::Request::from_parts(parts, s3s::Body::http_body_unsync(body));
-    let answer = builder.build().call(req).await;
-    // A known key refused for another reason, or a request that couldn't be read: no sign-in was tried
-    if !verified.0.load(Ordering::Relaxed) && (refused.load(Ordering::Relaxed) || answer.is_err()) {
-        auth::attempt_succeeded(&st, &key);
-    }
-    match answer {
-        Ok(res) => {
-            // Authenticated operation errors (missing objects, quota…) are not failed sign-ins.
-
-            let (parts, body) = res.into_parts();
-            Response::from_parts(parts, axum::body::Body::new(body))
-        }
-        Err(_) => wire_error(StatusCode::BAD_REQUEST, "InvalidRequest", "The S3 request could not be read"),
-    }
-}
-
-/// Whether a request's clock is within 15 minutes of the server's. s3s checks this too, but only after the request
-/// took an attempt of the sign-in limit: a clock out of step is no guess at a key, so it is refused here first.
-/// Presigned URLs are checked by s3s (their expiry), and so are form uploads (refused).
-fn time_ok(req: &Request) -> bool {
-    if req.uri().query().is_some_and(|q| form_urlencoded::parse(q.as_bytes()).any(|(k, _)| k == "X-Amz-Algorithm")) {
-        return true;
-    }
-    let header = |name| req.headers().get(name).and_then(|v| v.to_str().ok());
-    if req.method() == axum::http::Method::POST && header("content-type").is_some_and(|t| t.starts_with("multipart/form-data")) {
-        return true;
-    }
-    // x-amz-date, or the Date header when a client signs that instead
-    let at = match header("x-amz-date") {
-        Some(date) if date.len() == 16 && date.is_ascii() => {
-            let iso = format!("{}-{}-{}T{}:{}:{}Z", &date[0..4], &date[4..6], &date[6..8], &date[9..11], &date[11..13], &date[13..15]);
-            iso.parse::<jiff::Timestamp>().ok().map(|ts| ts.as_second())
-        }
-        Some(_) => None,
-        None => header("date").and_then(crate::util::parse_http_date),
+    req.extensions_mut().insert(RateKey(key));
+    // Browser form uploads (POST policy) and the rest of S3 aren't offered: the service answers them NotImplemented
+    let config = ServerConfig {
+        region: cfg.region,
+        max_object_size: if st.max_upload > 0 { st.max_upload.min(5 * 1024 * 1024 * 1024) } else { 5 * 1024 * 1024 * 1024 },
+        ..ServerConfig::default()
     };
-    at.is_some_and(|at| (crate::util::now() - at).unsigned_abs() <= 900)
-}
-
-#[async_trait::async_trait]
-impl s3s::S3 for Service {
-    async fn get_object(&self, req: s3s::S3Request<s3s::dto::GetObjectInput>) -> s3s::S3Result<s3s::S3Response<s3s::dto::GetObjectOutput>> {
-        objects::get(&self.0, req).await
-    }
-    async fn head_object(&self, req: s3s::S3Request<s3s::dto::HeadObjectInput>) -> s3s::S3Result<s3s::S3Response<s3s::dto::HeadObjectOutput>> {
-        objects::head(&self.0, req).await
-    }
-    async fn put_object(&self, req: s3s::S3Request<s3s::dto::PutObjectInput>) -> s3s::S3Result<s3s::S3Response<s3s::dto::PutObjectOutput>> {
-        objects::put(&self.0, req).await
-    }
-    async fn copy_object(&self, req: s3s::S3Request<s3s::dto::CopyObjectInput>) -> s3s::S3Result<s3s::S3Response<s3s::dto::CopyObjectOutput>> {
-        objects::copy(&self.0, req).await
-    }
-    async fn delete_object(&self, req: s3s::S3Request<s3s::dto::DeleteObjectInput>) -> s3s::S3Result<s3s::S3Response<s3s::dto::DeleteObjectOutput>> {
-        objects::delete(&self.0, req).await
-    }
-    async fn delete_objects(&self, req: s3s::S3Request<s3s::dto::DeleteObjectsInput>) -> s3s::S3Result<s3s::S3Response<s3s::dto::DeleteObjectsOutput>> {
-        objects::delete_many(&self.0, req).await
-    }
-    async fn list_objects_v2(&self, req: s3s::S3Request<s3s::dto::ListObjectsV2Input>) -> s3s::S3Result<s3s::S3Response<s3s::dto::ListObjectsV2Output>> {
-        listing::v2(&self.0, req).await
-    }
-    async fn list_objects(&self, req: s3s::S3Request<s3s::dto::ListObjectsInput>) -> s3s::S3Result<s3s::S3Response<s3s::dto::ListObjectsOutput>> {
-        listing::v1(&self.0, req).await
-    }
-    async fn create_multipart_upload(
-        &self,
-        req: s3s::S3Request<s3s::dto::CreateMultipartUploadInput>,
-    ) -> s3s::S3Result<s3s::S3Response<s3s::dto::CreateMultipartUploadOutput>> {
-        multipart::create(&self.0, req).await
-    }
-    async fn upload_part(&self, req: s3s::S3Request<s3s::dto::UploadPartInput>) -> s3s::S3Result<s3s::S3Response<s3s::dto::UploadPartOutput>> {
-        multipart::part(&self.0, req).await
-    }
-    async fn complete_multipart_upload(
-        &self,
-        req: s3s::S3Request<s3s::dto::CompleteMultipartUploadInput>,
-    ) -> s3s::S3Result<s3s::S3Response<s3s::dto::CompleteMultipartUploadOutput>> {
-        multipart::complete(&self.0, req).await
-    }
-    async fn abort_multipart_upload(
-        &self,
-        req: s3s::S3Request<s3s::dto::AbortMultipartUploadInput>,
-    ) -> s3s::S3Result<s3s::S3Response<s3s::dto::AbortMultipartUploadOutput>> {
-        multipart::abort(&self.0, req).await
-    }
-    async fn list_parts(&self, req: s3s::S3Request<s3s::dto::ListPartsInput>) -> s3s::S3Result<s3s::S3Response<s3s::dto::ListPartsOutput>> {
-        multipart::list_parts(&self.0, req).await
-    }
-    async fn list_multipart_uploads(
-        &self,
-        req: s3s::S3Request<s3s::dto::ListMultipartUploadsInput>,
-    ) -> s3s::S3Result<s3s::S3Response<s3s::dto::ListMultipartUploadsOutput>> {
-        multipart::list_uploads(&self.0, req).await
-    }
-
-    async fn list_buckets(&self, req: s3s::S3Request<s3s::dto::ListBucketsInput>) -> s3s::S3Result<s3s::S3Response<s3s::dto::ListBucketsOutput>> {
-        let identity = credentials::request_identity(&self.0, &req, None, false).await?;
-        let buckets = if req.input.prefix.as_ref().is_none_or(|prefix| identity.bucket.name.starts_with(prefix)) {
-            vec![s3s::dto::Bucket { name: Some(identity.bucket.name), creation_date: Some(objects::timestamp(identity.bucket.created_at)), ..Default::default() }]
-        } else {
-            vec![]
-        };
-        Ok(s3s::S3Response::new(s3s::dto::ListBucketsOutput { buckets: Some(buckets), ..Default::default() }))
-    }
-    async fn head_bucket(&self, req: s3s::S3Request<s3s::dto::HeadBucketInput>) -> s3s::S3Result<s3s::S3Response<s3s::dto::HeadBucketOutput>> {
-        credentials::request_identity(&self.0, &req, Some(&req.input.bucket), false).await?;
-        let cfg = config::load(&self.0).await.map_err(map_error)?;
-        Ok(s3s::S3Response::new(s3s::dto::HeadBucketOutput { bucket_region: Some(cfg.region), ..Default::default() }))
-    }
-    async fn get_bucket_location(&self, req: s3s::S3Request<s3s::dto::GetBucketLocationInput>) -> s3s::S3Result<s3s::S3Response<s3s::dto::GetBucketLocationOutput>> {
-        credentials::request_identity(&self.0, &req, Some(&req.input.bucket), false).await?;
-        let cfg = config::load(&self.0).await.map_err(map_error)?;
-        Ok(s3s::S3Response::new(s3s::dto::GetBucketLocationOutput { location_constraint: if cfg.region == "us-east-1" { None } else { Some(cfg.region.into()) } }))
-    }
+    let answer = S3Service::new(Gateway(st), config).handle(req).await;
+    let (parts, body) = answer.into_parts();
+    Response::from_parts(parts, axum::body::Body::new(body))
 }
 
 pub async fn maintain(st: &AppState) {

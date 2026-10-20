@@ -1,13 +1,11 @@
 //! Bucket ownership and keys are checked again on every operation, including presigned requests.
 
-use s3s::{
-    S3Request, S3Result,
-    auth::{S3Auth, SecretKey},
-    s3_error,
-};
 use serde::Serialize;
 use sqlx::SqliteConnection;
+use thirtys3_core::{S3Error, s3_error::code};
+use thirtys3_server::{Credential, Ctx};
 
+use super::{S3Result, failed};
 use crate::{
     auth::{self, User},
     error::{AppError, AppResult},
@@ -42,6 +40,7 @@ pub struct Key {
     pub last_used_at: Option<i64>,
 }
 
+#[derive(Clone)]
 pub struct Identity {
     pub bucket: Bucket,
     pub key: Key,
@@ -58,7 +57,7 @@ pub async fn publisher(conn: &mut SqliteConnection, user: &User, node_id: &str, 
 pub async fn identity(st: &AppState, access_key: &str, write: bool) -> S3Result<Identity> {
     let cfg = super::config::load(st).await.map_err(super::map_error)?;
     if !cfg.enabled {
-        return Err(s3_error!(AccessDenied, "S3 access is disabled"));
+        return Err(failed(code::ACCESS_DENIED, "S3 access is disabled"));
     }
     let mut conn = st.db.acquire().await.map_err(super::internal)?;
     let key: Key = sqlx::query_as("SELECT * FROM s3_keys WHERE access_key = ? AND enabled = 1 AND (expires_at IS NULL OR expires_at > ?)")
@@ -67,20 +66,21 @@ pub async fn identity(st: &AppState, access_key: &str, write: bool) -> S3Result<
         .fetch_optional(&mut *conn)
         .await
         .map_err(super::internal)?
-        .ok_or_else(|| s3_error!(InvalidAccessKeyId))?;
+        .ok_or_else(|| failed(code::INVALID_ACCESS_KEY_ID, "The AWS Access Key Id you provided does not exist in our records."))?;
     if write && !key.writable {
-        return Err(s3_error!(AccessDenied, "This Access Key is read-only"));
+        return Err(failed(code::ACCESS_DENIED, "This Access Key is read-only"));
     }
     let bucket: Bucket = sqlx::query_as("SELECT * FROM s3_buckets WHERE id = ? AND enabled = 1")
         .bind(&key.bucket_id)
         .fetch_optional(&mut *conn)
         .await
         .map_err(super::internal)?
-        .ok_or_else(|| s3_error!(AccessDenied))?;
-    let mut user = auth::user_by_id(st, &mut conn, bucket.creator_id).await.map_err(super::map_error)?.ok_or_else(|| s3_error!(AccessDenied))?;
+        .ok_or_else(|| failed(code::ACCESS_DENIED, "Access Denied"))?;
+    let mut user =
+        auth::user_by_id(st, &mut conn, bucket.creator_id).await.map_err(super::map_error)?.ok_or_else(|| failed(code::ACCESS_DENIED, "Access Denied"))?;
     let root = publisher(&mut conn, &user, &bucket.node_id, cfg.managers_publish).await.map_err(super::map_error)?;
     if write && root.space_read_only {
-        return Err(s3_error!(AccessDenied, "This space is read-only"));
+        return Err(failed(code::ACCESS_DENIED, "This space is read-only"));
     }
     user.protocol_key = Some(key.id.clone());
     user.protocol_root = Some(root.id.clone());
@@ -88,26 +88,26 @@ pub async fn identity(st: &AppState, access_key: &str, write: bool) -> S3Result<
     Ok(Identity { bucket, key, user, root })
 }
 
-pub async fn request_identity<T>(st: &AppState, req: &S3Request<T>, bucket: Option<&str>, write: bool) -> S3Result<Identity> {
-    let creds = req.credentials.as_ref().ok_or_else(|| s3_error!(AccessDenied))?;
-    let identity = identity(st, &creds.access_key, write).await?;
-    if let Some(expiry) = identity.key.expires_at {
-        let values = req.uri.query().map(|q| form_urlencoded::parse(q.as_bytes()).collect::<std::collections::HashMap<_, _>>()).unwrap_or_default();
-        if values.contains_key("X-Amz-Algorithm") {
-            let date = values.get("X-Amz-Date").ok_or_else(|| s3_error!(AccessDenied))?;
-            let seconds: i64 = values.get("X-Amz-Expires").and_then(|v| v.parse().ok()).ok_or_else(|| s3_error!(AccessDenied))?;
-            if date.len() != 16 || !date.is_ascii() {
-                return Err(s3_error!(AccessDenied));
-            }
-            let date = format!("{}-{}-{}T{}:{}:{}Z", &date[0..4], &date[4..6], &date[6..8], &date[9..11], &date[11..13], &date[13..15]);
-            let date = date.parse::<jiff::Timestamp>().map_err(|_| s3_error!(AccessDenied))?;
-            if date.as_second().checked_add(seconds).is_none_or(|until| until > expiry) {
-                return Err(s3_error!(AccessDenied, "The presigned URL outlives this Access Key"));
-            }
+/// Who a request is for, from the key that signed it: `bucket`, when the request names one, must be the key's own
+pub async fn request_identity(st: &AppState, ctx: &Ctx<'_>, bucket: Option<&str>, write: bool) -> S3Result<Identity> {
+    let identity = identity(st, ctx.access_key, write).await?;
+    if let Some(expiry) = identity.key.expires_at
+        && ctx.presigned
+    {
+        let values = ctx.uri.query().map(|q| form_urlencoded::parse(q.as_bytes()).collect::<std::collections::HashMap<_, _>>()).unwrap_or_default();
+        let date = values.get("X-Amz-Date").ok_or_else(|| failed(code::ACCESS_DENIED, "Access Denied"))?;
+        let seconds: i64 = values.get("X-Amz-Expires").and_then(|v| v.parse().ok()).ok_or_else(|| failed(code::ACCESS_DENIED, "Access Denied"))?;
+        if date.len() != 16 || !date.is_ascii() {
+            return Err(failed(code::ACCESS_DENIED, "Access Denied"));
+        }
+        let date = format!("{}-{}-{}T{}:{}:{}Z", &date[0..4], &date[4..6], &date[6..8], &date[9..11], &date[11..13], &date[13..15]);
+        let date = date.parse::<jiff::Timestamp>().map_err(|_| failed(code::ACCESS_DENIED, "Access Denied"))?;
+        if date.as_second().checked_add(seconds).is_none_or(|until| until > expiry) {
+            return Err(failed(code::ACCESS_DENIED, "The presigned URL outlives this Access Key"));
         }
     }
     if bucket.is_some_and(|name| name != identity.bucket.name) {
-        return Err(s3_error!(AccessDenied));
+        return Err(failed(code::ACCESS_DENIED, "Access Denied"));
     }
     // When they were last used, at most every five minutes: bookkeeping, which never fails the request (the database
     // may be busy with a long change)
@@ -121,29 +121,20 @@ pub async fn request_identity<T>(st: &AppState, req: &S3Request<T>, bucket: Opti
     Ok(identity)
 }
 
-/// `.1` is set when the Access Key exists but is refused (stopped, ended, its bucket or creator no longer allowed):
-/// that is no guess, and isn't counted as a failed sign-in
-pub struct Auth(pub AppState, pub std::sync::Arc<std::sync::atomic::AtomicBool>);
-
-#[async_trait::async_trait]
-impl S3Auth for Auth {
-    async fn get_secret_key(&self, access_key: &str) -> S3Result<SecretKey> {
-        let identity = match identity(&self.0, access_key, false).await {
-            Ok(identity) => identity,
-            Err(e) => {
-                let mut conn = self.0.db.acquire().await.map_err(super::internal)?;
-                let (known,): (bool,) = sqlx::query_as("SELECT EXISTS(SELECT 1 FROM s3_keys WHERE access_key = ?)")
-                    .bind(access_key)
-                    .fetch_one(&mut *conn)
-                    .await
-                    .map_err(super::internal)?;
-                if known {
-                    self.1.store(true, std::sync::atomic::Ordering::Relaxed);
-                }
-                return Err(e);
-            }
-        };
-        crate::secrets::open(&format!("s3-key:{}", identity.key.id), &identity.key.secret).map(SecretKey::from).map_err(super::internal)
+/// The secret of an Access Key. `Ok(None)` is a key nobody has (a guess, which counts as a failed sign-in); an error is a key that exists and is
+/// refused (stopped, ended, its bucket or creator no longer allowed), which is no guess and isn't counted
+pub async fn secret(st: &AppState, access_key: &str) -> Result<Option<Credential>, S3Error> {
+    match identity(st, access_key, false).await {
+        Ok(identity) => {
+            crate::secrets::open(&format!("s3-key:{}", identity.key.id), &identity.key.secret).map(|secret| Some(Credential::new(secret))).map_err(super::internal)
+        }
+        Err(e) if e.code == code::INVALID_ACCESS_KEY_ID => {
+            let mut conn = st.db.acquire().await.map_err(super::internal)?;
+            let (known,): (bool,) =
+                sqlx::query_as("SELECT EXISTS(SELECT 1 FROM s3_keys WHERE access_key = ?)").bind(access_key).fetch_one(&mut *conn).await.map_err(super::internal)?;
+            if known { Err(e) } else { Ok(None) }
+        }
+        Err(e) => Err(e),
     }
 }
 

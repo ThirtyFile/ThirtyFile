@@ -25,20 +25,6 @@ pub fn http_date(t: i64) -> String {
     jiff::fmt::rfc2822::DateTimePrinter::new().timestamp_to_rfc9110_string(&at).unwrap_or_default()
 }
 
-/// Seconds since 1970 from an HTTP date in any of the three forms a client may send (RFC 9110, section 5.6.7): "Sun, 06 Nov 1994 08:49:37 GMT",
-/// "Sunday, 06-Nov-94 08:49:37 GMT" and "Sun Nov  6 08:49:37 1994". Always in GMT; anything else is not a date
-pub fn parse_http_date(text: &str) -> Option<i64> {
-    let text = text.trim();
-    if text.as_bytes().get(3) == Some(&b',') {
-        // The preferred form: it ends in GMT (RFC 2822 would also take other zones)
-        text.strip_suffix(" GMT")?;
-        return jiff::fmt::rfc2822::DateTimeParser::new().parse_timestamp(text).ok().map(|at| at.as_second());
-    }
-    let parsed =
-        if text.ends_with(" GMT") { jiff::fmt::strtime::parse("%A, %d-%b-%y %H:%M:%S GMT", text) } else { jiff::fmt::strtime::parse("%a %b %e %H:%M:%S %Y", text) };
-    Some(parsed.ok()?.to_datetime().ok()?.to_zoned(jiff::tz::TimeZone::UTC).ok()?.timestamp().as_second())
-}
-
 pub fn new_id() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
@@ -609,45 +595,5 @@ mod tests {
         ] {
             assert_eq!(super::http_date(t), text, "{t}");
         }
-    }
-
-    #[test]
-    fn http_dates_are_read_in_the_three_forms_and_only_in_gmt() {
-        for text in ["Sun, 06 Nov 1994 08:49:37 GMT", "Sunday, 06-Nov-94 08:49:37 GMT", "Sun Nov  6 08:49:37 1994", "  Sun, 06 Nov 1994 08:49:37 GMT "] {
-            assert_eq!(super::parse_http_date(text), Some(784_111_777), "{text}");
-        }
-        assert_eq!(super::parse_http_date("Tue Feb 29 12:30:45 2000"), Some(951_827_445));
-        assert_eq!(super::parse_http_date("Tue Nov 10 08:49:37 1998"), Some(910_687_777));
-        // A two-digit year of 00 to 68 is in the 2000s and 69 to 99 in the 1900s
-        assert_eq!(super::parse_http_date("Tuesday, 29-Feb-00 00:00:00 GMT"), Some(951_782_400));
-        assert_eq!(super::parse_http_date("Thursday, 01-Jan-70 00:00:00 GMT"), Some(0));
-        for text in [
-            "",
-            "garbage",
-            "Sun, 06 Nov 1994 08:49:37",
-            "Sun, 06 Nov 1994 08:49:37 +0100",
-            "Sun, 06 Nov 1994 08:49:37 EST",
-            "Sun, 06 Nov 1994 08:49:37 +0000",
-            "Sun, 32 Nov 1994 08:49:37 GMT",
-            "Sun, 06 Nov 1994 25:49:37 GMT",
-            "Sun, 06 Foo 1994 08:49:37 GMT",
-            "Sunday, 06-Nov-94 08:49:37",
-            "Sun Nov  6 08:49:37",
-            "1994-11-06T08:49:37Z",
-            "784111777",
-        ] {
-            assert_eq!(super::parse_http_date(text), None, "{text:?}");
-        }
-    }
-
-    #[test]
-    fn http_dates_read_back_to_the_same_second() {
-        let mut t = -86_400;
-        while t < 4_000_000_000 {
-            let expected = t.max(0);
-            assert_eq!(super::parse_http_date(&super::http_date(t)), Some(expected), "{t}");
-            t += 86_399 * 7 + 3_601;
-        }
-        assert_eq!(super::parse_http_date(&super::http_date(i64::MAX)), Some(jiff::Timestamp::MAX.as_second()));
     }
 }

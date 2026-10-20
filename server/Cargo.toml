@@ -52,6 +52,9 @@ flate2 = "1.1"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp"] }
 # The client for S3 storage locations is our own library, ThirtyS3 (#636)
 thirtys3-client = "0.1"
+# The S3 service: the protocol is ThirtyS3's, the buckets are ours (src/s3/)
+thirtys3-core = "0.1"
+thirtys3-server = "0.1"
 russh = "0.64"
 russh-sftp = "3"
 suppaftp = { version = "12", features = ["tokio-rustls-aws-lc-rs"] }
@@ -69,7 +72,6 @@ quick-xml = "0.42"
 # Backup schedules in a named time zone (backups/policy.rs), with the time zone database built in: the Docker image
 # has none
 jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
-s3s = "0.17"
 async-trait = "0.1"
 # The FTP server for receive folders is our own library, ThirtyFTP (#612)
 thirtyftp = "0.1"
@@ -112,5 +114,3 @@ opt-level = 3
 tokio = { version = "1", features = ["test-util"] }
 rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs"] }
 aws-sdk-s3 = { version = "1.152.0", default-features = false, features = ["rt-tokio", "default-https-client"] }
-# An S3 service in memory, for the tests of the storage location client
-thirtys3-server = "0.1"

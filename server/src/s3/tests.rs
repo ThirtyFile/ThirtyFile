@@ -480,23 +480,15 @@ async fn cancelling_a_partial_body_removes_its_owned_temporary_file() {
     let st = s.env.st.clone();
     let received = std::sync::Arc::new(tokio::sync::Notify::new());
     let signal = received.clone();
-    let body = futures_util::stream::once(std::future::ready(Ok::<_, std::io::Error>(bytes::Bytes::from_static(b"partial")))).chain(futures_util::stream::poll_fn(
-        move |_| {
+    let body = futures_util::stream::once(std::future::ready(Ok::<_, thirtys3_core::S3Error>(bytes::Bytes::from_static(b"partial")))).chain(
+        futures_util::stream::poll_fn(move |_| {
             signal.notify_one();
             std::task::Poll::Pending
-        },
-    ));
+        }),
+    );
     use futures_util::StreamExt;
-    let task = tokio::spawn(async move {
-        super::objects::receive(
-            &st,
-            &identity,
-            &identity.root,
-            body,
-            super::objects::Incoming { size: None, md5: None, headers: &axum::http::HeaderMap::new(), trailers: None, replaced: 0 },
-        )
-        .await
-    });
+    let task =
+        tokio::spawn(async move { super::objects::receive(&st, &identity, &identity.root, body, super::objects::Incoming { declared: None, replaced: 0 }).await });
     tokio::time::timeout(std::time::Duration::from_secs(10), received.notified()).await.unwrap();
     assert!(std::fs::read_dir(s.env.st.tmp_dir()).unwrap().flatten().any(|f| f.file_name().to_string_lossy().starts_with("s3-receive-")));
     task.abort();
@@ -818,7 +810,10 @@ async fn a_stopped_key_and_a_skewed_clock_use_none_of_the_sign_in_limit_but_unkn
         .get(format!("{}/backups", s.endpoint))
         .header("host", "127.0.0.1")
         .header("x-amz-date", "20000101T000000Z")
-        .header("authorization", "AWS4-HMAC-SHA256 Credential=TFX/20000101/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-date, Signature=00")
+        .header(
+            "authorization",
+            format!("AWS4-HMAC-SHA256 Credential=TFX/20000101/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-date, Signature={}", "0".repeat(64)),
+        )
         .send()
         .await
         .unwrap();
@@ -1001,22 +996,43 @@ async fn etags_missing_in_published_buckets_are_worked_out_ahead() {
     assert_eq!(missing, 0);
 }
 
-#[test]
-fn request_times_come_from_x_amz_date_or_date() {
-    let at = |name: &str, value: String| axum::http::Request::builder().uri("/backups/a.txt").header(name, value).body(axum::body::Body::empty()).unwrap();
-    let iso = |t: i64| jiff::Timestamp::from_second(t).unwrap().strftime("%Y%m%dT%H%M%SZ").to_string();
+#[tokio::test]
+async fn a_clock_out_of_step_is_told_from_x_amz_date_or_from_date_and_counts_for_nothing() {
+    let s = server(false).await;
+    let rate = format!("ip:{}", crate::auth::limit_key_ip("127.0.0.1"));
     let http = crate::util::http_date;
-    assert!(super::time_ok(&at("x-amz-date", iso(now()))));
-    assert!(super::time_ok(&at("date", http(now()))), "Date, for clients that sign it instead");
-    assert!(!super::time_ok(&at("x-amz-date", iso(now() - 3600))));
-    assert!(!super::time_ok(&at("date", http(now() - 3600))));
-    let form = axum::http::Request::builder()
-        .method("POST")
-        .uri("/backups")
-        .header("content-type", "multipart/form-data; boundary=x")
-        .body(axum::body::Body::empty())
-        .unwrap();
-    assert!(super::time_ok(&form), "form uploads are refused by s3s, not called out of step here");
+    let signed = |date_header: &str, value: String, credential_date: &str| {
+        reqwest::Client::new()
+            .get(format!("{}/backups", s.endpoint))
+            .header("host", "127.0.0.1")
+            .header(date_header, value)
+            .header(
+                "authorization",
+                format!(
+                    "AWS4-HMAC-SHA256 Credential=TFX/{credential_date}/us-east-1/s3/aws4_request, SignedHeaders=host;{date_header}, Signature={}",
+                    "0".repeat(64)
+                ),
+            )
+            .send()
+    };
+    // A clock an hour off, in either header: refused as a clock, and no guess at a key
+    let day_of = |t: i64| jiff::Timestamp::from_second(t).unwrap().strftime("%Y%m%d").to_string();
+    for (header, value, day) in [
+        ("x-amz-date", "20000101T000000Z".to_string(), "20000101".to_string()),
+        ("date", http(now() - 3600), day_of(now() - 3600)),
+        ("date", http(now() + 3600), day_of(now() + 3600)),
+    ] {
+        let response = signed(header, value, &day).await.unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::FORBIDDEN, "{header}");
+        assert!(response.text().await.unwrap().contains("RequestTimeTooSkewed"), "{header}");
+        assert!(!crate::auth::attempts_exhausted(&s.env.st, &rate, 1), "{header}");
+    }
+    // The same request on time is a guess at an unknown key, and counts
+    let day = jiff::Timestamp::from_second(now()).unwrap().strftime("%Y%m%d").to_string();
+    let response = signed("date", http(now()), &day).await.unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::FORBIDDEN);
+    assert!(!response.text().await.unwrap().contains("RequestTimeTooSkewed"));
+    assert!(crate::auth::attempts_exhausted(&s.env.st, &rate, 1));
 }
 
 #[tokio::test]
@@ -1065,4 +1081,205 @@ async fn the_administrators_bucket_list_pages_without_skipping_any_and_with_each
     assert_eq!(backups.keys.len(), 1);
     assert_eq!(backups.folder, "Published");
     assert!(first.iter().all(|b| b.keys.is_empty() && b.folder == "Published" && b.creator == s.admin.username));
+}
+
+#[tokio::test]
+async fn downloads_are_attachments_and_a_link_may_ask_for_a_file_name_but_not_for_inline() {
+    let s = server(false).await;
+    put(&s, "page.html", b"<script>alert(1)</script>").await;
+    let ask = |disposition: Option<&'static str>, content_type: Option<&'static str>| {
+        let s = &s;
+        async move {
+            let mut request = s.client.get_object().bucket("backups").key("page.html");
+            if let Some(disposition) = disposition {
+                request = request.response_content_disposition(disposition);
+            }
+            if let Some(content_type) = content_type {
+                request = request.response_content_type(content_type);
+            }
+            let signed = request.presigned(PresigningConfig::expires_in(std::time::Duration::from_secs(300)).unwrap()).await.unwrap();
+            reqwest::get(signed.uri()).await.unwrap()
+        }
+    };
+    // Plain: an attachment, and the browser is not left to guess a type
+    let plain = ask(None, None).await;
+    assert_eq!(plain.status(), reqwest::StatusCode::OK);
+    assert_eq!(plain.headers()["content-disposition"], "attachment");
+    assert_eq!(plain.headers()["x-content-type-options"], "nosniff");
+    assert_eq!(plain.text().await.unwrap(), "<script>alert(1)</script>");
+    // A file name is allowed, and so is another type for what is downloaded
+    let named = ask(Some("attachment; filename=\"report.html\""), Some("text/plain")).await;
+    assert_eq!(named.status(), reqwest::StatusCode::OK);
+    assert_eq!(named.headers()["content-disposition"], "attachment; filename=\"report.html\"");
+    assert_eq!(named.headers()["content-type"], "text/plain");
+    assert_eq!(named.headers()["x-content-type-options"], "nosniff");
+    // Inline is not: the page would run on this address
+    for inline in ["inline", "INLINE; filename=x.html", "  inline"] {
+        let refused = ask(Some(inline), None).await;
+        assert_eq!(refused.status(), reqwest::StatusCode::BAD_REQUEST, "{inline}");
+        assert!(refused.text().await.unwrap().contains("InvalidArgument"), "{inline}");
+    }
+    // The same for a HEAD request, which is answered with the headers a download has
+    let signed = s
+        .client
+        .head_object()
+        .bucket("backups")
+        .key("page.html")
+        .response_content_disposition("inline")
+        .presigned(PresigningConfig::expires_in(std::time::Duration::from_secs(300)).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(reqwest::Client::new().head(signed.uri()).send().await.unwrap().status(), reqwest::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn a_copy_never_reads_from_another_bucket_and_settings_that_are_not_kept_are_refused() {
+    let s = server(false).await;
+    put(&s, "own.txt", b"mine").await;
+    // The source has to be in the key's own bucket, whatever the other bucket is called
+    for source in ["other-bucket/own.txt", "backups-2/own.txt", "/other/own.txt"] {
+        let error = s.client.copy_object().bucket("backups").key("stolen.txt").copy_source(source).send().await.unwrap_err();
+        assert_eq!(error.raw_response().unwrap().status().as_u16(), 403, "{source}");
+    }
+    assert!(s.client.head_object().bucket("backups").key("stolen.txt").send().await.is_err());
+    // Copying a folder is no copy
+    s.client.put_object().bucket("backups").key("folder/").body(ByteStream::from_static(b"")).send().await.unwrap();
+    assert!(s.client.copy_object().bucket("backups").key("folder-copy").copy_source("backups/folder/").send().await.is_err());
+    // Settings this server does not keep are refused, not taken and forgotten
+    let acl =
+        s.client.put_object().bucket("backups").key("acl.txt").acl(aws_sdk_s3::types::ObjectCannedAcl::PublicRead).body(ByteStream::from_static(b"x")).send().await;
+    assert_eq!(acl.unwrap_err().raw_response().unwrap().status().as_u16(), 501);
+    let encrypted = s
+        .client
+        .put_object()
+        .bucket("backups")
+        .key("sse.txt")
+        .server_side_encryption(aws_sdk_s3::types::ServerSideEncryption::Aes256)
+        .body(ByteStream::from_static(b"x"))
+        .send()
+        .await;
+    assert_eq!(encrypted.unwrap_err().raw_response().unwrap().status().as_u16(), 501);
+    assert!(s.client.head_object().bucket("backups").key("acl.txt").send().await.is_err());
+}
+
+#[tokio::test]
+async fn a_marker_or_start_after_that_is_a_group_does_not_list_the_group_again() {
+    let s = server(false).await;
+    for key in ["a/1.txt", "a/2.txt", "b.txt", "c/1.txt"] {
+        put(&s, key, b"x").await;
+    }
+    // ListObjects: the marker is the last key or group of the page before, so a group it ends is done
+    let v1 = s.client.list_objects().bucket("backups").delimiter("/").marker("a/").send().await.unwrap();
+    assert_eq!(v1.common_prefixes().iter().map(|p| p.prefix().unwrap()).collect::<Vec<_>>(), ["c/"]);
+    assert_eq!(v1.contents().iter().map(|o| o.key().unwrap()).collect::<Vec<_>>(), ["b.txt"]);
+    // ListObjectsV2 with start-after: the same
+    let v2 = s.client.list_objects_v2().bucket("backups").delimiter("/").start_after("a/").send().await.unwrap();
+    assert_eq!(v2.common_prefixes().iter().map(|p| p.prefix().unwrap()).collect::<Vec<_>>(), ["c/"]);
+    assert_eq!(v2.contents().iter().map(|o| o.key().unwrap()).collect::<Vec<_>>(), ["b.txt"]);
+}
+
+#[tokio::test]
+async fn a_body_that_fails_its_checks_is_refused_with_the_code_of_the_check_and_nothing_is_kept() {
+    use aws_sdk_s3::error::ProvideErrorMetadata;
+    let s = server(false).await;
+    // A Content-MD5 that is not that of the data
+    let error = s
+        .client
+        .put_object()
+        .bucket("backups")
+        .key("a.txt")
+        .content_md5("AAAAAAAAAAAAAAAAAAAAAA==")
+        .body(ByteStream::from_static(b"wrong"))
+        .send()
+        .await
+        .unwrap_err();
+    assert_eq!(error.as_service_error().and_then(|e| e.code()), Some("BadDigest"));
+    // The same for a part of an upload
+    let upload = s.client.create_multipart_upload().bucket("backups").key("m.bin").send().await.unwrap();
+    let error = s
+        .client
+        .upload_part()
+        .bucket("backups")
+        .key("m.bin")
+        .upload_id(upload.upload_id().unwrap())
+        .part_number(1)
+        .content_md5("AAAAAAAAAAAAAAAAAAAAAA==")
+        .body(ByteStream::from_static(b"wrong"))
+        .send()
+        .await
+        .unwrap_err();
+    assert_eq!(error.as_service_error().and_then(|e| e.code()), Some("BadDigest"));
+    assert_eq!(s.client.list_parts().bucket("backups").key("m.bin").upload_id(upload.upload_id().unwrap()).send().await.unwrap().parts().len(), 0);
+    // A checksum of the data that is not the one sent
+    let error = s
+        .client
+        .put_object()
+        .bucket("backups")
+        .key("c.txt")
+        .checksum_sha256("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+        .body(ByteStream::from_static(b"wrong"))
+        .send()
+        .await
+        .unwrap_err();
+    assert_eq!(error.as_service_error().and_then(|e| e.code()), Some("BadDigest"));
+    for key in ["a.txt", "c.txt"] {
+        assert!(s.client.head_object().bucket("backups").key(key).send().await.is_err(), "{key}");
+    }
+}
+
+#[tokio::test]
+async fn current_clients_send_a_checksum_in_a_trailer_and_it_is_checked_for_whole_objects_and_for_parts() {
+    use aws_sdk_s3::{error::ProvideErrorMetadata, types::ChecksumAlgorithm};
+    let s = server(false).await;
+    // What the AWS SDKs and the CLI do by default now: the body goes in aws-chunked pieces, with its checksum after them
+    let current = Client::from_conf(
+        aws_sdk_s3::Config::builder()
+            .behavior_version(BehaviorVersion::latest())
+            .region(Region::new("us-east-1"))
+            .credentials_provider(Credentials::new(&s.key.key.access_key, &s.key.secret_key, None, None, "contract"))
+            .endpoint_url(&s.endpoint)
+            .force_path_style(true)
+            .request_checksum_calculation(RequestChecksumCalculation::WhenSupported)
+            .build(),
+    );
+    let data: Vec<u8> = (0..3_000_000u32).map(|i| (i % 253) as u8).collect();
+    let out = current.put_object().bucket("backups").key("trailer.bin").body(ByteStream::from(data.clone())).send().await.unwrap();
+    assert!(out.checksum_crc32().is_some(), "the checksum is given back");
+    assert_eq!(read(&s, "trailer.bin").await.as_ref(), data.as_slice());
+    let (hashed,): (String,) = sqlx::query_as("SELECT content_md5 FROM nodes WHERE name = 'trailer.bin'").fetch_one(&s.env.st.db).await.unwrap();
+    assert_eq!(out.e_tag(), Some(format!("\"{hashed}\"").as_str()));
+    // Parts with a checksum each, put together
+    let upload = current.create_multipart_upload().bucket("backups").key("parts.bin").checksum_algorithm(ChecksumAlgorithm::Crc32).send().await.unwrap();
+    let id = upload.upload_id().unwrap();
+    let (first, second) = (vec![7u8; 5 * 1024 * 1024], vec![9u8; 300_000]);
+    let mut done = Vec::new();
+    for (number, body) in [(1, first.clone()), (2, second.clone())] {
+        let part = current
+            .upload_part()
+            .bucket("backups")
+            .key("parts.bin")
+            .upload_id(id)
+            .part_number(number)
+            .checksum_algorithm(ChecksumAlgorithm::Crc32)
+            .body(ByteStream::from(body))
+            .send()
+            .await
+            .unwrap();
+        done.push(CompletedPart::builder().part_number(number).e_tag(part.e_tag().unwrap()).set_checksum_crc32(part.checksum_crc32().map(str::to_string)).build());
+    }
+    current
+        .complete_multipart_upload()
+        .bucket("backups")
+        .key("parts.bin")
+        .upload_id(id)
+        .multipart_upload(CompletedMultipartUpload::builder().set_parts(Some(done)).build())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(read(&s, "parts.bin").await.as_ref(), [first, second].concat().as_slice());
+    // A checksum that is not that of the data is refused and nothing is kept
+    let wrong =
+        current.put_object().bucket("backups").key("wrong.bin").checksum_crc32("AAAAAA==").body(ByteStream::from_static(b"not that")).send().await.unwrap_err();
+    assert_eq!(wrong.as_service_error().and_then(|e| e.code()), Some("BadDigest"));
+    assert!(s.client.head_object().bucket("backups").key("wrong.bin").send().await.is_err());
 }
