@@ -9,10 +9,6 @@ use axum::{Json, extract::State};
 use suppaftp::tokio::AsyncRustlsFtpStream;
 use tokio::io::AsyncReadExt;
 
-// Test the production wrapper itself; the vendored crate has no upstream test-only dependencies.
-#[path = "../../vendor/libunftp/src/server/tls_upload_reader.rs"]
-mod tls_upload_reader;
-
 async fn download(ftp: &mut AsyncRustlsFtpStream, name: &str) -> Result<Vec<u8>, suppaftp::FtpError> {
     let mut stream = ftp.retr_as_stream(name).await?;
     let mut bytes = vec![];
@@ -72,7 +68,9 @@ async fn upload_only_native_protocol_versions_and_no_destructive_powers() {
     assert!(ftp.rm("scan.txt").await.is_err());
     assert!(ftp.rename("scan.txt", "moved.txt").await.is_err());
     assert!(ftp.rmdir("/").await.is_err());
-    assert!(ftp.cwd("/../").await.is_err());
+    // A path never goes above the root of the receive folder: ".." at the top stays at the top
+    ftp.cwd("/../").await.unwrap();
+    assert_eq!(ftp.pwd().await.unwrap(), "/");
     ftp.put_file("scan.txt", &mut std::io::Cursor::new(b"updated scan")).await.unwrap();
     ftp.put_file("empty.txt", &mut std::io::Cursor::new(b"")).await.unwrap();
     ftp.mkdir("batch").await.unwrap();

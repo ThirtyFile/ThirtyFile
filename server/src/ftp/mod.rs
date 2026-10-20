@@ -12,14 +12,10 @@ use crate::{
     error::{AppError, AppResult},
     state::AppState,
 };
-use libunftp::{
-    ServerBuilder,
-    options::{ActivePassiveMode, FtpsRequired, PassiveHost},
-};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use std::{
     collections::HashMap,
-    net::{IpAddr, Shutdown},
+    net::Shutdown,
     path::PathBuf,
     sync::{
         Arc, Weak,
@@ -27,6 +23,7 @@ use std::{
     },
     time::Duration,
 };
+use thirtyftp::PassiveHost;
 
 #[derive(Clone, Default)]
 pub struct Status {
@@ -242,7 +239,7 @@ pub async fn start(st: AppState, settings: Settings, cfg: config::Config) -> App
                     let plain=cfg.allow_private_plaintext && login::private_peer(peer.ip());
                     if !plain && tls.is_none(){continue;}
                     let (st,tls,host,ports,stop)=(st.clone(),tls.clone(),host.clone(),ports.clone(),stopped.clone());
-                    tasks.spawn(connection(st,stream,peer.ip(),Transport { plain, tls, host, ports },stop,(permit,waiting)));
+                    tasks.spawn(connection(st,stream,peer,Transport { plain, tls, host, ports },stop,(permit,waiting)));
                 }
             }
         }
@@ -255,7 +252,7 @@ pub async fn start(st: AppState, settings: Settings, cfg: config::Config) -> App
 async fn connection(
     st: AppState,
     stream: tokio::net::TcpStream,
-    peer: IpAddr,
+    peer: std::net::SocketAddr,
     transport: Transport,
     mut stopped: tokio::sync::watch::Receiver<bool>,
     (_permit, mut waiting): (tokio::sync::OwnedSemaphorePermit, crate::auth::pending::PendingGuard),
@@ -267,29 +264,19 @@ async fn connection(
     let alive = Arc::new(AtomicBool::new(true));
     let authenticated = Arc::new(AtomicBool::new(false));
     let signed_in = Arc::new(tokio::sync::Notify::new());
-    let login = Arc::new(login::Login {
-        state: st.clone(),
-        peer,
-        alive: alive.clone(),
-        plain,
-        authenticated: authenticated.clone(),
-        signed_in: signed_in.clone(),
-        user: Default::default(),
+    let backend = Arc::new(storage::Receive {
+        login: login::Login { state: st.clone(), peer: peer.ip(), alive: alive.clone(), plain, authenticated: authenticated.clone(), signed_in: signed_in.clone() },
+        files: storage::Files(st.clone()),
     });
-    let files = st.clone();
-    let mut builder = ServerBuilder::with_user_detail_provider(Box::new(move || storage::Files(files.clone())), login.clone())
-        .authenticator(login)
-        .greeting("ThirtyFile receive folder")
-        .active_passive_mode(ActivePassiveMode::PassiveOnly)
-        .idle_session_timeout(120)
-        .passive_host(host)
-        .passive_ports(ports)
-        .ftps_required(if plain { FtpsRequired::None } else { FtpsRequired::All }, if plain { FtpsRequired::None } else { FtpsRequired::All });
-    if let Some(tls) = tls {
-        builder = builder.ftps_manual::<PathBuf>(tls);
-    }
-    let Ok(server) = builder.build() else { return };
-    let mut service = tokio::spawn(server.service(stream));
+    // Passive mode only (active mode is off by default), TLS required unless this connection may be plain
+    let mut config = thirtyftp::Config::default();
+    config.greeting = "ThirtyFile receive folder".into();
+    config.idle_timeout = Duration::from_secs(120);
+    config.passive_host = host;
+    config.passive_ports = ports;
+    config.tls = tls;
+    config.require_tls = !plain;
+    let mut service = tokio::spawn(thirtyftp::serve(stream, peer, Arc::new(config), backend, Arc::new(thirtyftp::NoEvents)));
     let deadline = tokio::time::sleep(Duration::from_secs(20));
     tokio::pin!(deadline);
     let mut finished = false;
