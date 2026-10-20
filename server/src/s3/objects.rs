@@ -23,18 +23,8 @@ pub fn timestamp(seconds: i64) -> Timestamp {
     Timestamp(seconds.max(0))
 }
 
-/// A download is always an attachment, never a page: S3 payloads must not be rendered as active content on this origin. A presigned link may
-/// still ask for a file name (`attachment; filename=…`), but not for `inline`
-fn check_overrides(ctx: &Ctx<'_>) -> S3Result<()> {
-    let query = ctx.uri.query().unwrap_or_default();
-    for (name, value) in form_urlencoded::parse(query.as_bytes()) {
-        if name == "response-content-disposition" && !value.trim_start().to_ascii_lowercase().starts_with("attachment") {
-            return Err(failed(code::INVALID_ARGUMENT, "Only attachment is allowed for response-content-disposition"));
-        }
-    }
-    Ok(())
-}
-
+/// What is known about a file for a download. Unless a signed request asks for something else with a `response-*` parameter (the service applies
+/// those, as S3 does), a download is an attachment that the browser may not take for another type
 fn info_of(node: &crate::tree::Node, described: &Described) -> ObjectInfo {
     let mut info = ObjectInfo::new(described.size, quoted(&described.etag), timestamp(node.updated_at));
     info.content_type = Some(node.mime.clone());
@@ -61,7 +51,6 @@ impl ObjectSource for FileSource {
 
 pub async fn get(st: &AppState, ctx: &Ctx<'_>, bucket: &str, key: &str) -> S3Result<ObjectData> {
     let identity = request_identity(st, ctx, Some(bucket), false).await?;
-    check_overrides(ctx)?;
     let node = access::rooted_item(st, &identity.user, &identity.root.id, key, Need::Read).await.map_err(map_error)?;
     let described = describe_node(st, &node).await?;
     let info = info_of(&node, &described);
@@ -70,7 +59,6 @@ pub async fn get(st: &AppState, ctx: &Ctx<'_>, bucket: &str, key: &str) -> S3Res
 
 pub async fn head(st: &AppState, ctx: &Ctx<'_>, bucket: &str, key: &str) -> S3Result<ObjectInfo> {
     let identity = request_identity(st, ctx, Some(bucket), false).await?;
-    check_overrides(ctx)?;
     let node = access::rooted_item(st, &identity.user, &identity.root.id, key, Need::Read).await.map_err(map_error)?;
     let described = describe_node(st, &node).await?;
     Ok(info_of(&node, &described))

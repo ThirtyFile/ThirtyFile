@@ -1084,10 +1084,10 @@ async fn the_administrators_bucket_list_pages_without_skipping_any_and_with_each
 }
 
 #[tokio::test]
-async fn downloads_are_attachments_and_a_link_may_ask_for_a_file_name_but_not_for_inline() {
+async fn downloads_are_attachments_unless_a_signed_link_asks_for_the_response_headers_it_wants() {
     let s = server(false).await;
     put(&s, "page.html", b"<script>alert(1)</script>").await;
-    let ask = |disposition: Option<&'static str>, content_type: Option<&'static str>| {
+    let ask = |disposition: Option<&'static str>, content_type: Option<&'static str>, cache: Option<&'static str>| {
         let s = &s;
         async move {
             let mut request = s.client.get_object().bucket("backups").key("page.html");
@@ -1097,29 +1097,32 @@ async fn downloads_are_attachments_and_a_link_may_ask_for_a_file_name_but_not_fo
             if let Some(content_type) = content_type {
                 request = request.response_content_type(content_type);
             }
+            if let Some(cache) = cache {
+                request = request.response_cache_control(cache);
+            }
             let signed = request.presigned(PresigningConfig::expires_in(std::time::Duration::from_secs(300)).unwrap()).await.unwrap();
             reqwest::get(signed.uri()).await.unwrap()
         }
     };
     // Plain: an attachment, and the browser is not left to guess a type
-    let plain = ask(None, None).await;
+    let plain = ask(None, None, None).await;
     assert_eq!(plain.status(), reqwest::StatusCode::OK);
     assert_eq!(plain.headers()["content-disposition"], "attachment");
     assert_eq!(plain.headers()["x-content-type-options"], "nosniff");
     assert_eq!(plain.text().await.unwrap(), "<script>alert(1)</script>");
-    // A file name is allowed, and so is another type for what is downloaded
-    let named = ask(Some("attachment; filename=\"report.html\""), Some("text/plain")).await;
+    // A file name and another type for what is downloaded
+    let named = ask(Some("attachment; filename=\"report.html\""), Some("text/plain"), Some("no-store")).await;
     assert_eq!(named.status(), reqwest::StatusCode::OK);
     assert_eq!(named.headers()["content-disposition"], "attachment; filename=\"report.html\"");
     assert_eq!(named.headers()["content-type"], "text/plain");
-    assert_eq!(named.headers()["x-content-type-options"], "nosniff");
-    // Inline is not: the page would run on this address
-    for inline in ["inline", "INLINE; filename=x.html", "  inline"] {
-        let refused = ask(Some(inline), None).await;
-        assert_eq!(refused.status(), reqwest::StatusCode::BAD_REQUEST, "{inline}");
-        assert!(refused.text().await.unwrap().contains("InvalidArgument"), "{inline}");
-    }
-    // The same for a HEAD request, which is answered with the headers a download has
+    assert_eq!(named.headers()["cache-control"], "no-store");
+    // As in S3, a link that was signed with `inline` gets it (only the holder of the key can sign that); the type is still not guessed
+    let inline = ask(Some("inline"), Some("text/html"), None).await;
+    assert_eq!(inline.status(), reqwest::StatusCode::OK);
+    assert_eq!(inline.headers()["content-disposition"], "inline");
+    assert_eq!(inline.headers()["content-type"], "text/html");
+    assert_eq!(inline.headers()["x-content-type-options"], "nosniff");
+    // The same parameters on a HEAD request, and a changed parameter is a bad signature
     let signed = s
         .client
         .head_object()
@@ -1129,7 +1132,20 @@ async fn downloads_are_attachments_and_a_link_may_ask_for_a_file_name_but_not_fo
         .presigned(PresigningConfig::expires_in(std::time::Duration::from_secs(300)).unwrap())
         .await
         .unwrap();
-    assert_eq!(reqwest::Client::new().head(signed.uri()).send().await.unwrap().status(), reqwest::StatusCode::BAD_REQUEST);
+    let head = reqwest::Client::new().head(signed.uri()).send().await.unwrap();
+    assert_eq!((head.status(), head.headers()["content-disposition"].to_str().unwrap()), (reqwest::StatusCode::OK, "inline"));
+    let signed = s
+        .client
+        .get_object()
+        .bucket("backups")
+        .key("page.html")
+        .response_content_disposition("attachment")
+        .presigned(PresigningConfig::expires_in(std::time::Duration::from_secs(300)).unwrap())
+        .await
+        .unwrap();
+    let changed = signed.uri().replace("response-content-disposition=attachment", "response-content-disposition=inline");
+    assert_ne!(changed, signed.uri());
+    assert_eq!(reqwest::get(changed).await.unwrap().status(), reqwest::StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]
