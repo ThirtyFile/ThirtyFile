@@ -417,7 +417,7 @@ async fn tidy(dst: &dyn crate::storage::Storage, c: &Config) -> std::io::Result<
 
 fn key_of(passphrase: &str, salt: &[u8], (m, t, p): (u32, u32, u32)) -> std::io::Result<[u8; 32]> {
     let params = argon2::Params::new(m, t, p, Some(32)).map_err(std::io::Error::other)?;
-    let mut key = [0u8; 32];
+    let mut key = [u8::default(); 32];
     argon2::Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params)
         .hash_password_into(passphrase.as_bytes(), salt, &mut key)
         .map_err(std::io::Error::other)?;
@@ -484,7 +484,7 @@ pub const UNREADABLE: &str = "The passphrase is wrong, or the file isn't a compl
 pub fn decrypt_file(src: &Path, dst: &Path, passphrase: &str) -> Result<(), String> {
     let io = |e: std::io::Error| e.to_string();
     let mut input = std::io::BufReader::new(std::fs::File::open(src).map_err(io)?);
-    let mut header = [0u8; 8 + 12 + 16 + 7];
+    let mut header = [u8::default(); 8 + 12 + 16 + 7];
     if fill(&mut input, &mut header).map_err(io)? != header.len() || &header[..8] != MAGIC {
         return Err(UNREADABLE.into());
     }

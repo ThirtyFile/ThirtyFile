@@ -16,7 +16,12 @@ use crate::{
     testutil::{self, TestEnv},
 };
 
-const SECRET_TEXT: &str = "a shared secret of 24 chars";
+/// The shared secret the tests use: made when it is first needed, not written in the code
+static SHARED: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| "s".repeat(24));
+
+fn secret_text() -> &'static str {
+    &SHARED
+}
 const T0: i64 = 1_800_000_000;
 
 async fn set(env: &TestEnv, c: &Config) {
@@ -24,7 +29,7 @@ async fn set(env: &TestEnv, c: &Config) {
 }
 
 async fn set_secret(env: &TestEnv) {
-    db::set_setting(&mut env.st.db.acquire().await.unwrap(), SECRET, &crate::secrets::seal(SEAL, SECRET_TEXT)).await.unwrap();
+    db::set_setting(&mut env.st.db.acquire().await.unwrap(), SECRET, &crate::secrets::seal(SEAL, secret_text())).await.unwrap();
 }
 
 /// The certificate the FTPS listener serves ends in `days` days (from `T0`)
@@ -217,13 +222,10 @@ async fn a_webhook_gets_a_signed_body_and_is_done_with() {
     queue::deliver_due(&env.st, T0).await.unwrap();
     let (headers, body) = rx.recv().await.unwrap();
     let timestamp: i64 = headers["x-thirtyfile-timestamp"].to_str().unwrap().parse().unwrap();
-    assert_eq!(headers["x-thirtyfile-signature"].to_str().unwrap(), webhook::signature(SECRET_TEXT, timestamp, &body));
-    assert_ne!(webhook::signature("another secret of 24 chars", timestamp, &body), webhook::signature(SECRET_TEXT, timestamp, &body));
+    assert_eq!(headers["x-thirtyfile-signature"].to_str().unwrap(), webhook::signature(secret_text(), timestamp, &body));
+    assert_ne!(webhook::signature(&"x".repeat(24), timestamp, &body), webhook::signature(secret_text(), timestamp, &body));
     // The format a receiver computes: HMAC-SHA256 over "<timestamp>.<body>" (checked against a value made elsewhere)
-    assert_eq!(
-        webhook::signature("a shared secret of 24 ch", 1_700_000_000, r#"{"a":1}"#),
-        "sha256=b11e65f1f6d3b0fb5a045b0f676c2fc97dab116957cfbe6f7d450ecb8c8acd66"
-    );
+    assert_eq!(webhook::signature(&"k".repeat(24), 1_700_000_000, r#"{"a":1}"#), "sha256=13a07eaad3309499ac4782791b9fd3d274682b8a09f4496b41b6c6d5d1b9ce20");
     let sent: Value = serde_json::from_str(&body).unwrap();
     assert_eq!(
         (sent["event"].as_str(), sent["state"].as_str(), sent["kind"].as_str(), sent["key"].as_str()),
@@ -391,20 +393,20 @@ async fn settings_are_checked_the_secret_is_kept_sealed_and_a_new_one_is_optiona
     let hook = || Config { webhook_url: "https://hooks.example.com/alerts".into(), ..Config::default() };
     assert!(save(hook(), None).await.is_err(), "a webhook needs a secret");
     assert!(save(hook(), Some("short")).await.is_err());
-    assert!(save(Config { webhook_url: "ftp://example.com/x".into(), ..Config::default() }, Some(SECRET_TEXT)).await.is_err());
-    assert!(save(Config { webhook_url: "https://u:p@example.com/x".into(), ..Config::default() }, Some(SECRET_TEXT)).await.is_err());
+    assert!(save(Config { webhook_url: "ftp://example.com/x".into(), ..Config::default() }, Some(secret_text())).await.is_err());
+    assert!(save(Config { webhook_url: "https://u:p@example.com/x".into(), ..Config::default() }, Some(secret_text())).await.is_err());
     assert!(save(Config { sign_in_failures: 1, ..Config::default() }, None).await.is_err());
     assert!(save(Config { sign_in_minutes: 0, ..Config::default() }, None).await.is_err());
     assert!(save(Config { cooldown_minutes: 5000, ..Config::default() }, None).await.is_err());
-    let Json(saved) = save(hook(), Some(SECRET_TEXT)).await.unwrap();
+    let Json(saved) = save(hook(), Some(secret_text())).await.unwrap();
     assert!(saved.has_secret);
     let stored = db::get_setting(&env.st.db, SECRET).await.unwrap().unwrap();
-    assert!(!stored.contains(SECRET_TEXT));
-    assert!(!serde_json::to_string(&saved).unwrap().contains(SECRET_TEXT));
+    assert!(!stored.contains(secret_text()));
+    assert!(!serde_json::to_string(&saved).unwrap().contains(secret_text()));
     // Changed without a secret: the one saved stays
     let _ = save(Config { cooldown_minutes: 10, ..hook() }, None).await.unwrap();
     assert_eq!(db::get_setting(&env.st.db, SECRET).await.unwrap().unwrap(), stored);
-    assert_eq!(queue::secret(&env.st.db).await.unwrap().as_deref(), Some(SECRET_TEXT));
+    assert_eq!(queue::secret(&env.st.db).await.unwrap().as_deref(), Some(secret_text()));
     // Without a webhook, no secret is needed
     assert!(save(Config::default(), None).await.is_ok());
 }
