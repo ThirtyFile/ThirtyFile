@@ -4,7 +4,7 @@
  * The upload queue lives in memory (uploads.ts), with the files the person picked. What is needed to find an upload
  * again is kept in the browser's storage: the file's name, folder path, size, date and its complete content identity, where
  * it goes, its batch and the answer to a name clash, and how far it got. Never the content itself, nor anything that
- * signs in. The server session of an upload is found again the way tus-js-client finds it: its own records, keyed by
+ * signs in. The server session of an upload is found again through records of its own (lib/tus.ts), keyed by
  * the upload's record (`fingerprintOf`), hold the upload's address, which for a share link's visitor includes the
  * link; they go when the upload ends, is discarded or expires with its record.
  *
@@ -235,7 +235,7 @@ export function sampleOf(file: Blob, signal?: AbortSignal): Promise<string> {
   });
 }
 
-// ───────────── Server sessions (tus-js-client's records) ─────────────
+// ───────────── Server sessions (the records lib/tus.ts keeps) ─────────────
 
 /**
  * The tus fingerprint of an upload: its record, so an upload only ever continues its own server session (a file chosen
@@ -248,7 +248,7 @@ export function fingerprintOf(endpoint: string, recordId: string) {
 const FINGERPRINT = "tf|";
 
 /**
- * Forgets tus-js-client's records that outlived the upload records (they expire together), and ends those of earlier
+ * Forgets the records of lib/tus.ts that outlived the upload records (they expire together), and ends those of earlier
  * versions, whose keys held the upload address (their uploads can't be continued any more): when the page loads
  */
 export function sweepSessions(now = Date.now()) {
@@ -270,22 +270,22 @@ export function sweepSessions(now = Date.now()) {
 }
 sweepSessions();
 
-/** The upload addresses tus-js-client kept for a fingerprint, with their storage keys */
+/** The upload addresses kept for a fingerprint (lib/tus.ts), with their storage keys, the newest first */
 export function sessionsOf(fingerprint: string): { key: string; url: string }[] {
-  const out: { key: string; url: string }[] = [];
+  const out: { key: string; url: string; created: number }[] = [];
   try {
     for (const key of Object.keys(localStorage)) {
       if (!key.startsWith(`tus::${fingerprint}::`)) continue;
-      const url = JSON.parse(localStorage.getItem(key) ?? "{}").uploadUrl;
-      if (typeof url === "string") out.push({ key, url });
+      const kept = JSON.parse(localStorage.getItem(key) ?? "{}");
+      if (typeof kept.uploadUrl === "string") out.push({ key, url: kept.uploadUrl, created: Date.parse(String(kept.creationTime)) || 0 });
     }
   } catch {
     // Nothing kept
   }
-  return out;
+  return out.sort((a, b) => b.created - a.created).map(({ key, url }) => ({ key, url }));
 }
 
-/** Whether the server may still have part of this upload (tus-js-client kept its address) */
+/** Whether the server may still have part of this upload (its address was kept) */
 export const hasSession = (endpoint: string, r: UploadRecord) => sessionsOf(fingerprintOf(endpoint, r.id)).length > 0;
 
 /** Ends the server sessions of an upload and forgets them, so it can't be continued (discarded, or starting over) */
@@ -306,7 +306,7 @@ async function endSession(key: string, url: unknown) {
   await fetch(url, { method: "DELETE", credentials: "same-origin", headers: { "Tus-Resumable": "1.0.0" }, keepalive: true }).catch(() => {});
 }
 
-/** What the server says about an upload it may have (a HEAD request, as tus-js-client makes before continuing) */
+/** What the server says about an upload it may have (a HEAD request, as lib/tus.ts makes before continuing) */
 export type SessionState =
   | { kind: "none" }
   | { kind: "partial"; offset: number }
@@ -319,7 +319,7 @@ export async function sessionState(url: string): Promise<SessionState> {
   try {
     res = await fetch(url, { method: "HEAD", credentials: "same-origin", headers: { "Tus-Resumable": "1.0.0" }, cache: "no-store" });
   } catch {
-    // Offline: tus-js-client will retry
+    // Offline: the upload retries
     return { kind: "none" };
   }
   if (res.ok) {

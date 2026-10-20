@@ -1,5 +1,5 @@
 // The upload queue (uploads.ts): a few files at a time, pause, resume, retry and cancel, and telling the lists when
-// files land. tus-js-client is stood in for: each upload is started, and succeeds or fails when a test says so.
+// files land. the tus client (lib/tus.ts) is stood in for: each upload is started, and succeeds or fails when a test says so.
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
@@ -9,7 +9,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vi
 interface FakeUpload {
   file: File;
   options: {
-    onSuccess(payload: { lastResponse: { getHeader(name: string): string | undefined } }): void;
+    onSuccess(payload: { lastResponse: { header(name: string): string | null } }): void;
     onError(err: Error): void;
     onProgress(sent: number, total: number): void;
   };
@@ -17,8 +17,8 @@ interface FakeUpload {
   aborted: boolean;
 }
 const uploads = vi.hoisted(() => [] as FakeUpload[]);
-vi.mock("tus-js-client", () => ({
-  Upload: class {
+vi.mock("@/lib/tus", () => ({
+  TusUpload: class {
     started = false;
     aborted = false;
     constructor(
@@ -34,10 +34,7 @@ vi.mock("tus-js-client", () => ({
       this.aborted = true;
       return Promise.resolve();
     }
-    findPreviousUploads() {
-      return Promise.resolve([]);
-    }
-    resumeFromPreviousUpload() {}
+    resume() {}
   },
 }));
 
@@ -75,7 +72,7 @@ beforeAll(() => act(() => root.render(createElement(Probe))));
 const files = (n: number, folder = "") => Array.from({ length: n }, (_, i) => ({ file: new File([`content ${i}`], `file${i}.txt`), relativePath: folder }));
 const started = () => uploads.filter((u) => u.started && !u.aborted);
 const statuses = () => shown.tasks.map((t) => t.status);
-const succeed = (u: FakeUpload) => act(() => u.options.onSuccess({ lastResponse: { getHeader: () => undefined } }));
+const succeed = (u: FakeUpload) => act(() => u.options.onSuccess({ lastResponse: { header: () => null } }));
 /** Lets the queue start what it can (each start is a few promises), and shows the change */
 const settle = () => act(async () => void (await new Promise((r) => setTimeout(r, 300))));
 
@@ -135,7 +132,7 @@ describe("upload queue", () => {
     act(() => up.enqueue(files(2), "folder"));
     await settle();
     const refused = Object.assign(new Error("tus: unexpected response"), {
-      originalResponse: { getStatus: () => 507, getBody: () => JSON.stringify({ error: "Not enough space" }), getHeader: () => undefined },
+      response: { status: 507, body: JSON.stringify({ error: "Not enough space" }), header: () => null },
     });
     act(() => started()[0].options.onError(refused));
     act(() => started()[1].options.onError(new Error("tus: failed to upload chunk")));
@@ -208,8 +205,7 @@ describe("content identity", () => {
     recovery.setRecoveryUser(7);
     act(() => up.enqueue(files(2), "folder"));
     await settle();
-    const response = (status: number, error: string) =>
-      Object.assign(new Error("tus: unexpected response"), { originalResponse: { getStatus: () => status, getBody: () => JSON.stringify({ error }), getHeader: () => undefined } });
+    const response = (status: number, error: string) => Object.assign(new Error("tus: unexpected response"), { response: { status, body: JSON.stringify({ error }), header: () => null } });
     act(() => started()[0].options.onError(response(400, "Name can't contain ?")));
     act(() => started()[1].options.onError(response(507, "Not enough space")));
     await act(async () => void (await new Promise((r) => setTimeout(r, 1200))));
