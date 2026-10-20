@@ -1,5 +1,6 @@
 //! Optional device uploads. The HTTP service starts first and remains available if FTP cannot listen.
 
+mod certificate;
 pub mod config;
 pub mod credentials;
 mod login;
@@ -109,8 +110,7 @@ fn passive_ports(value: &str) -> AppResult<std::ops::RangeInclusive<u16>> {
 /// When the first certificate of a PEM file ends (Unix seconds)
 fn certificate_ends(path: &std::path::Path) -> Option<i64> {
     let first = CertificateDer::pem_reader_iter(std::fs::File::open(path).ok()?).next()?.ok()?;
-    let (_, cert) = x509_parser::parse_x509_certificate(&first).ok()?;
-    Some(cert.validity().not_after.timestamp())
+    certificate::not_after(&first)
 }
 fn tls(settings: &Settings, private_plain: bool) -> AppResult<Option<Arc<rustls::ServerConfig>>> {
     let (cert, key) = match (&settings.cert, &settings.key) {
