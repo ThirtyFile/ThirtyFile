@@ -361,7 +361,7 @@ test("Office controls wait for the actual file before accepting input", async ({
   }
 });
 
-test("packaged editors omit upstream Discord promotion", async ({ page }) => {
+test("packaged editors omit upstream branding and promotion and expose legal notices", async ({ page }) => {
   await signIn(page);
   const folder = await makeFolder(page, "Office community links");
   const files = [
@@ -369,26 +369,60 @@ test("packaged editors omit upstream Discord promotion", async ({ page }) => {
     ["sheets", "community.xlsx", await buildWorkbook([{ name: "Hosted", rows: "" }])],
     ["slides", "community.pptx", await buildPresentation()],
   ] as const;
-  const noDiscord = () =>
+  const noPromotion = () =>
     expect
       .poll(() =>
         office(page)
           .locator("[data-office-dom]")
-          .evaluate((element: any) => /discord/i.test(JSON.stringify(element.model))),
+          .evaluate((element: any) =>
+            /WordCraft|GridCraft|DeckCraft|ArtCraft|[Dd]iscord|getartcraft\.com|github\.com\/storytold|Source on GitHub|Source code:/.test(JSON.stringify(element.model)),
+          ),
       )
       .toBe(false);
   for (const [kind, name, bytes] of files) {
     const id = await uploadFile(page, folder, name, Buffer.from(bytes));
     await openOffice(page, id, kind);
     if (kind === "word") await officeCall(page, "execute", "ui.language", { value: "en" });
-    await noDiscord();
+    await noPromotion();
     if (kind === "word") {
       await office(page).locator('[data-office-chrome] [data-id="tab:Help"]').click();
       await expect(office(page).getByRole("button", { name: "Commands", exact: true })).toBeVisible();
-      await noDiscord();
+      await noPromotion();
     }
     await officeCall(page, "execute", kind === "slides" ? "app.about" : "ui.dialog", kind === "slides" ? {} : { name: "about" });
-    await expect(office(page).getByRole("dialog")).toBeVisible();
-    await noDiscord();
+    const dialog = office(page).getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await expect
+      .poll(() =>
+        office(page)
+          .locator("[data-office-dom]")
+          .evaluate((element: any) => JSON.stringify(element.model).includes("About this editor")),
+      )
+      .toBe(true);
+    await noPromotion();
+    await dialog.getByRole("button", { name: "LICENSE-MIT", exact: true }).and(dialog.locator("button:not(.drag)")).click();
+    const notice = dialog.getByRole("textbox", { name: "LICENSE-MIT contents", exact: true });
+    await expect(notice).toHaveJSProperty("readOnly", true);
+    await expect.poll(() => notice.inputValue()).toContain("Permission is hereby granted");
+    await page.screenshot({ path: path.join(os.tmpdir(), `thirtyfile-office-${kind}-licenses.png`) });
+    await dialog.getByRole("button", { name: "LICENSE-MIT", exact: true }).and(dialog.locator("button:not(.drag)")).click();
+    await noPromotion();
+    await dialog
+      .getByRole("button", { name: /^Close(?: window)?$/ })
+      .last()
+      .click();
+    if (kind === "word") {
+      for (const pane of ["general", "save", "agents"]) {
+        await officeCall(page, "execute", "ui.backstage", { value: true, page: "options", pane });
+        await noPromotion();
+      }
+    }
+    if (kind === "slides") {
+      for (const pageName of ["home", "new", "account", "saveAs"]) {
+        await officeCall(page, "execute", "app.backstage", { page: pageName });
+        await noPromotion();
+      }
+      await expect(officeCall(page, "execute", "app.links", {})).rejects.toThrow("Community links are not available");
+    }
   }
 });
