@@ -17,6 +17,11 @@ vi.mock("@/components/officeFrame", () => ({
   frameDocument: () => "<!doctype html><html><body></body></html>",
 }));
 vi.mock("@/lib/errorReport", () => ({ reportShown: vi.fn<() => void>() }));
+vi.mock("@/components/office/OfficeWorkspace", () => ({
+  default: (props: { node: Node; editable?: boolean; allowDownload?: boolean }) => (
+    <div data-office-stub={props.node.name} data-editable={!!props.editable} data-export={props.allowDownload !== false} />
+  ),
+}));
 
 const { default: OfficeViewer } = await import("@/components/OfficeViewer");
 const { default: SheetPreview } = await import("@/components/sheet/SheetPreview");
@@ -80,7 +85,6 @@ async function message(data: unknown, from: unknown) {
   });
 }
 
-const spinning = () => !!container.querySelector(".animate-spin");
 const activation = (isActive: boolean | undefined) => Object.defineProperty(navigator, "userActivation", { configurable: true, value: isActive === undefined ? undefined : { isActive } });
 
 beforeEach(() => {
@@ -96,70 +100,25 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("a Word or PowerPoint preview", () => {
-  test("sends the document only to its own frame, once that frame says it is ready", async () => {
-    await mount(<OfficeViewer node={node("Plans.docx")} source={source} />);
-    const { win } = await frame();
-    await vi.waitFor(() => expect(fetchOffice).toHaveBeenCalledWith("/api/files/Plans.docx/content", expect.any(AbortSignal)));
-
-    // Another window (a page in another tab, a frame of the document's) saying "ready" changes nothing
-    await message({ type: "ready" }, window);
-    await message({ type: "ready" }, { postMessage() {} });
-    expect(win.postMessage).not.toHaveBeenCalled();
-
-    await message({ type: "ready" }, win);
-    expect(win.postMessage).toHaveBeenCalledTimes(1);
-    const [msg, origin, transfer] = win.postMessage.mock.calls[0];
-    expect(msg).toMatchObject({ type: "render", kind: "docx" });
-    expect(origin).toBe("*");
-    // Handed over, not copied
-    expect(transfer).toEqual([(msg as { buffer: ArrayBuffer }).buffer]);
-
-    // Only its own frame says when it's done
-    await message({ type: "done" }, window);
-    expect(spinning()).toBe(true);
-    await message({ type: "done" }, win);
-    expect(spinning()).toBe(false);
+describe("packaged Office previews", () => {
+  test("uses the same readonly SDK surface for Word, Excel and PPT without an iframe", async () => {
+    for (const name of ["Plans.docx", "Budget.xlsx", "Deck.pptx"]) {
+      await mount(<OfficeViewer node={node(name)} source={source} />);
+      expect(container.querySelector("[data-office-stub]")?.getAttribute("data-office-stub")).toBe(name);
+      expect(container.querySelector("[data-office-stub]")?.getAttribute("data-editable")).toBe("false");
+      expect(container.querySelector("iframe")).toBeNull();
+    }
   });
-
-  test("opens a link from the document only right after a click, one tab at a time, and only for web and email addresses", async () => {
-    const open = vi.spyOn(window, "open").mockReturnValue(null);
-    await mount(<OfficeViewer node={node("Deck.pptx")} source={source} />);
-    const { win } = await frame();
-    const link = (href: unknown, from: unknown = win) => message({ type: "link", href }, from);
-
-    // No click went with it (a script in the document asking by itself)
-    activation(false);
-    await link("https://example.com/a");
-    expect(open).not.toHaveBeenCalled();
-    // A browser that can't tell is treated the same
-    activation(undefined);
-    await link("https://example.com/a");
-    expect(open).not.toHaveBeenCalled();
-
-    activation(true);
-    await link("https://example.com/a", window);
-    await link("javascript:alert(1)");
-    await link("file:///etc/passwd");
-    expect(open).not.toHaveBeenCalled();
-    await link("https://example.com/a");
-    expect(open).toHaveBeenCalledWith("https://example.com/a", "_blank", "noopener,noreferrer");
-    // A second link within a second (one click) doesn't open another tab
-    await link("mailto:amy@example.com");
-    expect(open).toHaveBeenCalledTimes(1);
+  test("preserves a share's no-download policy in the SDK", async () => {
+    await mount(<OfficeViewer node={node("Deck.pptx")} source={source} allowDownload={false} />);
+    expect(container.querySelector("[data-office-stub]")?.getAttribute("data-export")).toBe("false");
   });
-
-  test("shows what went wrong in its frame", async () => {
-    await mount(<OfficeViewer node={node("Plans.docx")} source={source} />);
-    const { win } = await frame();
-    await message({ type: "error", message: "The document has no body" }, window);
-    expect(container.textContent).not.toContain("no body");
-    await message({ type: "error", message: "The document has no body" }, win);
-    expect(container.textContent).toContain("The document has no body");
-    expect(container.querySelector("iframe")).toBeNull();
+  test("does not initialize a Worker for a file over the preview limit", async () => {
+    await mount(<OfficeViewer node={{ ...node("Large.docx"), size: 51 * 1024 * 1024 }} source={source} />);
+    expect(container.textContent).toContain("too large");
+    expect(container.querySelector("[data-office-stub]")).toBeNull();
   });
 });
-
 describe("the drawing layer of a spreadsheet preview", () => {
   /** A workbook with a drawing part, so the preview loads its drawing frame */
   async function workbookWithDrawings() {

@@ -30,7 +30,13 @@ export interface DocxDraft {
   base: number;
 }
 
-export type Draft = TextDraft | SheetDraft | DocxDraft;
+/** The live Worker owns Office edits; this marker participates in the app's tab and unload guards. */
+export interface OfficeDraft {
+  kind: "office";
+  base: string;
+}
+
+export type Draft = TextDraft | SheetDraft | DocxDraft | OfficeDraft;
 
 const drafts = new Map<string, Draft>();
 const discardListeners = new Set<(nodeId: string) => void>();

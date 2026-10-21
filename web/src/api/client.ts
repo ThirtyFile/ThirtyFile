@@ -87,7 +87,7 @@ export async function fetchOffice(url: string, signal?: AbortSignal): Promise<Ar
 }
 
 /** .docx / .xlsx / .pptx are really ZIP archives; check the header first so the preview and editor don't throw a cryptic error or show a blank page */
-function checkOoxml(buf: ArrayBuffer) {
+export function checkOoxml(buf: ArrayBuffer) {
   const b = new Uint8Array(buf.slice(0, 4));
   if (b[0] === 0x50 && b[1] === 0x4b && b[2] === 0x03 && b[3] === 0x04) return buf;
   if (b[0] === 0xd0 && b[1] === 0xcf && b[2] === 0x11 && b[3] === 0xe0)

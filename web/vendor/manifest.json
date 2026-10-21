@@ -1,0 +1,34 @@
+{
+  "version": "0.1.0-alpha.1",
+  "createdAt": "2026-10-21T06:21:49.145Z",
+  "packages": [
+    {
+      "name": "@office/sdk",
+      "version": "0.1.0-alpha.1",
+      "file": "office-sdk-0.1.0-alpha.1.tgz",
+      "bytes": 8887076,
+      "sha256": "56dabdb471061c23cd697058acf3fc528ac52af39b5177d9f67bc354de4efd10"
+    },
+    {
+      "name": "@office/word",
+      "version": "0.1.0-alpha.1",
+      "file": "office-word-0.1.0-alpha.1.tgz",
+      "bytes": 22469238,
+      "sha256": "8a9d8620ed78fbb16ee55c09962504d00fd63056b726a1c9f019387cd24e3856"
+    },
+    {
+      "name": "@office/sheets",
+      "version": "0.1.0-alpha.1",
+      "file": "office-sheets-0.1.0-alpha.1.tgz",
+      "bytes": 8972633,
+      "sha256": "9ad669c357c165ce496b034512c777ef1bd74e36df5c2d2a7e1f7d55ac93b967"
+    },
+    {
+      "name": "@office/slides",
+      "version": "0.1.0-alpha.1",
+      "file": "office-slides-0.1.0-alpha.1.tgz",
+      "bytes": 15208291,
+      "sha256": "38f7662d92c027530df6fce4b43d17736508c10298c9e595a9ef2882535f95d0"
+    }
+  ]
+}

@@ -17,22 +17,20 @@ use crate::i18n::{self, Lang};
 struct Assets;
 
 /// Security headers for the web pages themselves:
-/// - Only this site may embed them (prevents clickjacking; the sandboxed iframe for Office previews uses srcdoc, so it's unaffected)
+/// - Only this site may embed them (prevents clickjacking)
 /// - No referrer URL is sent to other sites (share page URLs contain the share token)
 /// - The Content-Security-Policy is built per page (see `content_security_policy`)
 const SECURITY_HEADERS: [(header::HeaderName, &str); 3] =
     [(header::X_FRAME_OPTIONS, "SAMEORIGIN"), (header::REFERRER_POLICY, "same-origin"), (header::X_CONTENT_TYPE_OPTIONS, "nosniff")];
 
 /// Content-Security-Policy for the app page. Scripts may only come from this site, plus the inline scripts we generate
-/// ourselves, allowed by hash: the theme bootstrap in index.html, the injected branding settings, and the Office previewer
-/// (`office-frame.js`), which the page inlines into a sandboxed srcdoc iframe; srcdoc documents inherit this policy,
-/// so that script has to be allowed here too. Everything else (styles, images, fonts, API calls) stays on this origin;
+/// ourselves, allowed by hash: the theme bootstrap in index.html and the injected branding settings.
+/// Office engines run WASM in same-origin Workers. Everything else (styles, images, fonts, API calls) stays on this origin;
 /// blob:/data: are needed for previews and downloads generated in the browser.
 fn content_security_policy(html: &str) -> String {
-    let mut hashes = inline_script_hashes(html);
-    hashes.extend(office_frame_hash().iter().cloned());
+    let hashes = inline_script_hashes(html);
     format!(
-        "default-src 'self'; script-src 'self' {}; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; \
+        "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' {}; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; \
          media-src 'self' blob:; font-src 'self' blob: data:; connect-src 'self'; worker-src 'self' blob:; \
          frame-src 'self' blob:; object-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'",
         hashes.join(" ")
@@ -117,34 +115,6 @@ fn script_hash(script: &str) -> String {
     format!("'sha256-{}'", base64::engine::general_purpose::STANDARD.encode(Sha256::digest(parsed.as_bytes())))
 }
 
-/// Hash of office-frame.js exactly as the page inlines it into the iframe (`</script` is escaped as `<\/script` there).
-/// Computed once: the file is part of the build.
-fn office_frame_hash() -> &'static Option<String> {
-    static HASH: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
-    HASH.get_or_init(|| {
-        let file = Assets::get("office-frame.js")?;
-        let js = String::from_utf8_lossy(&file.data);
-        Some(script_hash(&escape_script_end(&js)))
-    })
-}
-
-/// Same transformation as the frontend's `script.replace(/<\/(script)/gi, "<\\/$1")`
-fn escape_script_end(js: &str) -> String {
-    let lower = js.to_ascii_lowercase();
-    let mut out = String::with_capacity(js.len());
-    let mut last = 0;
-    let mut search = 0;
-    while let Some(i) = lower[search..].find("</script") {
-        let at = search + i;
-        out.push_str(&js[last..at]);
-        out.push_str("<\\/");
-        last = at + 2;
-        search = at + 8;
-    }
-    out.push_str(&js[last..]);
-    out
-}
-
 pub async fn serve(State(st): State<crate::state::AppState>, uri: Uri, headers: HeaderMap) -> Response {
     let path = uri.path().trim_start_matches('/');
     if path.starts_with("api/") {
@@ -154,7 +124,7 @@ pub async fn serve(State(st): State<crate::state::AppState>, uri: Uri, headers: 
         && let Some(file) = Assets::get(path)
     {
         let mime = mime_guess::from_path(path).first_or_octet_stream();
-        // Vite's assets/ file names contain a hash, so they can be cached long-term; other files (e.g. office-frame.js) are revalidated every time, returning 304 if unchanged
+        // Vite's assets/ file names contain a hash, so they can be cached long-term; other files are revalidated every time, returning 304 if unchanged
         let cache = if path.starts_with("assets/") { "public, max-age=31536000, immutable" } else { "no-cache" };
         let etag = format!("\"{}\"", hex::encode(&file.metadata.sha256_hash()[..16]));
         if headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) == Some(etag.as_str()) {
@@ -206,9 +176,10 @@ mod tests {
         assert_eq!(hashes.len(), 2, "two inline scripts, the external one is not hashed");
         assert_eq!(hashes[0], script_hash(r#"window.__TF_BRANDING__={"a":1}"#));
         let csp = content_security_policy(html);
-        assert!(csp.starts_with("default-src 'self'; script-src 'self' 'sha256-"));
+        assert!(csp.starts_with("default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-"));
         let script_src = csp.split(';').find(|d| d.trim().starts_with("script-src")).unwrap();
         assert!(!script_src.contains("unsafe-inline"), "no unsafe-inline for scripts: {script_src}");
+        assert!(!script_src.contains("'unsafe-eval'"), "JavaScript evaluation stays blocked: {script_src}");
         assert!(csp.contains("frame-ancestors 'self'"));
     }
 
@@ -272,11 +243,5 @@ mod tests {
             let html = format!("<html><head><script>{body}</script></head></html>");
             assert_eq!(inline_script_hashes(&html), vec![want.to_string()], "{body:?}");
         }
-    }
-
-    #[test]
-    fn script_end_is_escaped_like_the_frontend() {
-        assert_eq!(escape_script_end("a</script>b</SCRIPT>c"), "a<\\/script>b<\\/SCRIPT>c");
-        assert_eq!(escape_script_end("no tags"), "no tags");
     }
 }

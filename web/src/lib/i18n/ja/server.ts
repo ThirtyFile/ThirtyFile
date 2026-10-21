@@ -1,5 +1,10 @@
 /** Japanese translations of messages returned by the server (errors, activity log details, connection failures, SSO errors…), used by tServer() */
 export default {
+  "Invalid save request key": "保存リクエストの識別子が無効です",
+  "Invalid save request key or base version": "保存リクエストの識別子または元のバージョンが無効です",
+  "The save request key was reused with different content": "保存リクエストの識別子が異なる内容で再利用されました",
+  "Invalid base version": "元のバージョンが無効です",
+  "Invalid content revision": "内容のバージョンが無効です",
   // Common errors (error.rs, util.rs, web.rs)
   "Please sign in": "サインインしてください",
   "A server error occurred": "サーバーでエラーが発生しました",

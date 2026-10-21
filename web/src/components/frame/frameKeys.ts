@@ -72,6 +72,8 @@ export function useFrameKeys(o: { enabled?: boolean; upTo?: string | null; refre
     // Alt+arrows move around folders wherever the focus is: before a focused menu button takes Alt+↑ or Alt+↓ to open
     // its menu
     const onAltArrow = (e: KeyboardEvent) => {
+      // Office owns Alt combinations too (lists, navigation and slide tools).
+      if ((e.target as HTMLElement | null)?.closest?.("[data-office-document]")) return;
       const toParent = pressed(e, withAlt(k.upFolder));
       const backward = pressed(e, withAlt(k.back));
       if (!toParent && !backward && !pressed(e, withAlt(k.forward))) return;

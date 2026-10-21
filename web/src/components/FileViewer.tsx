@@ -47,7 +47,7 @@ export function FileViewer(props: {
     return (
       <div className={cn("size-full overflow-hidden", !embedded && "max-w-6xl rounded-lg")}>
         <Suspense fallback={<Loader2Icon className="m-auto size-6 animate-spin text-muted-foreground" />}>
-          <OfficeViewer node={node} source={props.source} />
+          <OfficeViewer node={node} source={props.source} allowDownload={props.allowDownload} />
         </Suspense>
       </div>
     );

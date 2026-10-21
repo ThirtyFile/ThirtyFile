@@ -1,6 +1,7 @@
 // Editing, typed Control panel paths and transfer states against a real isolated server.
 import { expect, test, type Page } from "@playwright/test";
 import { buildWorkbook } from "../fixtures";
+import { office, officeCall, openOffice, sheetGo, sheetRead } from "./office-sdk.helpers";
 import { answer, makeFolder, makeUser, openFolder, PASSWORD, signIn, signInAsNewUser, uploadFile, uploadFinished, USER_PASSWORD } from "./helpers";
 
 test.describe.configure({ mode: "parallel" });
@@ -70,12 +71,11 @@ test("a delayed text save stays with its own file when switching two cached tabs
 test("formula bar and name box keep candidate selection inside an input method", async ({ page }) => {
   await signInAsNewUser(page, "ime-sheet");
   const dir = await makeFolder(page, "IME sheet");
-  const xlsx = Buffer.from(await buildWorkbook([{ name: "Sheet1", rows: '<row r="1"><c r="A1"><v>1</v></c></row>' }]));
-  const id = await uploadFile(page, dir, "ime.xlsx", xlsx);
-  await page.goto(`/view/${id}`);
-  await page.getByRole("button", { name: "Edit workbook" }).click();
-  const bar = page.getByLabel("Formula bar");
-  const box = page.getByLabel("Name box");
+  const id = await uploadFile(page, dir, "ime.xlsx", Buffer.from(await buildWorkbook([{ name: "Sheet1", rows: '<row r="1"><c r="A1"><v>1</v></c></row>' }])));
+  await openOffice(page, id, "sheets");
+  await office(page).getByRole("button", { name: "Edit formula", exact: true }).click();
+  const bar = office(page).getByLabel("Formula bar", { exact: true });
+  const box = office(page).getByLabel("Name box", { exact: true });
   await bar.fill("ㄓ");
   await bar.dispatchEvent("compositionstart", { data: "ㄓ" });
   for (const key of ["Enter", "Escape", "Tab"]) {
@@ -90,11 +90,12 @@ test("formula bar and name box keep candidate selection inside an input method",
   await bar.dispatchEvent("compositionend", { data: "中文" });
   await bar.press("Enter");
   await expect(box).toHaveValue("A2");
+  await expect.poll(() => sheetRead(page, "A1")).toEqual([["中文"]]);
   await box.fill("A1");
   await box.dispatchEvent("keydown", { key: "Enter", isComposing: true });
   await expect(box).toBeFocused();
-  await expect(bar).toHaveValue("");
   await box.press("Enter");
+  await office(page).getByRole("button", { name: "Edit formula", exact: true }).click();
   await expect(bar).toHaveValue("中文");
 });
 
@@ -108,34 +109,26 @@ test("cutting cells from another workbook preserves unrelated destination cells"
     "destination.xlsx",
     Buffer.from(await buildWorkbook([{ name: "Destination", rows: '<row r="1"><c r="A1" t="inlineStr"><is><t>keep B</t></is></c></row>' }])),
   );
-  await page.goto(`/view/${a}`);
-  await page.getByRole("button", { name: "Edit workbook" }).click();
-  await expect(page.getByLabel("Formula bar")).toHaveValue("from A");
-  const text = await page.getByLabel("Cell contents").evaluate((el) => {
-    const data = new DataTransfer();
-    el.dispatchEvent(new ClipboardEvent("cut", { bubbles: true, cancelable: true, clipboardData: data }));
-    return data.getData("text/plain");
-  });
-  expect(text).toBe("from A");
+  await openOffice(page, a, "sheets");
+  const copied = await officeCall(page, "execute", "edit.cut", { range: "A1" });
+  expect(copied.text.trimEnd()).toBe("from A");
   await page.getByRole("button", { name: "New tab" }).click();
   await page.waitForURL(/\/files$/);
   await page.getByRole("navigation", { name: "File path" }).click();
   const path = page.getByRole("textbox", { name: "Full path" });
   await path.fill(`${new URL(page.url()).origin}/view/${b}`);
   await path.press("Enter");
-  await page.getByRole("button", { name: "Edit workbook" }).click();
-  const box = page.getByLabel("Name box");
-  await box.fill("B1");
-  await box.press("Enter");
-  await page.getByLabel("Cell contents").evaluate((el, text) => {
-    const data = new DataTransfer();
-    data.setData("text/plain", text);
-    el.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: data }));
-  }, text);
-  await expect(page.getByLabel("Formula bar")).toHaveValue("from A");
-  await box.fill("A1");
-  await box.press("Enter");
-  await expect(page.getByLabel("Formula bar")).toHaveValue("keep B");
+  await page.getByRole("button", { name: "Edit workbook", exact: true }).click();
+  await expect(office(page)).toHaveAttribute("data-office-ready", "true", { timeout: 120_000 });
+  await sheetGo(page, "B1");
+  await office(page)
+    .getByRole("textbox", { name: "Office editor text input" })
+    .evaluate((el, text) => {
+      const data = new DataTransfer();
+      data.setData("text/plain", text);
+      el.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: data }));
+    }, copied.text);
+  await expect.poll(() => sheetRead(page, "A1:B1")).toEqual([["keep B", "from A"]]);
 });
 
 test("a paste past the last column is rejected without altering the next row", async ({ page }) => {
@@ -147,20 +140,9 @@ test("a paste past the last column is rejected without altering the next row", a
     "edge.xlsx",
     Buffer.from(await buildWorkbook([{ name: "Edge", rows: '<row r="2"><c r="A2" t="inlineStr"><is><t>keep next row</t></is></c></row>' }])),
   );
-  await page.goto(`/view/${id}`);
-  await page.getByRole("button", { name: "Edit workbook" }).click();
-  const box = page.getByLabel("Name box");
-  await box.fill("XFD1");
-  await box.press("Enter");
-  await page.getByLabel("Cell contents").evaluate((el) => {
-    const data = new DataTransfer();
-    data.setData("text/plain", "first\tsecond");
-    el.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: data }));
-  });
-  await expect(page.getByText("The pasted cells would extend beyond the worksheet. Select another cell and try again.")).toBeVisible();
-  await box.fill("A2");
-  await box.press("Enter");
-  await expect(page.getByLabel("Formula bar")).toHaveValue("keep next row");
+  await openOffice(page, id, "sheets");
+  await expect(officeCall(page, "execute", "edit.paste", { at: "XFD1", text: "first\tsecond" })).rejects.toThrow();
+  expect(await sheetRead(page, "A2")).toEqual([["keep next row"]]);
 });
 
 test("Windows address bar opens copied and canonical Control panel paths", async ({ page }) => {

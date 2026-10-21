@@ -27,6 +27,10 @@ use crate::{
 
 pub const MAX_EDIT_BYTES: usize = 20 * 1024 * 1024;
 
+#[cfg(test)]
+mod receipt_tests;
+mod receipts;
+
 /// Parses a single Range. Ok(None) = return the whole file; Err = 416.
 fn parse_range(value: &str, size: u64) -> Result<Option<(u64, u64)>, ()> {
     let Some(spec) = value.trim().strip_prefix("bytes=") else { return Ok(None) };
@@ -307,9 +311,20 @@ pub async fn save_content(State(st): State<AppState>, user: User, Path(id): Path
     if body.len() > MAX_EDIT_BYTES {
         return Err(AppError::new(StatusCode::PAYLOAD_TOO_LARGE, "The file is too large to edit online"));
     }
-    let base: Option<i64> = headers.get("x-base-version").and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok());
+    let base = headers
+        .get("x-base-version")
+        .map(|v| v.to_str().ok().and_then(|s| s.parse::<i64>().ok()).ok_or_else(|| AppError::bad_request("Invalid base version")))
+        .transpose()?;
     // Check write permission before uploading anything to the storage location (a viewer must not be able to make the server write there)
-    let node = tree::node_for(&mut *st.db.acquire().await?, &user, &id, tree::Need::Write).await?;
+    let mut node = tree::node_for(&mut *st.db.acquire().await?, &user, &id, tree::Need::Write).await?;
+    let bytes = body.clone();
+    let digest = tokio::task::spawn_blocking(move || hex::encode(Sha256::digest(&bytes))).await.map_err(AppError::internal)?;
+    let receipt = receipts::Receipt::parse(&headers, &digest, base)?;
+    if let Some(receipt) = &receipt
+        && receipt.replay(&mut *st.db.acquire().await?, user.id, &mut node, body.len()).await?
+    {
+        return Ok(Json(node));
+    }
     if base.is_some_and(|b| b != node.updated_at) {
         return Err(edit_conflict());
     }
@@ -318,15 +333,20 @@ pub async fn save_content(State(st): State<AppState>, user: User, Path(id): Path
     let hash = if node.in_folder_space() {
         None
     } else {
-        let body = body.clone();
-        let hash = tokio::task::spawn_blocking(move || hex::encode(Sha256::digest(&body))).await.map_err(AppError::internal)?;
-        if node.blob_hash.as_deref() == Some(hash.as_str()) {
+        if receipt.is_none() && !headers.contains_key(header::IF_MATCH) && node.blob_hash.as_deref() == Some(digest.as_str()) {
             return Ok(Json(node));
         }
-        Some(hash)
+        Some(digest)
     };
     // Store and record in a task of its own, so a dropped request can't stop it between the two
-    tokio::spawn(store_content(st, user, node, body, hash, base)).await.map_err(AppError::internal)?
+    let tag = headers.get(header::IF_MATCH).map(|v| v.to_str().map(str::to_owned).map_err(|_| AppError::bad_request("Invalid content revision"))).transpose()?;
+    tokio::spawn(store_content(st, user, node, body, hash, SaveCondition { base, tag, receipt })).await.map_err(AppError::internal)?
+}
+
+struct SaveCondition {
+    base: Option<i64>,
+    tag: Option<String>,
+    receipt: Option<receipts::Receipt>,
 }
 
 /// Someone else saved the file since it was opened in the editor
@@ -337,7 +357,7 @@ fn edit_conflict() -> AppError {
 /// Gives the file `before` the saved content (content.rs). A file of a folder space changed on the server since it was
 /// indexed (or removed there) isn't overwritten: the new content is saved next to it as "name (conflict copy)", in the
 /// system default language (`i18n::names`), and the save reports a conflict.
-async fn store_content(st: AppState, user: User, before: Node, body: Bytes, hash: Option<String>, base: Option<i64>) -> AppResult<Json<Node>> {
+async fn store_content(st: AppState, user: User, before: Node, body: Bytes, hash: Option<String>, condition: SaveCondition) -> AppResult<Json<Node>> {
     let tmp = st.tmp_dir().join(new_id());
     let received = async {
         tokio::fs::write(&tmp, &body).await?;
@@ -358,10 +378,22 @@ async fn store_content(st: AppState, user: User, before: Node, body: Bytes, hash
         turn.ready()?;
         let mut tx = crate::db::begin_write(&st.db).await?;
         // Re-read while holding the write lock so concurrent saves don't overwrite each other
-        let node = tree::node_for(&mut tx, &user, &before.id, tree::Need::Write).await?;
+        let mut node = tree::node_for(&mut tx, &user, &before.id, tree::Need::Write).await?;
+        if let Some(receipt) = &condition.receipt
+            && receipt.replay(&mut tx, user.id, &mut node, body.len()).await?
+        {
+            tx.commit().await?;
+            return Ok(Ok((node, None)));
+        }
         staged.check(&node)?;
-        if base.is_some_and(|b| b != node.updated_at) {
+        if condition.base.is_some_and(|b| b != node.updated_at) {
             return Err(edit_conflict());
+        }
+        if let Some(tag) = &condition.tag {
+            let current = Source::of(&node)?.version_within(node.drive()).await.ok_or_else(edit_conflict)?;
+            if tag != &format!("\"{current}\"") {
+                return Err(edit_conflict());
+            }
         }
         if !staged.unchanged(&mut tx, &node).await? {
             // All of it counts against the space's size limit, as a copy
@@ -381,13 +413,20 @@ async fn store_content(st: AppState, user: User, before: Node, body: Bytes, hash
         let written = content::replace(&mut tx, &st, &staged, &node, user.id).await?;
         logs::record_activity(&mut tx, &user, Some(&node), "edit", "").await?;
         let node = tree::get_node(&mut tx, &node.id).await?.ok_or_else(|| AppError::not_found("Item not found"))?;
+        if let Some(receipt) = &condition.receipt {
+            receipt.commit(&mut tx, user.id, &node).await?;
+        }
         tx.commit().await?;
-        Ok(Ok((node, written)))
+        Ok(Ok((node, Some(written))))
     }
     .await;
     match result {
         Ok(Ok((node, written))) => {
-            staged.finish(&st, written).await;
+            if let Some(written) = written {
+                staged.finish(&st, written).await;
+            } else {
+                staged.abandon(&st).await;
+            }
             Ok(Json(node))
         }
         Ok(Err((name, written))) => {

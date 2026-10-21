@@ -153,6 +153,16 @@ export function useTabsState() {
   return useStore(store);
 }
 
+/** Office sessions use this to release hidden Workers once their file tab closes. */
+export const subscribeTabs = store.subscribe;
+export const openTabFiles = () =>
+  new Set(
+    store
+      .get()
+      .tabs.map(viewedFile)
+      .filter((id): id is string => id !== null),
+  );
+
 /**
  * Called on every URL change: record it in the current tab's history. `replace`: the page replaced the one before it
  * (a search refined as it is typed, a redirect), which it takes the place of, as in the browser's history

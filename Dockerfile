@@ -29,6 +29,7 @@ ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN npm install --global corepack@0.36.0 && corepack enable
 WORKDIR /src/web
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
+COPY web/vendor/ ./vendor/
 RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 COPY web/ ./

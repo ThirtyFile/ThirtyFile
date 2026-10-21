@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 import { buildDocx, buildWorkbook } from "../fixtures";
 import { makeFolder, PASSWORD, uploadFinished } from "./helpers";
+import { officeCall, readyOffice } from "./office-sdk.helpers";
 
 test("sign in, upload, preview and download", async ({ page }) => {
   const docx = Buffer.from(await buildDocx(["Hello from the smoke test", "Second paragraph"]));
@@ -40,20 +41,25 @@ test("sign in, upload, preview and download", async ({ page }) => {
   await expect(row("letter.docx")).toBeVisible();
   await expect(row("budget.xlsx")).toBeVisible();
 
-  // Word: laid out in the sandboxed preview frame
+  // Word: the readonly packaged SDK draws the document without a frame.
   await row("letter.docx").dblclick();
   await page.waitForURL(/\/view\//);
-  const frame = page.frameLocator("iframe").first();
-  await expect(frame.getByText("Hello from the smoke test")).toBeVisible();
-  await expect(frame.getByText("Second paragraph")).toBeVisible();
+  await readyOffice(page);
+  const word = (await officeCall(page, "getState")).engine.content.text;
+  expect(word).toContain("Hello from the smoke test");
+  expect(word).toContain("Second paragraph");
 
   // Excel: drawn on a canvas, with a tab for each sheet
   await page.goBack();
   await row("budget.xlsx").dblclick();
   await page.waitForURL(/\/view\//);
-  await expect(page.getByRole("button", { name: "Budget", exact: true })).toBeVisible();
-  await expect(page.locator("canvas").first()).toBeVisible();
-  await page.getByRole("button", { name: "Notes", exact: true }).click();
+  await readyOffice(page);
+  const sheets = (await officeCall(page, "getState")).engine.content.document;
+  expect(JSON.stringify(sheets)).toContain("Budget");
+  expect(JSON.stringify(sheets)).toContain("Notes");
+  await page.getByLabel("Preview worksheet", { exact: true }).selectOption("1");
+  await expect.poll(async () => (await officeCall(page, "getState")).engine.content.navigation.index).toBe(1);
+  expect((await officeCall(page, "getState")).engine.content.viewport.values[0][0]).toBe("Paid monthly");
   await expect(page.getByText(/Couldn't open/)).toHaveCount(0);
 
   // Download gives back the same bytes

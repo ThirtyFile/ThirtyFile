@@ -1,5 +1,10 @@
 /** Traditional Chinese translations of messages returned by the server (errors, activity log details, connection failures, SSO errors…), used by tServer() */
 export default {
+  "Invalid save request key": "儲存請求識別碼無效",
+  "Invalid save request key or base version": "儲存請求識別碼或原始版本無效",
+  "The save request key was reused with different content": "儲存請求識別碼已被用於不同的內容",
+  "Invalid base version": "原始版本無效",
+  "Invalid content revision": "內容版本無效",
   // Common errors (error.rs, util.rs, web.rs)
   "Please sign in": "請先登入",
   "A server error occurred": "伺服器發生錯誤",

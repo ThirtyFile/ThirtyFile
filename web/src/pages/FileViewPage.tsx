@@ -15,6 +15,7 @@ import {
   Share2Icon,
   SheetIcon,
   UsersRoundIcon,
+  PresentationIcon,
 } from "lucide-react";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
@@ -44,12 +45,12 @@ import { useSort } from "@/lib/sort";
 import { pathOf } from "@/lib/paths";
 import { neighbours, useFolderWindows } from "@/lib/windows";
 
-const SheetEditor = lazy(() => import("@/components/sheet/SheetEditor"));
-const DocxEditor = lazy(() => import("@/components/docx/DocxEditor"));
+const OfficeEditor = lazy(() => import("@/components/office/OfficeEditor"));
+const editingOfficeFiles = new Set<string>();
 
 /** Where focus takes the arrow keys for itself: typing, a media player's seek bar, lists, menus and the workbook */
 const OWN_ARROWS =
-  ".cm-editor, video, audio, input, textarea, select, [contenteditable], [role=grid], [role=tree], [role=tablist], [role=menu], [role=listbox], [role=slider], [data-slot=dialog-content]";
+  ".cm-editor, video, audio, input, textarea, select, [contenteditable], [role=grid], [role=tree], [role=tablist], [role=menu], [role=listbox], [role=slider], [data-slot=dialog-content], [data-office-document]";
 
 /** File opened in a tab: `/view/:id` */
 export function FileViewPage() {
@@ -65,11 +66,11 @@ export function FileViewPage() {
   });
   const [detailsOpen, setDetailsOpen] = useDetailsPane();
   const [dialog, setDialog] = useState<"rename" | "share" | "access" | null>(null);
-  // Excel or Word edit mode; when switching back to the tab with unsaved changes, go straight back to the editor
-  const [editingId, setEditingId] = useState<string | null>(() => (hasDraft(id) ? id : null));
+  // Office edit mode; switching back to a tab with unsaved changes returns to its live editor.
+  const [editingId, setEditingId] = useState<string | null>(() => (hasDraft(id) || editingOfficeFiles.has(id) ? id : null));
   // The same route element stays mounted from one file to the next: re-check the draft when the file changes
   useEffect(() => {
-    if (hasDraft(id)) setEditingId(id);
+    setEditingId(hasDraft(id) || editingOfficeFiles.has(id) ? id : null);
   }, [id]);
 
   const node = info.data?.node;
@@ -137,6 +138,14 @@ export function FileViewPage() {
   const sheetEditing = !!node && editingId === node.id && canEditSheet;
   const canEditDoc = !!node && extOf(node.name) === "docx" && caps.write && node.size <= me.max_edit_bytes;
   const docEditing = !!node && editingId === node.id && canEditDoc;
+  const canEditSlides = !!node && extOf(node.name) === "pptx" && caps.write && node.size <= me.max_edit_bytes;
+  const slidesEditing = !!node && editingId === node.id && canEditSlides;
+  const startEditing = () => {
+    if (node) {
+      editingOfficeFiles.add(node.id);
+      setEditingId(node.id);
+    }
+  };
   const rootUrl = loc.rootUrl;
   const folders = path.slice(0, -1);
   const parentUrl = folders.length ? `/files/${folders[folders.length - 1].id}` : rootUrl;
@@ -163,7 +172,7 @@ export function FileViewPage() {
             className="h-9 gap-1.5 px-2.5 text-[13px] text-emerald-700 dark:text-emerald-400 [&_svg]:size-[18px]"
             aria-pressed={sheetEditing}
             disabled={sheetEditing}
-            onClick={() => node && setEditingId(node.id)}
+            onClick={startEditing}
           >
             <SheetIcon />
             {sheetEditing ? t("Editing workbook") : t("Edit workbook")}
@@ -179,10 +188,25 @@ export function FileViewPage() {
             className="h-9 gap-1.5 px-2.5 text-[13px] text-blue-700 dark:text-blue-400 [&_svg]:size-[18px]"
             aria-pressed={docEditing}
             disabled={docEditing}
-            onClick={() => node && setEditingId(node.id)}
+            onClick={startEditing}
           >
             <FileTextIcon />
             {docEditing ? t("Editing document") : t("Edit document")}
+          </Button>
+        </>
+      )}
+      {canEditSlides && (
+        <>
+          <ToolSeparator />
+          <Button
+            variant={slidesEditing ? "secondary" : "ghost"}
+            className="h-9 gap-1.5 px-2.5 text-[13px] text-orange-700 dark:text-orange-400"
+            aria-pressed={slidesEditing}
+            disabled={slidesEditing}
+            onClick={startEditing}
+          >
+            <PresentationIcon />
+            {slidesEditing ? t("Editing presentation") : t("Edit presentation")}
           </Button>
         </>
       )}
@@ -239,13 +263,18 @@ export function FileViewPage() {
               <OfflinePanel reason={info.data.offline} retrying={info.isFetching} onRetry={() => info.refetch()} />
             ) : (
               <div className="flex size-full items-center justify-center p-0 [&>img]:p-4 [&>video]:p-4">
-                {sheetEditing ? (
+                {sheetEditing || docEditing || slidesEditing ? (
                   <Suspense fallback={<Loader2Icon className="size-6 animate-spin text-muted-foreground" />}>
-                    <SheetEditor node={node} source={privateSource} onExit={() => setEditingId(null)} onSaved={onSaved} />
-                  </Suspense>
-                ) : docEditing ? (
-                  <Suspense fallback={<Loader2Icon className="size-6 animate-spin text-muted-foreground" />}>
-                    <DocxEditor node={node} source={privateSource} onExit={() => setEditingId(null)} onSaved={onSaved} />
+                    <OfficeEditor
+                      key={node.id}
+                      node={node}
+                      source={privateSource}
+                      onExit={() => {
+                        editingOfficeFiles.delete(node.id);
+                        setEditingId(null);
+                      }}
+                      onSaved={onSaved}
+                    />
                   </Suspense>
                 ) : (
                   <FileViewer node={node} source={privateSource} editable={caps.write} embedded onSaved={onSaved} />

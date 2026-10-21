@@ -6,7 +6,7 @@
 //   node scripts/third-party-notices.mjs prod.json dev.json > notices.txt
 // The notices cover the runtime dependencies, and the few development packages whose code ends up in the interface
 // anyway (BUNDLED). A licence that isn't allowed stops it with a message.
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -71,10 +71,14 @@ for (const p of packages) {
   // One text per distinct file (several installed versions usually ship the same licence)
   const texts = new Set();
   for (const dir of p.paths ?? []) {
-    for (const name of readdirSync(dir)
-      .filter((f) => noticeFile.test(f))
-      .sort()) {
-      texts.add(readFileSync(join(dir, name), "utf8").trim());
+    // Office distributions retain upstream notices and font licences inside dist.
+    const roots = [dir, ...(p.name.startsWith("@office/") ? [join(dir, "dist"), join(dir, "dist/assets/fonts"), join(dir, "dist/third-party-assets/fonts")] : [])];
+    for (const root of roots.filter(existsSync)) {
+      for (const name of readdirSync(root)
+        .filter((f) => noticeFile.test(f) || (p.name.startsWith("@office/") && /^(ATTRIBUTION\.md|OFL-.*\.txt)$/i.test(f)))
+        .sort()) {
+        texts.add(readFileSync(join(root, name), "utf8").trim());
+      }
     }
   }
   out.push(texts.size ? [...texts].join(`\n${"-".repeat(80)}\n`) : `The package includes no licence file; its licence is ${p.license}.`);
