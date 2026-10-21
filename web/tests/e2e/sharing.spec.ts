@@ -2,7 +2,7 @@
 // stopping once it is deleted; and sharing a folder with a contributor, who changes only what they add
 import { readFile } from "node:fs/promises";
 import { devices, expect, test } from "@playwright/test";
-import { USER_PASSWORD, answer, makeFolder, makeUser, openFolder, signIn, uploadFile, uploadFinished } from "./helpers";
+import { USER_PASSWORD, answer, makeFolder, makeUser, openFolder, signIn, signInAsNewUser, unique, uploadFile, uploadFinished } from "./helpers";
 
 test("a visitor unlocks a shared folder with its password, opens a folder in it and downloads a file", async ({ page, browser, baseURL }) => {
   await signIn(page);
@@ -230,4 +230,55 @@ test("a contributor adds a file and renames it, but can't rename or delete someo
   // Both selected: Delete waits for a selection that is all theirs
   await row("brief.txt").click({ modifiers: ["ControlOrMeta"] });
   await expect(remove).toBeDisabled();
+});
+
+test("the list of share links sorts by its headers and says where each linked folder is", async ({ page }) => {
+  await signInAsNewUser(page, "links");
+  const root = (await (await page.request.get("/api/auth/me")).json()).root_id as string;
+  const [teamAName, teamBName] = [`Team A ${unique()}`, `Team B ${unique()}`];
+  const teamA = await makeFolder(page, teamAName, root);
+  const teamB = await makeFolder(page, teamBName, root);
+  const sameA = await makeFolder(page, "XXX", teamA);
+  const sameB = await makeFolder(page, "XXX", teamB);
+  const top = await makeFolder(page, "Alpha", root);
+  const link = async (node: string) => (await (await page.request.post("/api/shares", { data: { node_id: node } })).json()).id as string;
+  for (const node of [sameA, sameB, top]) await link(node);
+
+  await page.goto("/shares");
+  const rows = page.locator("tr[data-row-id]");
+  await expect(rows).toHaveCount(3);
+  // The two folders called XXX are told apart by the folder they are in
+  const xxx = rows.filter({ hasText: "XXX" });
+  await expect(xxx).toHaveCount(2);
+  await expect(xxx.filter({ hasText: `My files/${teamAName}` })).toHaveCount(1);
+  await expect(xxx.filter({ hasText: `My files/${teamBName}` })).toHaveCount(1);
+  await expect(rows.filter({ hasText: "Alpha" }).locator("td").nth(1)).toHaveText("My files");
+
+  // Sorting by the name header, then the other way, and the choice is still there after a reload
+  const names = () =>
+    rows
+      .locator("td:first-child")
+      .allInnerTexts()
+      .then((all) => all.map((n) => n.trim().replace(/ \w+$/, "")));
+  await page.getByRole("columnheader", { name: "Name" }).getByRole("button").click();
+  await expect(page.getByRole("columnheader", { name: "Name" })).toHaveAttribute("aria-sort", "ascending");
+  expect((await names()).map((n) => n.split(" ")[0])).toEqual(["Alpha", "XXX", "XXX"]);
+  await page.getByRole("columnheader", { name: "Name" }).getByRole("button").click();
+  await expect(page.getByRole("columnheader", { name: "Name" })).toHaveAttribute("aria-sort", "descending");
+  expect((await names()).map((n) => n.split(" ")[0])).toEqual(["XXX", "XXX", "Alpha"]);
+  await page.reload();
+  await expect(page.getByRole("columnheader", { name: "Name" })).toHaveAttribute("aria-sort", "descending");
+
+  // By location, the folders called XXX sit next to each other in the order of their folders
+  await page.getByRole("columnheader", { name: "Location" }).getByRole("button").click();
+  await expect(page.getByRole("columnheader", { name: "Location" })).toHaveAttribute("aria-sort", "ascending");
+  const places = await rows.locator("td:nth-child(2)").allInnerTexts();
+  expect(places).toEqual([...places].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })));
+
+  // A click on the place opens that folder
+  await xxx
+    .filter({ hasText: `My files/${teamBName}` })
+    .getByRole("link")
+    .click();
+  await expect(page).toHaveURL(new RegExp(`/files/${teamB}$`));
 });

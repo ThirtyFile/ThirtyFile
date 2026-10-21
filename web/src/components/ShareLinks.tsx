@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CopyIcon, ExternalLinkIcon, FolderOpenIcon, HistoryIcon, PencilIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { DataTable, type Column } from "@/components/DataTable";
 import { toast } from "sonner";
@@ -9,18 +9,35 @@ import { api, type ShareFilter, type ShareInfo } from "@/api";
 import { keys } from "@/api/queryKeys";
 import { FileIcon } from "@/components/FileIcon";
 import { Frame, ToolButton, ToolSeparator, type FrameProps } from "@/components/Frame";
-import { EditShareDialog, LinksOffNotice, LocalLinkWarning, deleteLinkQuestion, sharePath, shareSpace, useShareLink } from "@/components/ShareDialog";
+import { EditShareDialog, LinksOffNotice, LocalLinkWarning, deleteLinkQuestion, sharePath, useShareLink } from "@/components/ShareDialog";
+import { SHARE_SORT_KEYS, type ShareSort, type ShareSortKey, sortShares, shareLocation, sharePathOfItem } from "@/components/shareList";
 import { confirm } from "@/lib/confirm";
 import { copyAndSay, formatDate, formatDateTime } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ShareAccessLog } from "@/components/logs/ShareAccessLog";
-import { useMe } from "@/lib/session";
+import { useMe, usePersisted } from "@/lib/session";
 import { t, tc } from "@/lib/i18n";
 
 /** What a link in someone else's personal space shows instead of its item's name (administrators only delete them) */
 const privateItem = () => t("In someone else's personal space");
 
 const linkName = (s?: ShareInfo) => (s?.private ? privateItem() : s?.node_name);
+
+/** The place of a link's item. It is cut at the front when it is long, so the folder and the one above it stay in view, and opens the folder when it may be
+ * opened. `bdi` keeps the order of the names right in a text that is laid out from the right */
+function Location({ share, text }: { share: ShareInfo; text: string }) {
+  const name = (
+    <span className="block max-w-[320px] truncate text-left [direction:rtl]">
+      <bdi>{text}</bdi>
+    </span>
+  );
+  if (!share.location_id || share.private) return name;
+  return (
+    <Link to={`/files/${share.location_id}`} className="hover:text-foreground hover:underline" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+      {name}
+    </Link>
+  );
+}
 
 /** A table of share links with copy, open, edit, delete and the access log */
 export function ShareLinks({
@@ -46,7 +63,10 @@ export function ShareLinks({
   const { link: shareLink, local, admin } = useShareLink();
   // Access log dialog: a specific link, or "all" for all my links
   const [accessOf, setAccessOf] = useState<string | null>(null);
-  const items = q.data ?? [];
+  // The order of the table, kept for the next visit (newest link first until a header is clicked)
+  const [sort, setSort] = usePersisted<ShareSort>("tf-share-sort", { key: "created", order: "desc" }, (v) => SHARE_SORT_KEYS.includes(v.key) && (v.order === "asc" || v.order === "desc"));
+  const onSort = (key: string) => setSort({ key: key as ShareSortKey, order: sort.key === key && sort.order === "asc" ? "desc" : "asc" });
+  const items = useMemo(() => sortShares(q.data ?? [], sort, me), [q.data, sort, me]);
   const current = items.find((s) => s.id === selected);
   // A link in someone else's personal space, listed for an administrator: it can only be deleted
   const usable = current && !current.private ? current : undefined;
@@ -92,6 +112,7 @@ export function ShareLinks({
   const columns: Column<ShareInfo>[] = [
     {
       header: t("Name"),
+      sortKey: "name",
       cell: (s) => (
         <div className="flex max-w-[360px] items-center gap-[7px]">
           <FileIcon node={{ kind: s.node_kind, name: s.node_name, mime: "" }} className="size-4" />
@@ -99,12 +120,15 @@ export function ShareLinks({
         </div>
       ),
     },
-    ...(showOwner
-      ? ([
-          { header: t("Space"), className: "max-md:hidden", cellClassName: "text-muted-foreground", cell: (s) => shareSpace(s) },
-          { header: t("Created by"), cellClassName: "text-muted-foreground", cell: (s) => s.owner_name },
-        ] as Column<ShareInfo>[])
-      : []),
+    {
+      header: t("Location"),
+      sortKey: "location",
+      className: "max-md:hidden",
+      cellClassName: "text-muted-foreground",
+      title: (s) => sharePathOfItem(s, me),
+      cell: (s) => <Location share={s} text={shareLocation(s, me)} />,
+    },
+    ...(showOwner ? ([{ header: t("Created by"), sortKey: "owner", cellClassName: "text-muted-foreground", cell: (s) => s.owner_name }] as Column<ShareInfo>[]) : []),
     {
       header: t("Link"),
       cellClassName: "font-mono text-muted-foreground",
@@ -112,18 +136,21 @@ export function ShareLinks({
     },
     {
       header: t("Date created"),
+      sortKey: "created",
       className: "max-md:hidden",
       cellClassName: "text-muted-foreground",
       cell: (s) => formatDateTime(s.created_at),
     },
     {
       header: t("Expires"),
+      sortKey: "expires",
       className: "max-md:hidden",
       cellClassName: "text-muted-foreground",
       cell: (s) => (s.expires_at ? (s.expires_at * 1000 <= Date.now() ? t("Expired {date}", { date: formatDate(s.expires_at) }) : formatDate(s.expires_at)) : t("Never expires")),
     },
     {
       header: t("Downloads"),
+      sortKey: "downloads",
       cellClassName: "text-muted-foreground tabular-nums",
       cell: (s) => `${s.downloads}${s.max_downloads ? ` / ${s.max_downloads}` : ""}`,
     },
@@ -135,11 +162,13 @@ export function ShareLinks({
     },
     {
       header: t("Views"),
+      sortKey: "views",
       cellClassName: "text-muted-foreground tabular-nums",
       cell: (s) => s.views,
     },
     {
       header: t("Last accessed"),
+      sortKey: "accessed",
       className: "max-lg:hidden",
       cellClassName: "text-muted-foreground",
       cell: (s) => (s.last_access ? formatDateTime(s.last_access) : t("Not accessed yet")),
@@ -163,6 +192,8 @@ export function ShareLinks({
         loading={q.isLoading}
         error={q.error}
         onRetry={() => q.refetch()}
+        sort={sort}
+        onSort={onSort}
         selectedKey={selected}
         onSelect={setSelected}
         onOpen={(s) => !s.private && copy(s.id)}
@@ -183,6 +214,11 @@ export function ShareLinks({
               {usable && canOpenItem(usable) && (
                 <DropdownMenuItem onClick={() => navigate(current.node_kind === "folder" ? `/files/${current.node_id}` : `/view/${current.node_id}`)}>
                   <FolderOpenIcon /> {current.node_kind === "folder" ? t("Open folder") : t("Open file")}
+                </DropdownMenuItem>
+              )}
+              {usable && canOpenItem(usable) && usable.location_id && (
+                <DropdownMenuItem onClick={() => navigate(`/files/${usable.location_id}`)}>
+                  <FolderOpenIcon /> {t("Open file location")}
                 </DropdownMenuItem>
               )}
               {usable && (
