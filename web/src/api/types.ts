@@ -1443,6 +1443,12 @@ export interface ShareInfo {
   drive_kind: string;
   /** Owner of a personal space */
   drive_owner: string;
+  /** The folders above the item, from the top of its space down (the item itself is `node_name`) */
+  location_path: string[];
+  /** The path starts below the top of the space: a restricted folder above it is not the viewer's to see */
+  location_partial: boolean;
+  /** The folder the item is in, when the viewer may open it */
+  location_id: string | null;
   /** Folder links: visitors may upload files */
   allow_upload: boolean;
   /** Visitors can only upload, not see what is in the folder */

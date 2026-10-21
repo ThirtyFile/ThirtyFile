@@ -64,6 +64,18 @@ pub struct ShareInfo {
     drive_kind: String,
     /// Owner of a personal space, to tell "My files" of different people apart
     drive_owner: String,
+    /// The folder the item is in (not sent; `location_path` is made from it)
+    #[serde(skip)]
+    parent_id: Option<String>,
+    /// The folders above the item, from the top of its space down (the item itself is `node_name`): what tells `/ABC/XXX` from `/EFG/XXX`
+    #[sqlx(skip)]
+    location_path: Vec<String>,
+    /// The path starts below the top of the space: a restricted folder above it is not the viewer's to see
+    #[sqlx(skip)]
+    location_partial: bool,
+    /// The folder the item is in, when the viewer may open it (not when it is a restricted folder they can't see)
+    #[sqlx(skip)]
+    location_id: Option<String>,
     /// Folder links: visitors may upload files into the folder
     allow_upload: bool,
     /// Folder links: visitors can only upload, not see what is in the folder
@@ -90,7 +102,7 @@ const SHARE_COLS: &str = "s.id, s.node_id, s.password_hash IS NOT NULL AS has_pa
      s.views, s.last_access, s.owner_id, u.username AS owner_name, n.drive_id,
      COALESCE(d.name, '') AS drive_name, COALESCE(d.kind, '') AS drive_kind,
      COALESCE((SELECT username FROM users WHERE id = d.owner_id AND d.kind = 'personal'), '') AS drive_owner,
-     s.allow_upload, s.drop_only, s.allow_download";
+     n.parent_id, s.allow_upload, s.drop_only, s.allow_download";
 
 const SHARE_FROM: &str = "shares s JOIN nodes n ON n.id = s.node_id JOIN users u ON u.id = s.owner_id LEFT JOIN drives d ON d.id = n.drive_id";
 
@@ -261,7 +273,27 @@ pub async fn list(State(st): State<AppState>, user: User, Query(q): Query<ListQu
         .bind(now())
         .fetch_all(&mut *c)
         .await?;
+    let mut rows: Vec<ShareInfo> = rows;
+    locate(&mut c, &user, &mut rows).await?;
     Ok(Json(hide_private(&st, &mut c, &user, rows).await?))
+}
+
+/// Where each link's item is: the folders above it, in one query for all of them. In a space with restricted folders only the part of the path
+/// the viewer may see is given (the same rule as the lists of search results and recent files)
+async fn locate(conn: &mut SqliteConnection, user: &User, rows: &mut [ShareInfo]) -> AppResult<()> {
+    let parents: Vec<String> = rows.iter().filter_map(|s| s.parent_id.clone()).collect::<std::collections::HashSet<_>>().into_iter().collect();
+    let paths = tree::paths_of(conn, &parents).await?;
+    let drives: Vec<&str> = rows.iter().filter_map(|s| s.drive_id.as_deref()).collect::<std::collections::HashSet<_>>().into_iter().collect();
+    let restricted = tree::restricted_drives(conn, &drives).await?;
+    for s in rows {
+        let path = s.parent_id.as_ref().and_then(|p| paths.get(p)).map_or(&[][..], Vec::as_slice);
+        let start = if s.drive_id.as_deref().is_some_and(|d| restricted.contains(d)) { tree::visible_path_start(conn, user, path).await? } else { 0 };
+        s.location_partial = start > 0;
+        s.location_path = path[start..].iter().map(|c| c.name.clone()).collect();
+        // The folder itself is the viewer's to open unless every folder of the path is hidden from them
+        s.location_id = s.parent_id.clone().filter(|_| start == 0 || start < path.len());
+    }
+    Ok(())
 }
 
 /// Links an administrator may only revoke (in someone else's personal space), without their address or item
@@ -278,15 +310,20 @@ async fn hide_private(st: &AppState, conn: &mut SqliteConnection, user: &User, m
             s.id = handle(st, &s.id);
             s.node_id.clear();
             s.node_name.clear();
+            s.location_path.clear();
+            s.location_partial = false;
+            s.location_id = None;
             s.private = true;
         }
     }
     Ok(rows)
 }
 
-async fn share_info(conn: &mut SqliteConnection, id: &str) -> AppResult<ShareInfo> {
+async fn share_info(conn: &mut SqliteConnection, user: &User, id: &str) -> AppResult<ShareInfo> {
     let sql = format!("SELECT {SHARE_COLS} FROM {SHARE_FROM} WHERE s.id = ?");
-    Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(id).fetch_one(conn).await?)
+    let mut rows = vec![sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(id).fetch_one(&mut *conn).await?];
+    locate(conn, user, &mut rows).await?;
+    Ok(rows.remove(0))
 }
 
 #[derive(Deserialize)]
@@ -407,7 +444,7 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
     .bind(req.allow_download || req.drop_only)
     .execute(&mut *tx)
     .await?;
-    let info = share_info(&mut tx, &token).await?;
+    let info = share_info(&mut tx, &user, &token).await?;
     let mut options = Vec::new();
     if password.is_some() {
         options.push("password protected".to_string());
@@ -542,7 +579,7 @@ pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<Strin
     if !changes.is_empty() {
         logs::record_activity(&mut tx, &user, Some(&node), "share_update", &format!("/share/{id}: {}", changes.join(", "))).await?;
     }
-    let info = share_info(&mut tx, &id).await?;
+    let info = share_info(&mut tx, &user, &id).await?;
     tx.commit().await?;
     Ok(Json(info))
 }
@@ -1203,6 +1240,108 @@ mod tests {
         assert_eq!(links(&env, &amy, ListQuery { node_id: Some(report.clone()), ..Default::default() }).await, vec![theirs.id.clone()]);
         assert_eq!(links(&env, &amy, managed()).await, vec![theirs.id.clone()]);
         let _ = remove(&env, &amy, &theirs.id).await.unwrap();
+    }
+
+    /// The links of `user` as (name of the item, folders above it, whether the path starts below the top of the space)
+    async fn places(env: &testutil::TestEnv, user: &User, q: ListQuery) -> Vec<(String, Vec<String>, bool)> {
+        let Json(list) = super::list(State(env.st.clone()), user.clone(), Query(q)).await.unwrap();
+        let mut places: Vec<_> = list.into_iter().map(|s| (s.node_name, s.location_path, s.location_partial)).collect();
+        places.sort();
+        places
+    }
+
+    #[tokio::test]
+    async fn a_link_says_which_folders_its_item_is_in_so_same_named_items_can_be_told_apart() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let abc = env.folder(&amy, amy.root(), "ABC").await;
+        let efg = env.folder(&amy, amy.root(), "EFG").await;
+        let xxx_abc = env.folder(&amy, &abc, "XXX").await;
+        let xxx_efg = env.folder(&amy, &efg, "XXX").await;
+        let reports = env.folder(&amy, amy.root(), "Reports").await;
+        let year = env.folder(&amy, &reports, "2026").await;
+        let quarter = env.file(&amy, &year, "q1.txt").await;
+        let top = env.file(&amy, amy.root(), "top.txt").await;
+        for node in [&xxx_abc, &xxx_efg, &quarter, &top] {
+            let Json(created) = create(State(env.st.clone()), amy.clone(), Json(link(node))).await.unwrap();
+            // The answer to creating a link has it too
+            assert!(created.location_id.is_some(), "the folder to open is given");
+            assert_eq!(
+                created.location_path.len(),
+                if node == &top {
+                    0
+                } else if node == &quarter {
+                    2
+                } else {
+                    1
+                }
+            );
+        }
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            places(&env, &amy, ListQuery::default()).await,
+            vec![
+                ("XXX".to_string(), s(&["ABC"]), false),
+                ("XXX".to_string(), s(&["EFG"]), false),
+                ("q1.txt".to_string(), s(&["Reports", "2026"]), false),
+                ("top.txt".to_string(), s(&[]), false),
+            ]
+        );
+        // Renaming a folder above changes what is said, and nothing else is needed
+        let _ = crate::access::rename(&env.st, &amy, &abc, "ABC-old").await;
+        assert!(places(&env, &amy, ListQuery::default()).await.contains(&("XXX".to_string(), s(&["ABC-old"]), false)));
+    }
+
+    #[tokio::test]
+    async fn a_link_in_someone_elses_personal_space_gives_no_path_and_a_restricted_folder_is_left_out_of_it() {
+        let env = testutil::env().await;
+        let admin = env.admin().await;
+        let amy = env.user("amy", true).await;
+        let inbox = env.folder(&amy, amy.root(), "Inbox").await;
+        let secret = env.folder(&amy, &inbox, "Salaries").await;
+        let _ = create(State(env.st.clone()), amy.clone(), Json(link(&secret))).await.unwrap();
+        // The administrator may only revoke it: no name, and no path either
+        let seen = places(&env, &admin, managed()).await;
+        assert_eq!(seen, vec![(String::new(), Vec::new(), false)]);
+        let Json(private) = super::list(State(env.st.clone()), admin.clone(), Query(managed())).await.unwrap();
+        assert!(private.iter().all(|s| s.private && s.location_id.is_none()), "not even the folder it is in is given");
+
+        // In a space with a restricted folder, a person who reaches an item below it only by a link-sized grant sees the path from where they can
+        let owner = env.user("owner", true).await;
+        let member = env.user("member", true).await;
+        let root = {
+            let mut c = env.st.db.acquire().await.unwrap();
+            let (_, root) = crate::db::create_drive(&mut c, "Department space", "team", owner.id, 0, "local").await.unwrap();
+            crate::db::add_grant(&mut c, &root, "user", owner.id, "owner", Some(owner.id), None).await.unwrap();
+            root
+        };
+        env.grant(&root, &member, "manager").await;
+        let department = env.folder(&owner, &root, "Department").await;
+        let payroll = env.folder(&owner, &department, "Payroll").await;
+        let inner = env.folder(&owner, &payroll, "2026").await;
+        let sheet = env.file(&owner, &inner, "sheet.txt").await;
+        let minutes = env.file(&owner, &department, "minutes.txt").await;
+        let _ = create(State(env.st.clone()), owner.clone(), Json(link(&sheet))).await.unwrap();
+        let _ = create(State(env.st.clone()), owner.clone(), Json(link(&minutes))).await.unwrap();
+        sqlx::query("UPDATE nodes SET restricted = 1 WHERE id = ?").bind(&payroll).execute(&env.st.db).await.unwrap();
+        env.grant(&sheet, &member, "viewer").await;
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        // The owner sees both whole paths
+        assert_eq!(
+            places(&env, &owner, ListQuery::default()).await,
+            vec![("minutes.txt".to_string(), s(&["Department"]), false), ("sheet.txt".to_string(), s(&["Department", "Payroll", "2026"]), false)]
+        );
+        // The manager of the space reaches the sheet only through its own grant: the path starts below the folders they can't see
+        let mine = places(&env, &member, managed()).await;
+        assert!(mine.contains(&("minutes.txt".to_string(), s(&["Department"]), false)), "{mine:?}");
+        let sheet_place = mine.iter().find(|p| p.0 == "sheet.txt").unwrap_or_else(|| panic!("{mine:?}"));
+        assert!(sheet_place.2 && !sheet_place.1.contains(&"Payroll".to_string()) && !sheet_place.1.contains(&"Department".to_string()), "{sheet_place:?}");
+        // Whose folder it is to open: the owner's, and not the manager's when the folder is one of the hidden ones
+        let id_of = |list: Vec<ShareInfo>, name: &str| list.into_iter().find(|s| s.node_name == name).map(|s| s.location_id);
+        let Json(owners) = super::list(State(env.st.clone()), owner.clone(), Query(ListQuery::default())).await.unwrap();
+        assert_eq!(id_of(owners, "sheet.txt"), Some(Some(inner.clone())));
+        let Json(managers) = super::list(State(env.st.clone()), member.clone(), Query(managed())).await.unwrap();
+        assert_eq!(id_of(managers, "sheet.txt"), Some(None), "the folder is one the manager can't see");
     }
 
     #[tokio::test]

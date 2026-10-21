@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import { ErrorState } from "@/components/ErrorState";
 import { RowMenuArea } from "@/components/RowMenuArea";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -14,6 +15,8 @@ export interface Column<T> {
   cell(row: T): ReactNode;
   /** Tooltip when hovering a cell */
   title?(row: T): string | undefined;
+  /** What the column sorts by: its header becomes a button (the table has `onSort`) */
+  sortKey?: string;
 }
 
 const TH = "sticky top-0 z-[1] h-[30px] border-b bg-background px-2.5 text-left font-normal text-muted-foreground";
@@ -46,6 +49,9 @@ export function DataTable<T>(p: {
   /** Compact list with shorter rows */
   compact?: boolean;
   rowClassName?(row: T): string | false | undefined;
+  /** How the rows are sorted now, and a column header with a `sortKey` was clicked (the rows are sorted by the caller) */
+  sort?: { key: string; order: "asc" | "desc" };
+  onSort?(key: string): void;
 }) {
   const selected = p.selectedKey === null ? null : (p.rows.find((r) => p.rowKey(r) === p.selectedKey) ?? null);
   const list = useSelectableList({
@@ -75,11 +81,27 @@ export function DataTable<T>(p: {
         <table {...list.listProps("grid", p.label)} className={cn("w-full min-w-[560px] border-collapse text-xs", p.fixed ? "table-fixed" : "whitespace-nowrap")}>
           <thead>
             <tr role="row">
-              {p.columns.map((c, i) => (
-                <th key={i} role="columnheader" className={cn(TH, i === 0 && "pl-3", c.className)}>
-                  {c.header}
-                </th>
-              ))}
+              {p.columns.map((c, i) => {
+                const sortable = !!c.sortKey && !!p.onSort;
+                const active = sortable && p.sort?.key === c.sortKey;
+                return (
+                  <th
+                    key={i}
+                    role="columnheader"
+                    className={cn(TH, i === 0 && "pl-3", sortable && "hover:bg-muted", c.className)}
+                    aria-sort={active ? (p.sort!.order === "asc" ? "ascending" : "descending") : undefined}
+                  >
+                    {sortable ? (
+                      <button type="button" onClick={() => p.onSort!(c.sortKey!)} className="flex h-full w-full min-w-0 items-center gap-1 hover:text-foreground">
+                        <span className="truncate">{c.header}</span>
+                        {active && (p.sort!.order === "asc" ? <ChevronUpIcon aria-hidden className="size-3 shrink-0" /> : <ChevronDownIcon aria-hidden className="size-3 shrink-0" />)}
+                      </button>
+                    ) : (
+                      c.header
+                    )}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
