@@ -101,6 +101,7 @@ test("formula bar and name box keep candidate selection inside an input method",
 
 test("cutting cells from another workbook preserves unrelated destination cells", async ({ page }) => {
   await signInAsNewUser(page, "cut-books");
+  expect((await page.request.put("/api/auth/style", { data: { style: "windows" } })).ok()).toBe(true);
   const dir = await makeFolder(page, "Cut workbooks");
   const a = await uploadFile(page, dir, "source.xlsx", Buffer.from(await buildWorkbook([{ name: "Source", rows: '<row r="1"><c r="A1" t="inlineStr"><is><t>from A</t></is></c></row>' }])));
   const b = await uploadFile(
@@ -119,14 +120,18 @@ test("cutting cells from another workbook preserves unrelated destination cells"
   await path.fill(`${new URL(page.url()).origin}/view/${b}`);
   await path.press("Enter");
   await page.getByRole("button", { name: "Edit workbook", exact: true }).click();
+  await expect(office(page).getByRole("button", { name: "Save", exact: true })).toBeVisible();
   await expect(office(page)).toHaveAttribute("data-office-ready", "true", { timeout: 120_000 });
   await sheetGo(page, "B1");
+  await office(page).getByRole("textbox", { name: "Office editor text input" }).focus();
   await office(page)
     .getByRole("textbox", { name: "Office editor text input" })
     .evaluate((el, text) => {
-      const data = new DataTransfer();
-      data.setData("text/plain", text);
-      el.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: data }));
+      // Firefox protects DataTransfer contents on constructed clipboard events. Supply this
+      // test's own payload explicitly; real user paste events carry their trusted clipboard data.
+      const event = new ClipboardEvent("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "clipboardData", { value: { getData: (type: string) => (type === "text/plain" ? text : ""), files: [] } });
+      el.dispatchEvent(event);
     }, copied.text);
   await expect.poll(() => sheetRead(page, "A1:B1")).toEqual([["keep B", "from A"]]);
 });

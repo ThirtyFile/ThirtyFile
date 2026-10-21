@@ -222,6 +222,7 @@ test("closing an Office draft discards it and terminates its dedicated Worker", 
     };
   });
   await signIn(page);
+  expect((await page.request.put("/api/auth/style", { data: { style: "windows" } })).ok()).toBe(true);
   const folder = await makeFolder(page, "Office lifetime");
   const id = await uploadFile(page, folder, "retire.docx", Buffer.from(await buildDocx(["Original"])));
   await openOffice(page, id, "word");
@@ -237,6 +238,7 @@ test("closing an Office draft discards it and terminates its dedicated Worker", 
 
 test("saving a detached Office tab drains typing into its own file", async ({ page }) => {
   await signIn(page);
+  expect((await page.request.put("/api/auth/style", { data: { style: "windows" } })).ok()).toBe(true);
   const folder = await makeFolder(page, "Office detached save");
   const id = await uploadFile(page, folder, "background.docx", Buffer.from(await buildDocx(["Original"])));
   await openOffice(page, id, "word");
@@ -297,4 +299,22 @@ test("readonly Office previews scroll and switch sheets and slides without editi
     await expect(officeCall(page, "execute", "undo", {})).rejects.toThrow("read-only");
     if (id === sheet) expect((await officeCall(page, "getState")).engine.content.viewport.values[0][0]).toBe("22");
   }
+});
+
+test("PPT toolbar actions preserve the original slideshow shortcut", async ({ page }) => {
+  await signIn(page);
+  const folder = await makeFolder(page, "PPT toolbar shortcut");
+  const id = await uploadFile(page, folder, "shortcut.pptx", Buffer.from(await buildPresentation()));
+  await openOffice(page, id, "slides");
+  await office(page).getByRole("button", { name: "New Slide", exact: true }).click();
+  const agent = office(page).getByRole("textbox", { name: "Office editor text input", exact: true });
+  await agent.press("F5");
+  await expect
+    .poll(async () => {
+      const showing = (await officeCall(page, "inspectUI")).result.showing;
+      return showing !== null && typeof showing === "object";
+    })
+    .toBe(true);
+  await agent.press("Escape");
+  await expect.poll(async () => (await officeCall(page, "inspectUI")).result.showing).toBeNull();
 });

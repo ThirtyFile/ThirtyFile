@@ -525,23 +525,23 @@ packages:
     engines: {node: '>= 20.19.0'}
 
   '@office/sdk@file:vendor/office-sdk-0.1.0-alpha.1.tgz':
-    resolution: {integrity: sha512-dK92qDqrZ4vceDG/cP4gYlDnDse7afG8ioTr+QznVoneJ+GZzr7fAEAZKEORdNAGutbEntbJzCRBbwLLI0nhPw==, tarball: file:vendor/office-sdk-0.1.0-alpha.1.tgz}
+    resolution: {integrity: sha512-/v8/R1B9BRBmakqAnpqixFcXNccOygAJ1kKqWobiEsusRw8zrKoxAYzvzNPf9MIxe5V2vSsU5li8YFmp/q4RHQ==, tarball: file:vendor/office-sdk-0.1.0-alpha.1.tgz}
     version: 0.1.0-alpha.1
 
   '@office/sheets@file:vendor/office-sheets-0.1.0-alpha.1.tgz':
-    resolution: {integrity: sha512-glamZynz3cRO05vYC24w2gMB4mpxrPaWFdTHjjY4n/5FjPZpHFInV3AjYH4fkvtq6TaWdQo3/Fivewj7k6/AGg==, tarball: file:vendor/office-sheets-0.1.0-alpha.1.tgz}
+    resolution: {integrity: sha512-1t/4MloL0XSbJt4V3/YwJWqTyVn6Z1vhls0yVOatJsLw+604afoPpCRbZLlAV33kRmpYPYsiK1phAuVe+/rwow==, tarball: file:vendor/office-sheets-0.1.0-alpha.1.tgz}
     version: 0.1.0-alpha.1
     peerDependencies:
       '@office/sdk': 0.1.0-alpha.1
 
   '@office/slides@file:vendor/office-slides-0.1.0-alpha.1.tgz':
-    resolution: {integrity: sha512-wPL+QbhG3M7H727OQulRKMVHbu6zkuOtR8i26ZrOZxrfSasLApe1GP1W4XRD4GTJGHcOVQ6kH2XRgPwX1o95OA==, tarball: file:vendor/office-slides-0.1.0-alpha.1.tgz}
+    resolution: {integrity: sha512-O/Ap2Sy2jmlqXcEEmzypyUGez7UJdAaaU0YJdMg5CYDRI7/130MC63BB5Lzy6nRV9oMrxYMuJlaIyHtFn8ycnA==, tarball: file:vendor/office-slides-0.1.0-alpha.1.tgz}
     version: 0.1.0-alpha.1
     peerDependencies:
       '@office/sdk': 0.1.0-alpha.1
 
   '@office/word@file:vendor/office-word-0.1.0-alpha.1.tgz':
-    resolution: {integrity: sha512-5EcxC2RSkTtdoSEWLgt/YWRIrEAEVWSYkLjIpqY0EQfxXMo17dDp+TOMEnkegGc2ETfw54SJjVwUBVb2ltC6jA==, tarball: file:vendor/office-word-0.1.0-alpha.1.tgz}
+    resolution: {integrity: sha512-ibIOTqQa1sd27BZx8d4Zcn0NoI0eOwMQZxWNEjSYg38l4j2nxoh0OXPLZNXg48iVFUs61p6oVwQIRl3S0YcfJA==, tarball: file:vendor/office-word-0.1.0-alpha.1.tgz}
     version: 0.1.0-alpha.1
     peerDependencies:
       '@office/sdk': 0.1.0-alpha.1

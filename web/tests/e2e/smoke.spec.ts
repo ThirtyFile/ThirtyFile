@@ -26,6 +26,8 @@ test("sign in, upload, preview and download", async ({ page }) => {
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.waitForURL(/\/files/);
+  expect((await page.request.put("/api/auth/style", { data: { style: "windows" } })).ok()).toBe(true);
+  await page.evaluate(() => localStorage.setItem("tf-view", JSON.stringify("list")));
 
   // Upload both files to a new folder in "My files" (which holds the other tests' folders, more than fit on screen)
   await page.goto(`/files/${await makeFolder(page, "Smoke")}`);
