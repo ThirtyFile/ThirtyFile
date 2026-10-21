@@ -318,3 +318,45 @@ test("PPT toolbar actions preserve the original slideshow shortcut", async ({ pa
   await agent.press("Escape");
   await expect.poll(async () => (await officeCall(page, "inspectUI")).result.showing).toBeNull();
 });
+
+test("Office controls wait for the actual file before accepting input", async ({ page }) => {
+  await signIn(page);
+  const folder = await makeFolder(page, "Office pending load");
+  const files = [
+    ["word", "pending.docx", await buildDocx(["Actual document"])],
+    ["sheets", "pending.xlsx", await buildWorkbook([{ name: "Actual", rows: '<row r="1"><c r="A1"><v>123</v></c></row>' }])],
+    ["slides", "pending.pptx", await buildPresentation(2)],
+  ] as const;
+  for (const [kind, name, bytes] of files) {
+    const id = await uploadFile(page, folder, name, Buffer.from(bytes));
+    await page.goto(`/view/${id}`);
+    await readyOffice(page);
+    for (const action of [kind === "word" ? "Edit document" : kind === "sheets" ? "Edit workbook" : "Edit presentation", "Reload latest version"]) {
+      let release!: () => void;
+      let received!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      const requested = new Promise<void>((resolve) => (received = resolve));
+      const url = `**/api/files/${id}/content`;
+      await page.route(url, async (route) => {
+        received();
+        await gate;
+        await route.continue();
+      });
+      try {
+        await page.getByRole("button", { name: action, exact: true }).click();
+        await requested;
+        await expect(office(page)).toHaveAttribute("data-office-ready", "false");
+        await expect(office(page).getByRole("textbox", { name: "Office editor text input", exact: true })).toBeHidden();
+      } finally {
+        release();
+      }
+      await readyOffice(page);
+      await page.unroute(url);
+      await expect(office(page).getByRole("textbox", { name: "Office editor text input", exact: true })).toBeVisible();
+    }
+    const state = await officeCall(page, "getState");
+    if (kind === "word") expect(state.engine.content.text).toContain("Actual document");
+    if (kind === "sheets") expect(state.engine.content.viewport.values[0][0]).toBe("123");
+    if (kind === "slides") expect(state.engine.content.navigation.items).toHaveLength(2);
+  }
+});

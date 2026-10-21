@@ -116,7 +116,15 @@ export default function OfficeWorkspace(props: {
             {t("Reload latest version")}
           </Button>
           <span role="status">
-            {!state ? t("Loading…") : state.saving ? t("Saving…") : !state.revision ? t("Local document: download to keep this file") : state.dirty ? t("Unsaved changes") : t("Saved")}
+            {!state || state.loading
+              ? t("Loading…")
+              : state.saving
+                ? t("Saving…")
+                : !state.revision
+                  ? t("Local document: download to keep this file")
+                  : state.dirty
+                    ? t("Unsaved changes")
+                    : t("Saved")}
           </span>
           <span className="flex-1" />
           {props.onExit && (
@@ -133,8 +141,9 @@ export default function OfficeWorkspace(props: {
           </div>
         </div>
       ) : null}
-      <div ref={host} className={error && !state ? "hidden" : "relative min-h-0 min-w-0 flex-1 overflow-hidden"} />
-      {!state && !error && (
+      {/* The initial empty surface and a document being replaced cannot accept input until open completes. */}
+      <div ref={host} style={{ visibility: !state || state.loading ? "hidden" : undefined }} className={error && !state ? "hidden" : "relative min-h-0 min-w-0 flex-1 overflow-hidden"} />
+      {(!state || state.loading) && !error && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
           <Loader2Icon className="size-6 animate-spin text-muted-foreground" />
         </div>
