@@ -360,3 +360,35 @@ test("Office controls wait for the actual file before accepting input", async ({
     if (kind === "slides") expect(state.engine.content.navigation.items).toHaveLength(2);
   }
 });
+
+test("packaged editors omit upstream Discord promotion", async ({ page }) => {
+  await signIn(page);
+  const folder = await makeFolder(page, "Office community links");
+  const files = [
+    ["word", "community.docx", await buildDocx(["Hosted document"])],
+    ["sheets", "community.xlsx", await buildWorkbook([{ name: "Hosted", rows: "" }])],
+    ["slides", "community.pptx", await buildPresentation()],
+  ] as const;
+  const noDiscord = () =>
+    expect
+      .poll(() =>
+        office(page)
+          .locator("[data-office-dom]")
+          .evaluate((element: any) => /discord/i.test(JSON.stringify(element.model))),
+      )
+      .toBe(false);
+  for (const [kind, name, bytes] of files) {
+    const id = await uploadFile(page, folder, name, Buffer.from(bytes));
+    await openOffice(page, id, kind);
+    if (kind === "word") await officeCall(page, "execute", "ui.language", { value: "en" });
+    await noDiscord();
+    if (kind === "word") {
+      await office(page).locator('[data-office-chrome] [data-id="tab:Help"]').click();
+      await expect(office(page).getByRole("button", { name: "Commands", exact: true })).toBeVisible();
+      await noDiscord();
+    }
+    await officeCall(page, "execute", kind === "slides" ? "app.about" : "ui.dialog", kind === "slides" ? {} : { name: "about" });
+    await expect(office(page).getByRole("dialog")).toBeVisible();
+    await noDiscord();
+  }
+});
