@@ -535,7 +535,7 @@ packages:
       '@office/sdk': 0.1.0-alpha.1
 
   '@office/slides@file:vendor/office-slides-0.1.0-alpha.1.tgz':
-    resolution: {integrity: sha512-tBdmJNSdGuPjaJAvyWssD9eOq8QO8Rben7oKklJLjpTFimoBwNK36hms6r6DrjysTc+htfz+vgqr7vZOShiW2g==, tarball: file:vendor/office-slides-0.1.0-alpha.1.tgz}
+    resolution: {integrity: sha512-ofGlugYmTjbU0awKQbVWK1xzPNfu++c87gcYmNm59tQDI0moiYZM/bMJMAs7wKn2Tt5xMyRQTu8aQdTuuBM7Kg==, tarball: file:vendor/office-slides-0.1.0-alpha.1.tgz}
     version: 0.1.0-alpha.1
     peerDependencies:
       '@office/sdk': 0.1.0-alpha.1

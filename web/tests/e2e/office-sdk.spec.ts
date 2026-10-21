@@ -421,6 +421,13 @@ test("packaged editors omit upstream branding and promotion and expose legal not
       for (const pageName of ["home", "new", "account", "saveAs"]) {
         await officeCall(page, "execute", "app.backstage", { page: pageName });
         await noPromotion();
+        await expect
+          .poll(() =>
+            office(page)
+              .locator("[data-office-dom]")
+              .evaluate((element: any) => JSON.stringify(element.model).includes("Office JS SDK 0.8.0")),
+          )
+          .toBe(false);
       }
       await expect(officeCall(page, "execute", "app.links", {})).rejects.toThrow("Community links are not available");
     }

@@ -1,6 +1,6 @@
 {
   "version": "0.1.0-alpha.1",
-  "createdAt": "2026-10-21T09:09:32.101Z",
+  "createdAt": "2026-10-21T09:26:10.362Z",
   "packages": [
     {
       "name": "@office/sdk",
@@ -27,8 +27,8 @@
       "name": "@office/slides",
       "version": "0.1.0-alpha.1",
       "file": "office-slides-0.1.0-alpha.1.tgz",
-      "bytes": 15224011,
-      "sha256": "9861e3a524f523b186596d2d0965c2157bde0d9cde5763bba925dd937a2e4885"
+      "bytes": 15223933,
+      "sha256": "43d13f4e501864b4829aecdf42845d116dcdbcc91ef7630c3db2f5694da3fa7c"
     }
   ]
 }
