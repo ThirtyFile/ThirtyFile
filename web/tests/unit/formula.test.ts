@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { Calculator, checkFormula, dateToSerial, evaluateAt, parseNumber, serialToDate, shiftFormula, toScalar } from "@/ooxml/xlsx/formula";
 import { key, parseCellName } from "@/ooxml/xlsx/model";
 import { sheet, workbook } from "./sheet";

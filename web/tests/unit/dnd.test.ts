@@ -1,5 +1,5 @@
 // Dragging items onto folders (lib/dnd.ts): what a drop carries, moving or copying, and a large folder's span
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vite-plus/test";
 import { QueryClient } from "@tanstack/react-query";
 import type { DragEvent } from "react";
 import type { FolderSpan } from "@/lib/span";

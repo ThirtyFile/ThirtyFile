@@ -1,5 +1,5 @@
 // The link from the version an administrator sees to that release's notes (lib/version.ts)
-import { expect, test } from "vitest";
+import { expect, test } from "vite-plus/test";
 import { releaseNotesUrl } from "@/lib/version";
 
 test("a release links to its notes on GitHub", () => {

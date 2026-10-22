@@ -1,5 +1,5 @@
 import JSZip from "jszip";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { partAllowed } from "@/components/docx/session";
 
 function opened() {

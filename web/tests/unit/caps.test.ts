@@ -1,6 +1,6 @@
 // What the menus offer, as the server allows it: contributors change only what they added, and managing access needs a
 // manager who may share (the server's tree::allows and drives::can_manage_node)
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import type { Me } from "@/api";
 import { capsFor, capsOf } from "@/lib/drives";
 

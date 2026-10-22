@@ -1,7 +1,7 @@
 // Keeping a Word document's content when it is edited: characters people make themselves (private use, U+E000…) are
 // never taken for the editor's selection marks, bookmarks stay when the text after them goes, text typed into an
 // empty paragraph gets only formatting the view shows, and lists in Strict documents are linked as Strict ones
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { attr } from "@/ooxml/core/package";
 import { originalPieces, planEdits, readEdits, saveEdits } from "@/ooxml/docx/edit";
 import { applyFmt, AUTO_COLOR, formatRange, hasMarks, MARK_END, MARK_START } from "@/ooxml/docx/formatOps";

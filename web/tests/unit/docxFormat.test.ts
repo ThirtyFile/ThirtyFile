@@ -1,6 +1,6 @@
 // Formatting text in a Word document: character formatting the view changed written into the runs as a difference,
 // and font, font size, paragraph style, alignment and spacing applied between the editor's two marks
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { attr } from "@/ooxml/core/package";
 import { originalPieces, planEdits, readEdits, saveEdits, type FmtOf } from "@/ooxml/docx/edit";
 import { applyFmt, formatRange, MARK_END, MARK_START } from "@/ooxml/docx/formatOps";

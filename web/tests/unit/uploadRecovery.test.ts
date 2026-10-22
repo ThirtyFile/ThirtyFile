@@ -1,5 +1,5 @@
 // What is kept to recover interrupted uploads after a reload (lib/uploadRecovery.ts)
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vite-plus/test";
 import type { UploadRecord } from "@/lib/uploadRecovery";
 
 /** The module as a page loaded afresh in this tab has it */

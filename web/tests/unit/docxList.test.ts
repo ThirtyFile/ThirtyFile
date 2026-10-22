@@ -1,6 +1,6 @@
 // Lists in a Word document: bulleted and numbered lists made the way Word makes them (definitions like Word's own,
 // added to the numbering part, which is made when missing), turned off, and moved a level in or out
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { attr } from "@/ooxml/core/package";
 import { MARK_END, MARK_START } from "@/ooxml/docx/formatOps";
 import { formatList, listKind, type ListParts } from "@/ooxml/docx/listOps";

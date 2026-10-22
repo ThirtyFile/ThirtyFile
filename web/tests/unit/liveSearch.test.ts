@@ -1,5 +1,5 @@
 // Search as you type: text an input method is still composing (Zhuyin, Pinyin, Japanese, Korean) is never searched
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vite-plus/test";
 import { liveSearch } from "@/lib/liveSearch";
 
 describe("live search", () => {

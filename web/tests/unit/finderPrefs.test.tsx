@@ -1,7 +1,7 @@
 // Local Mac window preferences never reach another account or the Windows column store.
 import { act, useLayoutEffect } from "react";
 import { createRoot } from "react-dom/client";
-import { expect, test } from "vitest";
+import { expect, test } from "vite-plus/test";
 import type { Me } from "@/api";
 import { MeContext } from "@/lib/session";
 import { StyleChoiceContext } from "@/lib/style";

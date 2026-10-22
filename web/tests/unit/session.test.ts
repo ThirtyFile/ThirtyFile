@@ -1,7 +1,7 @@
 // Saved preferences: stored values of the wrong shape are ignored, and every user of a key sees a change at once
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { sameShape, usePersisted } from "@/lib/session";
 import { validTabs } from "@/tabs";
 

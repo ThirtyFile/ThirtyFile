@@ -5,7 +5,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vite-plus/test";
 import { FileIcon, type FileCategory } from "@/components/FileIcon";
 import { StyleKitContext } from "@/components/style";
 import { macKit } from "@/components/style/mac";

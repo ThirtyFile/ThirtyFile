@@ -1,5 +1,5 @@
 // Folders in pages: a newer first page while files are uploaded
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { QueryClient, QueryObserver, type InfiniteData } from "@tanstack/react-query";
 import type { CursorPage } from "@/api";
 import { allItems, refreshFirstPage, withFirstPage } from "@/lib/pages";

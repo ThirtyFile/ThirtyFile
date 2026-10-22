@@ -1,6 +1,6 @@
 // Saving a spreadsheet from the editor (components/sheet/save.ts): what is saved is the workbook as it was when saving
 // started; edits made while it uploads stay unsaved, and a save that fails changes nothing
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vite-plus/test";
 import { api, type Node } from "@/api";
 import type { Session } from "@/components/sheet/session";
 import { saveSession } from "@/components/sheet/save";

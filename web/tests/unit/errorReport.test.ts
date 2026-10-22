@@ -1,6 +1,6 @@
 // Reporting errors to the server's error log (lib/errorReport.ts): what a report holds, and that reporting stays
 // bounded and out of the way
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vite-plus/test";
 import { ApiError } from "@/api";
 import { errorFromBody } from "@/api/client";
 import { describe as describeError, pageRoute, report, reportShown, resetErrorReporting, worthReporting, type ErrorReport } from "@/lib/errorReport";

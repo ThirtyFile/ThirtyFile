@@ -1,5 +1,5 @@
 // Compress and extract tasks: which files offer "Extract all", and the progress shown while a task runs
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { isZip } from "@/components/FileIcon";
 import { jobPercent } from "@/lib/jobs";
 

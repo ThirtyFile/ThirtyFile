@@ -1,6 +1,6 @@
 // Headers and footers of a Word document: listing those the sections show, adding one to a document without, and
 // editing one's text and formatting the way the body's is edited
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { attr } from "@/ooxml/core/package";
 import { originalPieces, planEdits, saveEdits } from "@/ooxml/docx/edit";
 import { formatRange, MARK_END, MARK_START } from "@/ooxml/docx/formatOps";

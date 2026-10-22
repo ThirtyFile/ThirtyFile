@@ -1,7 +1,7 @@
 // Formats, plurals and sorting in each of the interface's languages. The language is decided when the modules load,
 // so each test imports fresh copies after choosing it. Chinese and Japanese expectations come from Intl itself or from
 // the dictionaries (no translations in the tests).
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vite-plus/test";
 import { formatCell, setFormatLocale } from "@/ooxml/core/numfmt";
 
 type Lang = "en" | "zh-TW" | "zh-CN" | "ja";

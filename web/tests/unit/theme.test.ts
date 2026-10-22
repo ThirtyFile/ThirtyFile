@@ -1,5 +1,5 @@
 // The appearance is applied when the app loads, even when the inline script in index.html didn't run (lib/theme.ts)
-import { beforeEach, expect, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vite-plus/test";
 
 /** The module as a freshly loaded page has it, with the system in dark mode or not */
 async function load(systemDark: boolean) {

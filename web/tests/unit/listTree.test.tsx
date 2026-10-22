@@ -2,7 +2,7 @@
 // the rows in view need, and the list with its triangles and keys
 import { act, useMemo, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vite-plus/test";
 import type { FileSource, Node } from "@/api";
 import { FileList } from "@/components/FileList";
 import { flatten, partsFor, shownByFolder, type Branch, type ListTreeView } from "@/components/fileList/listTree";

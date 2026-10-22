@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // (jsdom: happy-dom parses HTML differently from browsers, and DOMPurify relies on the browser behaviour)
 // The rendered Markdown view: someone's upload shown as HTML, so nothing in it may run or reach other sites
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { renderMarkdown } from "@/lib/markdown";
 import { canBrowserThumbnail } from "@/components/FileIcon";
 import type { Node } from "@/api";

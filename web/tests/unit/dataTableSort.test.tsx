@@ -1,7 +1,7 @@
 // A table whose headers sort: a header with a sort key is a button, the sorted one says which way, and the others are plain
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import { DataTable, type Column } from "@/components/DataTable";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

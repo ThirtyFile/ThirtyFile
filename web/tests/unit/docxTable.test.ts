@@ -1,6 +1,6 @@
 // Adding and deleting the rows and columns of a Word table, the way Word does it: settings copied from the row or column
 // next to it, merged cells kept merged, the grid and a fixed width kept in step, and nothing changed half-way
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { attr } from "@/ooxml/core/package";
 import { cellRange, changeTable } from "@/ooxml/docx/tableOps";
 

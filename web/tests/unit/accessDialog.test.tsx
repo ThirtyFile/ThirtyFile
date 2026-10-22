@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import type { AccessInfo, Grant, Me, Node } from "@/api";
 import { AccessDialog } from "@/components/AccessDialog";
 import { MeContext } from "@/lib/session";

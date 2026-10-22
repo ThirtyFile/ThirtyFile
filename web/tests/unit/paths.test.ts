@@ -1,6 +1,6 @@
 // The language is decided when the module loads, so each test imports a fresh copy after choosing it.
 // Expected Chinese text is taken from the dictionary itself (no Chinese in the tests).
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vite-plus/test";
 import { DICT as ZH } from "@/lib/i18n/zh-TW";
 
 async function load(lang: "en" | "zh-TW") {

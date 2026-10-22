@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { COLUMN_WIDTH, columnPrefs, columnShown, columnsToHide, dateGroup, groupItems, pageRows, resetColumns, setColumnWidth, showColumn } from "@/lib/listView";
 
 /** Unix seconds of a local time */

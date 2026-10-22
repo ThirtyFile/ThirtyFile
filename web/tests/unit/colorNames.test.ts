@@ -1,5 +1,5 @@
 // The palette's colors have names for screen readers: Office's theme colors with their variants, and its standard colors
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { PALETTE, paletteName } from "@/components/ColorMenu";
 
 describe("palette color names", () => {

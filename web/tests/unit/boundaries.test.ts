@@ -1,5 +1,5 @@
 // scripts/check-boundaries.mjs: nothing under src/ooxml imports from the rest of the app
-import { afterAll, describe, expect, test } from "vitest";
+import { afterAll, describe, expect, test } from "vite-plus/test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

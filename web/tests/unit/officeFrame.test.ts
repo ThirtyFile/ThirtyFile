@@ -1,6 +1,6 @@
 // The sandboxed preview frame (office-frame.ts): it takes work only from the page that embeds it, checks the shape of
 // every message, and hands links back to that page instead of following them
-import { afterAll, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, test, vi } from "vite-plus/test";
 import { buildWorkbook } from "../fixtures";
 
 const renderDocx = vi.hoisted(() => vi.fn<(buffer: ArrayBuffer, root: HTMLElement) => Promise<{ dispose(): void }>>());

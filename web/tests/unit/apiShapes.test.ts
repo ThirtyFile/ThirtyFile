@@ -2,7 +2,7 @@
 // `api_shapes_match_the_recorded_ones`). Type-checking this file (pnpm typecheck) fails when a type requires a field
 // the server doesn't send, or the server sends a field the type doesn't have; the error names the fields.
 
-import { expect, test } from "vitest";
+import { expect, test } from "vite-plus/test";
 import type {
   AccessInfo,
   AlertsInfo,

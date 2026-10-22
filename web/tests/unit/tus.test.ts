@@ -1,5 +1,5 @@
 // The tus client (lib/tus.ts), against a server that is stood in for: creation, chunks, resuming, retries, termination
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vite-plus/test";
 import { TusError, TusUpload, encodeMetadata, type TusOptions, type TusResponse } from "@/lib/tus";
 import { sessionsOf } from "@/lib/uploadRecovery";
 

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // (jsdom: happy-dom's getElementsByTagNameNS doesn't take "*" for any namespace, which the sheet code uses)
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { computeConditional } from "@/ooxml/xlsx/conditional";
 import { key } from "@/ooxml/xlsx/model";
 import { sheet, workbook } from "./sheet";

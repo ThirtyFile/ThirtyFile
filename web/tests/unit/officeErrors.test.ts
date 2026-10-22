@@ -1,5 +1,5 @@
 // The Office code throws coded errors; the app says them in words (lib/officeErrors.ts)
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import JSZip from "jszip";
 import { OoxmlError } from "@/ooxml/core/errors";
 import { readXlsx } from "@/ooxml/xlsx/workbook";

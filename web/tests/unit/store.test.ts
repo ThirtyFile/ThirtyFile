@@ -1,5 +1,5 @@
 // lib/store.ts: a value kept outside React, and the listeners told when it changes
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, test, vi } from "vite-plus/test";
 import { createStore } from "@/lib/store";
 
 describe("createStore", () => {

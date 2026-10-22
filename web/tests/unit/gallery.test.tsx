@@ -2,7 +2,7 @@
 // file list laid out across), the keys, the preview, what is announced, and the details panel that can be hidden
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vite-plus/test";
 import type { FileSource } from "@/api";
 import type { ExplorerProps } from "@/components/Explorer";
 import type { ExplorerActions } from "@/components/explorer/actions";

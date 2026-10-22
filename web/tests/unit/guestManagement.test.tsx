@@ -1,7 +1,7 @@
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vite-plus/test";
 import { api, ApiError, type GuestConversionPreview, type UserRow } from "@/api";
 import { keys } from "@/api/queryKeys";
 import { UserDialog } from "@/admin/users/UserDialog";

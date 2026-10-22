@@ -1,5 +1,5 @@
 // Click the name of the selected item to rename it (lib/clickToRename.ts): which presses may rename, and the timing
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vite-plus/test";
 import { RENAME_DELAY, clickToRename, mayRename, type NamePress } from "@/lib/clickToRename";
 
 /** A press that renames: the main button, once, on the name of the item selected on its own, in a list that had the focus */

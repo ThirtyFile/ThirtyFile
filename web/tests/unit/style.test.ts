@@ -1,5 +1,5 @@
 // The interface style: which device the browser is on, and the style `auto` gives it (lib/style/device.ts)
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { detectDevice, deviceHints, resolveStyle, styleChoice, type DeviceHints, type Style } from "@/lib/style/device";
 
 const SAFARI_MAC = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15";

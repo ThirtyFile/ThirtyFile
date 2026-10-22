@@ -1,5 +1,5 @@
 // Files and folders dropped from the computer: what can't be read is skipped and counted, the rest is uploaded
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { readEntries } from "@/uploads";
 
 const fileEntry = (name: string, readable = true) =>

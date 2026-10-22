@@ -3,7 +3,7 @@ import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { keys } from "@/api/queryKeys";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vite-plus/test";
 import { toast } from "sonner";
 import type { S3Bucket, S3Config, S3Key } from "@/api/s3";
 import { S3Settings } from "@/admin/system/S3Settings";

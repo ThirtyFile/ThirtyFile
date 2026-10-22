@@ -3,7 +3,7 @@
 // jsdom reads prefixed attributes (w:val) the way browsers do; it has no ResizeObserver or IntersectionObserver, which
 // the slides use to scale and to render as they scroll into view, so they are stood in for
 import JSZip from "jszip";
-import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import { renderDocx } from "@/ooxml/docx";
 import { renderPptx } from "@/ooxml/pptx";
 import { renderChart } from "@/ooxml/chart";

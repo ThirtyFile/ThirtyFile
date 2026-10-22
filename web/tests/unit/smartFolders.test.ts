@@ -1,6 +1,6 @@
 // Smart folders (lib/smartFolders.ts): a search saved as one, the dialog's fields and the query they make, keeping the
 // list of smart folders in order, and selecting a span of one a batch at a time (lib/span.ts)
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vite-plus/test";
 import { QueryClient } from "@tanstack/react-query";
 import { api, type SmartFolder, type SmartQuery } from "@/api";
 import { keys } from "@/api/queryKeys";

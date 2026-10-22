@@ -1,5 +1,5 @@
 // Notifications: what the bell says for each kind, where opening one goes, and the email server's port choice
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import type { AppNotification } from "@/api";
 import { notificationLink, notificationText, portForSecurity, unreadBadge } from "@/lib/notifications";
 

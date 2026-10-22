@@ -1,6 +1,6 @@
 // The Columns view's trail of folders, the widths of its columns, and what happens on arriving in another column
 // (lib/columns.ts)
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vite-plus/test";
 import { arriveAt, depthOf, KEPT_WIDTHS, MAX_COLUMN_WIDTH, MIN_COLUMN_WIDTH, openFrom, selectsOnArrival, takeArrival, trailFor, validWidths, withWidth } from "@/lib/columns";
 
 const c = (id: string) => ({ id, name: id.toUpperCase() });

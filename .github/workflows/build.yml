@@ -88,7 +88,7 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
 
       # The full checks are the ones contributors run locally too.
-      # The interface: formatting (oxfmt, web/.oxfmtrc.json), translations, types, lint (oxlint, web/.oxlintrc.json)
+      # The interface: formatting (oxfmt) and lint (oxlint), through Vite+ and set in web/vite.config.ts, translations, types
       # and the unit tests (Vitest), with the coverage in the job summary
       - name: Frontend
         run: |

@@ -1,7 +1,7 @@
 // Secrets hidden until shown: a typed password, a private key of several lines, and a password shown once
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test } from "vite-plus/test";
 import { SecretInput, SecretTextarea } from "@/components/SecretField";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

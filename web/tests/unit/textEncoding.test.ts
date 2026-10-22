@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { decodeText, encodeText, lineEnding, looksBinary, normalizeLines, type TextEncodingName } from "@/lib/textEncoding";
 
 const TEXT = "Line one\nCaf\u00e9 \u4e2d\u6587 \u{1F600}\n";

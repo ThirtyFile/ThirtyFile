@@ -1,6 +1,6 @@
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import TextEditor from "@/components/TextEditor";
 import { ApiError, type FileSource, type Node } from "@/api";
 import { toast } from "sonner";
