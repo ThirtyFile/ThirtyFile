@@ -1,5 +1,5 @@
 // Name clashes before uploading, moving, copying or restoring: what is asked, and what the answers send
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { type Answer, type Clash, applyToUpload, numberedName, resolveAll, topLevel } from "@/lib/conflicts";
 import { savedName } from "@/uploads";
 

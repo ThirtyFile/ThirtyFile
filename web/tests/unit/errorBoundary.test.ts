@@ -1,7 +1,7 @@
 // A rendering error caught by the error boundary is shown, and reported to the error log (components/ErrorBoundary.tsx)
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
-import { expect, test, vi } from "vitest";
+import { expect, test, vi } from "vite-plus/test";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import type { ErrorReport } from "@/lib/errorReport";
 

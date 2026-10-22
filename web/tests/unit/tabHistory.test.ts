@@ -1,6 +1,6 @@
 // A tab's history: a page that replaces the one before it (a search refined as it is typed) takes its place, so Back
 // goes to where the search started in one step
-import { expect, test } from "vitest";
+import { expect, test } from "vite-plus/test";
 import { activeTab, loadTabs, syncLocation } from "@/tabs";
 
 test("new tabs start at the first page shown, without their unseen home page before it", () => {

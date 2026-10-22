@@ -1,5 +1,5 @@
 // New items kept where they were made (components/explorer/newItems.ts): where the list shows them
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import type { Node } from "@/api";
 import { arrange, isPending, notLoaded, type NewItem } from "@/components/explorer/newItems";
 

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { key } from "@/ooxml/xlsx/model";
 import { adjustFormula, adjustRange, adjustSqref, applyStructOp, cloneState, deriveStyle, inverseOp, type StructOp } from "@/ooxml/xlsx/ops";
 import { sheet, workbook } from "./sheet";

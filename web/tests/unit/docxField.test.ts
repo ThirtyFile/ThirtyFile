@@ -1,6 +1,6 @@
 // Fields in a Word document being edited: a paragraph holding fields (page numbers…) can be edited around them, each
 // field kept as it is as one piece, and a page number or the number of pages is inserted at the caret
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { attr } from "@/ooxml/core/package";
 import { fieldsOf, isEditableParagraph, originalPieces, planEdits, readParagraph, saveEdits } from "@/ooxml/docx/edit";
 import { insertField, MARK_END, MARK_START } from "@/ooxml/docx/formatOps";

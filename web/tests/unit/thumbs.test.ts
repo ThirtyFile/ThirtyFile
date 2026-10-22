@@ -1,5 +1,5 @@
 // Thumbnails of PDFs and videos (lib/thumbs.ts): the server's when it has one, asked for once, and remembered
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vite-plus/test";
 import type { FileSource, Node } from "@/api";
 import { browserThumb, knownThumb } from "@/lib/thumbs";
 

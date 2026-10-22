@@ -1,5 +1,5 @@
 // Where people start, with or without a personal space ("My files")
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { folderOfPath, homeFolder } from "@/lib/home";
 
 const space = (kind: "personal" | "company" | "team", root_id: string, disabled = false) => ({ kind, root_id, disabled });

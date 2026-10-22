@@ -1,5 +1,5 @@
 // What a change to files updates: rows changed in place, and only the lists it touched loaded again
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vite-plus/test";
 import { QueryClient, QueryObserver, type InfiniteData, type QueryKey } from "@tanstack/react-query";
 import type { CursorPage, Node, NodeInfo } from "@/api";
 import { forgetUnreachable, invalidateFiles, refreshFiles, renamed, rowsOf } from "@/lib/queries";

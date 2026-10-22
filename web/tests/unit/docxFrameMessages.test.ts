@@ -1,6 +1,6 @@
 // What the page takes from the Word editor's frame: parts by path as text only, and the toolbar's formatting only in
 // the shape it expects (the frame shows the document's content, so its messages aren't trusted as they come)
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { caretFormatFrom, partsFrom } from "@/components/docx/frameMessages";
 
 describe("messages from the editing frame", () => {

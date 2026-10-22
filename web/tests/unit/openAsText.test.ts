@@ -1,5 +1,5 @@
 // Which files the preview screen offers to open in the text editor (components/FileIcon.tsx, mayOpenAsText)
-import { expect, test } from "vitest";
+import { expect, test } from "vite-plus/test";
 import type { Node } from "@/api";
 import { MAX_TEXT_BYTES, isTextLike, mayOpenAsText } from "@/components/FileIcon";
 

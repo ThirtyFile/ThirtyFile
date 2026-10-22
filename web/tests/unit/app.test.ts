@@ -1,5 +1,5 @@
 // Small pieces of the app that decide what is sent to the server or saved in the browser
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { enc, privateSource, shareSource, type Node } from "@/api";
 import { frameDocument } from "@/components/officeFrame";
 import { filenameFrom } from "@/downloads";

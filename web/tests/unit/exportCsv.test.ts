@@ -2,7 +2,7 @@
 // and sign-in event the server records, the same one the page shows
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { ACTION_GROUPS, actionLabel } from "@/components/logs/actions";
 import { LOGIN_EVENTS } from "@/components/logs/LoginLog";
 import { csvField, csvFileName, csvTime, toCsv } from "@/components/logs/exportCsv";

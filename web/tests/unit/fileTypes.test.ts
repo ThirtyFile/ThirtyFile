@@ -1,6 +1,6 @@
 // File icons by format, language and tool (lib/fileTypes.ts), and that they leave what can be done with a file alone
 // (categoryOf and the checks in components/FileIcon.tsx)
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import type { Node } from "@/api";
 import { categoryOf, isBrowserMedia, isTextLike, typeTitle } from "@/components/FileIcon";
 import { MAX_SCRIPT_BYTES, fileTypeOf } from "@/lib/fileTypes";

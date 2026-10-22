@@ -1,7 +1,7 @@
 // The file list (components/FileList.tsx) in the page: selecting with the mouse and the keyboard, and opening items
 import { act, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vite-plus/test";
 import type { FileSource, Node } from "@/api";
 import { FileList, type ListNav } from "@/components/FileList";
 import type { ViewMode } from "@/components/fileList/layout";

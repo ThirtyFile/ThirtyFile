@@ -1,5 +1,5 @@
 // lib/cancellable.ts: loading an effect stops when it cleans up
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, test, vi } from "vite-plus/test";
 import { cancellable } from "@/lib/cancellable";
 
 describe("cancellable", () => {

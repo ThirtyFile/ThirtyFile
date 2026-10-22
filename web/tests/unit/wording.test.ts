@@ -2,7 +2,7 @@
 // names that crept back in fail here.
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { DICT as ZH } from "@/lib/i18n/zh-TW";
 
 /** The tests run in web/ */

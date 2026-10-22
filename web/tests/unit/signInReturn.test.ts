@@ -1,5 +1,5 @@
 // Where the sign-in page goes afterwards, and the reason a sign-in with another account failed (lib/signInReturn.ts)
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vite-plus/test";
 import { safeNext, takeSsoError } from "@/lib/signInReturn";
 
 describe("the page after signing in", () => {

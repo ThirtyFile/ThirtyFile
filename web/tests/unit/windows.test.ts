@@ -1,5 +1,5 @@
 // A large folder a part at a time (lib/windows), and what is selected in it without being loaded (lib/span)
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vite-plus/test";
 import { api } from "@/api";
 import { assemble, KEEP, neighbours, startsWith, toKeep, WINDOW } from "@/lib/windows";
 import { batchesOf, chunks, eachBatch, inSpan, spanCount, type FolderSpan } from "@/lib/span";

@@ -1,6 +1,6 @@
 // Requests that can't reach the server (api/client.ts, lib/utils.ts): they say so in the interface's language rather
 // than with the browser's own "Failed to fetch"
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vite-plus/test";
 import { ApiError } from "@/api";
 import { fetchOk, request } from "@/api/client";
 import { errorMessage, isNetworkError, unreachable } from "@/lib/utils";

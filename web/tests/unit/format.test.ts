@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { formatCell, formatGeneral, formatValue, isDatePattern } from "@/ooxml/core/numfmt";
 import { dateToSerial } from "@/ooxml/xlsx/formula";
 import { estimateWidthEm, formatNumber } from "@/ooxml/docx/numfmt";

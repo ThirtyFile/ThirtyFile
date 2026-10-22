@@ -1,6 +1,6 @@
 // Open, edit and save round trips: saving must change only what was edited and keep everything else in the file.
 import JSZip from "jszip";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { Calculator, isErr, toScalar } from "@/ooxml/xlsx/formula";
 import { key, type Workbook } from "@/ooxml/xlsx/model";
 import { applyStructOp, deriveStyle, type StructOp } from "@/ooxml/xlsx/ops";

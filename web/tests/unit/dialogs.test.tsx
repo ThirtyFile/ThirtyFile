@@ -2,7 +2,7 @@
 // while busy, and the error that stays when an action fails
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vite-plus/test";
 import { ConfirmDialog, NameDialog } from "@/components/dialogs";
 import { ConfirmHost } from "@/components/confirm";
 import { confirm } from "@/lib/confirm";

@@ -1,6 +1,6 @@
 // Editing the text of a Word document: which paragraphs can be edited, reading the edited view back, and writing only
 // what changed into document.xml (everything else stays as it was)
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { attr } from "@/ooxml/core/package";
 import { isEditableParagraph, originalPieces, planEdits, readAllEdits, readEdits, saveEdits, type EditedBlock, type EditPlan, type Edits } from "@/ooxml/docx/edit";
 

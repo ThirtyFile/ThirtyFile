@@ -1,5 +1,5 @@
 // Unsaved drafts: a workbook's marker flags the tab like a text draft, but is never read back as text
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { getDraft, hasDraft, onDraftRemoved, setDraft, textSaved } from "@/lib/drafts";
 
 describe("drafts", () => {

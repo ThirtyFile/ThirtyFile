@@ -1,6 +1,6 @@
 // The spreadsheet editor's change history (components/sheet/history.ts): committing changes, undo and redo
 import JSZip from "jszip";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { changeAt, commit, redo, undo } from "@/components/sheet/history";
 import type { Sel, Session } from "@/components/sheet/session";
 import { key } from "@/ooxml/xlsx/model";

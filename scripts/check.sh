@@ -24,7 +24,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 web_static() {
   cd "$ROOT/web"
   pnpm install --frozen-lockfile
-  # Formatting (oxfmt, web/.oxfmtrc.json): `pnpm format` fixes it
+  # Formatting (oxfmt through Vite+, the `fmt` section of web/vite.config.ts): `pnpm format` fixes it
   pnpm format:check
   node scripts/check-i18n.mjs
   node scripts/check-boundaries.mjs

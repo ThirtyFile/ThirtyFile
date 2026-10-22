@@ -2,7 +2,7 @@
 // time, and how an item's tags show (dots labelled with their names, and the names themselves)
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vite-plus/test";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { api, type Node, type Tag } from "@/api";
 import { keys } from "@/api/queryKeys";

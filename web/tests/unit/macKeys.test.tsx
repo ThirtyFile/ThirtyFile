@@ -1,7 +1,7 @@
 // The Mac style's keyboard map (components/style/mac/keys.ts), and the shortcuts dialog listing it
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vite-plus/test";
 import { StyleKitContext } from "@/components/style";
 import { macKit } from "@/components/style/mac";
 import { MAC_KEYS } from "@/components/style/mac/keys";

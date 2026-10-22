@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig } from "vite-plus";
 import { fileURLToPath } from "node:url";
 
 // Unit tests (pnpm test): plain logic and components, run in happy-dom for DOMParser, XMLSerializer and localStorage.

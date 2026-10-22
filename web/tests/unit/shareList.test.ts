@@ -1,5 +1,5 @@
 // The share links table: where a link's item is, and the order of the rows
-import { expect, test } from "vitest";
+import { expect, test } from "vite-plus/test";
 import type { ShareInfo } from "@/api";
 import { shareLocation, sharePathOfItem, sortShares, type ShareSort } from "@/components/shareList";
 

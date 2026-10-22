@@ -1,5 +1,5 @@
 // scripts/check-e2e.mjs: no fixed waits, and no names without a unique part, in the end-to-end tests
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { join } from "node:path";
 // @ts-expect-error: a plain script without type declarations
 import { check, problems } from "../../scripts/check-e2e.mjs";

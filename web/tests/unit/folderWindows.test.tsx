@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { afterEach, beforeEach, describe, expect, test, vi, type MockInstance } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi, type MockInstance } from "vite-plus/test";
 import { api, type Node } from "@/api";
 import { KEEP, WINDOW, useFolderWindows, windowsKey } from "@/lib/windows";
 

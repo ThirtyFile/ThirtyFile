@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import type { DatabaseBackup, StorageLocation } from "@/api";
 import { DatabaseBackupDialog, databaseBackupSummary } from "@/admin/storage/DatabaseBackupDialog";
 

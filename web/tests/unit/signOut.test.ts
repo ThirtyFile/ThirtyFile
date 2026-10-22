@@ -1,5 +1,5 @@
 // What a browser keeps of the previous person after a session ended without signing out (lib/signOut.ts)
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vite-plus/test";
 
 vi.mock("@/uploads", () => ({ cancelAll: vi.fn<() => void>() }));
 vi.mock("@/downloads", () => ({ clearDownloads: vi.fn<() => void>() }));

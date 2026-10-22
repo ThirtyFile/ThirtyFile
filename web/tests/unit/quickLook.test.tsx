@@ -2,7 +2,7 @@
 // the arrows and the selection following them
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vite-plus/test";
 import type { ExplorerProps } from "@/components/Explorer";
 import type { ExplorerActions } from "@/components/explorer/actions";
 import type { ExplorerState } from "@/components/explorer/state";

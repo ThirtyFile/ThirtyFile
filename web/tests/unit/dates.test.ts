@@ -1,6 +1,6 @@
 // Dates and times (lib/utils.ts) are written one way everywhere, in the order and with the clock of the interface's
 // locale. The language is decided when the modules load, so each test imports fresh copies after choosing it.
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vite-plus/test";
 import { DICT as ZH } from "@/lib/i18n/zh-TW";
 
 async function load(lang: "en" | "zh-TW" | "zh-CN" | "ja", browser = "en-US") {

@@ -1,6 +1,6 @@
 import { act, useLayoutEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import { DownloadPanel } from "@/components/DownloadPanel";
 import { cancelDownload, clearDownloads, download, retryDownload, triggerDownload, useDownloads, type DownloadTask } from "@/downloads";
 

@@ -1,7 +1,7 @@
 // The size pre-check before opening an Office file reads the sizes the ZIP archive's central directory declares, and
 // reading an entry stops as soon as it grows past its limit
 import JSZip from "jszip";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "vite-plus/test";
 import { checkZipSizes, declaredEntries, MAX_XML_PART, readEntry, TOO_LARGE } from "@/ooxml/core/package";
 
 const CONTENT = "<root>" + "x".repeat(1000) + "</root>";

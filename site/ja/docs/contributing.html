@@ -124,7 +124,7 @@
         <p>コードはツールで整形し、未整形はチェックで失敗します。コミット前に実行してください。</p>
         <pre><code>cd server &amp;&amp; cargo fmt
 cd web &amp;&amp; pnpm format</code></pre>
-        <p>サーバーは rustfmt（<code>server/rustfmt.toml</code>）、画面は oxfmt（<code>web/.oxfmtrc.json</code>、対象は <code>web/src</code>、<code>web/tests</code>、<code>web/scripts</code>）を使います。エディターの拡張でも同じ設定で保存時に整形できます。手で 1 行に複数項目を並べた表は、前の <code>// oxfmt-ignore</code> で保持できます。<code>web/src/lib/i18n/</code> の辞書は整形せず、1 行 1 項目です。</p>
+        <p>サーバーは rustfmt（<code>server/rustfmt.toml</code>）、画面は <a href="https://viteplus.dev/">Vite+</a>（<code>vp</code>：Vite、Vitest、oxlint、oxfmt。設定は <code>web/vite.config.ts</code>。<code>pnpm dev</code>、<code>pnpm build</code>、<code>pnpm test</code>、<code>pnpm lint</code>、<code>pnpm format</code> が実行します。oxfmt の対象は <code>web/src</code>、<code>web/tests</code>、<code>web/scripts</code>）を使います。エディターの拡張でも同じ設定で保存時に整形できます。手で 1 行に複数項目を並べた表は、前の <code>// oxfmt-ignore</code> で保持できます。<code>web/src/lib/i18n/</code> の辞書は整形せず、1 行 1 項目です。</p>
         <p>整形だけのコミットは <code>.git-blame-ignore-revs</code> に列挙します。GitHub の blame は無視します。ローカルの <code>git blame</code> でも無視するには <code>git config blame.ignoreRevsFile .git-blame-ignore-revs</code> を一度実行してください。</p>
         <ul>
           <li>コード、コメント、ガイドの原文は英語です。</li>

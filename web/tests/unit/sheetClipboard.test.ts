@@ -1,4 +1,4 @@
-import { beforeEach, expect, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vite-plus/test";
 import { clipboardRange, clipStore, createClipboard, MAX_CLIP_CELLS } from "@/components/sheet/clipboard";
 import { applyChanges, changeAt } from "@/components/sheet/history";
 import { parseTsv, type Change } from "@/components/sheet/session";

@@ -1,5 +1,5 @@
 // Taking back moves, renames and deletions (lib/undo.ts): Undo in the message, Ctrl+Z, and moving items back
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vite-plus/test";
 import { api, type Job } from "@/api";
 import { movedBack, moveBack, originsOf, toastWithUndo, undoLast } from "@/lib/undo";
 
