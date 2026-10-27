@@ -149,15 +149,21 @@ async fn a_refused_password_is_answered_like_a_wrong_one() {
 #[tokio::test]
 async fn the_time_a_refused_password_takes_is_that_of_a_hashed_one() {
     let env = testutil::env().await;
-    env.user("amy", true).await;
+    for name in ["amy", "ben", "cat", "dan"] {
+        env.user(name, true).await;
+    }
     apply(&env, with_google(PasswordSignIn::Nobody)).await;
-    // (the same bound as the check for accounts without a password: a refusal that skipped the hash would be several times faster)
-    let started = std::time::Instant::now();
-    sign_in(&env, "amy", testutil::password()).await.unwrap_err();
-    let refused = started.elapsed();
-    let started = std::time::Instant::now();
-    sign_in(&env, "amy", &testutil::wrong_password()).await.unwrap_err();
-    let wrong = started.elapsed();
+    // (a refusal that skipped the hash would be several times faster than one that does it. Each time is the quickest of
+    // four, a different account each, so a busy machine in the middle of one doesn't decide the test)
+    let (mut refused, mut wrong) = (std::time::Duration::MAX, std::time::Duration::MAX);
+    for name in ["amy", "ben", "cat", "dan"] {
+        let started = std::time::Instant::now();
+        sign_in(&env, name, testutil::password()).await.unwrap_err();
+        refused = refused.min(started.elapsed());
+        let started = std::time::Instant::now();
+        sign_in(&env, name, &testutil::wrong_password()).await.unwrap_err();
+        wrong = wrong.min(started.elapsed());
+    }
     assert!(refused * 3 > wrong, "a refusal answers much faster: {refused:?} vs {wrong:?}");
 }
 
