@@ -1,17 +1,15 @@
 # GHSA-68fv-2mgg-jv7q: keep all transitive source-map consumers on the patched release.
 overrides:
   "source-map-js@<1.2.2": 1.2.2
-  vite@*: "catalog:"
-  vitest@*: "catalog:"
 catalog:
-  vite: npm:@voidzero-dev/vite-plus-core@1.3.0
+  # Vite+ and the packages it is built from, which have to be one release each. `vite` is the alias of Vite+'s core that
+  # the plugins and the tests import; `vite-plus` and `vite` move together (scripts/check-toolchain.mjs) and are raised
+  # by hand, as Dependabot would raise one of the two.
+  vite: npm:@voidzero-dev/vite-plus-core@1.4.0
+  vite-plus: 1.4.0
   vitest: 5.0.5
-  vite-plus: 1.3.0
   "@vitest/coverage-v8": 5.0.5
 peerDependencyRules:
+  # The plugins ask for vite ^8 and see the alias's own version number (Vite+ 1.x), which is not a Vite release
   allowAny:
     - vite
-    - vitest
-  allowedVersions:
-    vite: "*"
-    vitest: "*"
