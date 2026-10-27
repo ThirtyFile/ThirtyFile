@@ -28,6 +28,8 @@ web_static() {
   pnpm format:check
   node scripts/check-i18n.mjs
   node scripts/check-boundaries.mjs
+  # vite-plus and the vite alias of its core in pnpm-workspace.yaml are the same release
+  node scripts/check-toolchain.mjs
   # The end-to-end tests run in parallel: no fixed waits, no names without a unique part (scripts/check-e2e.mjs)
   node scripts/check-e2e.mjs
   pnpm typecheck

@@ -2,7 +2,8 @@
 # major updates arrive one by one, because they may need changes to the code. New versions are only proposed after a
 # few days, so a broken or compromised release is usually withdrawn before it reaches us.
 # Actions and base images are pinned to a commit or digest; Dependabot updates the pin and its version comment.
-# The Rust version (server/rust-toolchain.toml and the rust image) is raised by hand, in a pull request of its own.
+# The Rust version (server/rust-toolchain.toml and the rust image) and Vite+ are raised by hand, each in a pull request
+# of its own.
 version: 2
 updates:
   - package-ecosystem: cargo
@@ -30,6 +31,10 @@ updates:
     groups:
       frontend:
         update-types: [minor, patch]
+    ignore:
+      # Vite+ is two lines in web/pnpm-workspace.yaml (vite-plus and the vite alias of its core) that Dependabot would
+      # raise one at a time: it is raised by hand, both together (scripts/check-toolchain.mjs fails when they differ)
+      - dependency-name: vite-plus
 
   - package-ecosystem: github-actions
     directory: /
