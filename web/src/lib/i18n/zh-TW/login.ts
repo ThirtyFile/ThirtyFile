@@ -18,4 +18,7 @@ export default {
   // Server messages and activity log
   "The background image can't be larger than 5 MB": "背景圖片不能超過 5 MB",
   "Your session ended. Sign in again.": "你的登入階段已結束，請重新登入。",
+  "Your administrator requires single sign-on.": "你的管理員要求使用單一登入。",
+  "Signing in with a password is turned off, and no other way to sign in is available. Ask your administrator.": "密碼登入已關閉，也沒有其他可用的登入方式。請洽詢管理員。",
+  "Password sign-in is off": "密碼登入已關閉",
 } satisfies Record<string, string>;

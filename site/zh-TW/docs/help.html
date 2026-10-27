@@ -82,6 +82,7 @@
             <li><a href="#password">忘記管理員密碼</a></li>
             <li><a href="#shell">docker exec thirtyfile sh 無法執行</a></li>
             <li><a href="#two-factor">管理員遺失了手機和復原碼</a></li>
+            <li><a href="#passwords-off">關閉密碼登入後沒有人能登入</a></li>
             <li><a href="#links">分享連結以 http://127.0.0.1:8080 開頭</a></li>
             <li><a href="#signed-out">剛登入就退出了</a></li>
             <li><a href="#locked">所有人都看到「失敗嘗試過多」</a></li>
@@ -104,6 +105,11 @@
         <h2 id="two-factor">管理員遺失了手機和復原碼</h2>
         <p>其他管理員可在<strong>控制台 › 使用者</strong>中重設。如果沒有其他管理員，請在伺服器上關閉：</p>
         <pre><code>docker exec thirtyfile thirtyfile reset-two-factor admin</code></pre>
+        <h2 id="passwords-off">關閉密碼登入後沒有人能登入</h2>
+        <p>如果單一登入無法運作，請在伺服器上重新開啟密碼登入（不需要重新啟動）：</p>
+        <pre><code>docker exec thirtyfile thirtyfile password-sign-in everyone</code></pre>
+        <p>然後用密碼登入，並在 <strong>控制台 › 單一登入</strong> 修正供應商。<a href="sign-in.html#passwords-off">進一步了解如何關閉密碼登入</a>。</p>
+
         <h2 id="links">分享連結以 http://127.0.0.1:8080 開頭</h2>
         <p>在<strong>控制台 › 一般 › 網站網址</strong>中設定大家實際存取的位址。</p>
         <h2 id="signed-out">剛登入就退出了</h2>

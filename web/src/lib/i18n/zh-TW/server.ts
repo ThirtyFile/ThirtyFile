@@ -1173,4 +1173,9 @@ export default {
   "Search inside files is off": "檔案內容搜尋未開啟",
   "The largest file read is 1 to 100 MB": "讀取的檔案大小上限為 1 至 100 MB",
   "The text kept is 10 to 100,000 MB in all": "文字儲存總量為 10 至 100,000 MB",
+  "Your administrator requires single sign-on: you sign in without a password": "你的管理員要求使用單一登入：登入時不使用密碼",
+  "Turn on and set up a sign-in provider first": "請先開啟並設定登入供應商",
+  "Link your own account to one of the sign-in providers first (My account › Sign-in methods): you have to be able to sign in that way": "請先把你自己的帳號連結到其中一個登入供應商（帳號選單 › 登入方式）：你必須能用這種方式登入",
+  "Sign in through a provider once with your own account first, to be sure it works": "請先用你自己的帳號透過供應商登入一次，確認可以運作",
+  "Single sign-on would be the only way to sign in, and no enabled administrator is linked to a sign-in provider that is on": "單一登入會是唯一的登入方式，但沒有任何已啟用的管理員連結到已開啟的登入供應商",
 } satisfies Record<string, string>;

@@ -1173,4 +1173,9 @@ export default {
   "Search inside files is off": "ファイル内検索はオフです",
   "The largest file read is 1 to 100 MB": "読み取るファイルの最大サイズは 1〜100 MB です",
   "The text kept is 10 to 100,000 MB in all": "保存する文字の合計は 10〜100,000 MB です",
+  "Your administrator requires single sign-on: you sign in without a password": "管理者がシングルサインオンを求めています。パスワードなしでサインインします",
+  "Turn on and set up a sign-in provider first": "先にサインインプロバイダーを有効にして設定してください",
+  "Link your own account to one of the sign-in providers first (My account › Sign-in methods): you have to be able to sign in that way": "先に自分のアカウントをいずれかのサインインプロバイダーにリンクしてください（アカウントメニュー › サインイン方法）。その方法でサインインできる必要があります",
+  "Sign in through a provider once with your own account first, to be sure it works": "先に自分のアカウントでプロバイダー経由のサインインを一度行い、動作を確認してください",
+  "Single sign-on would be the only way to sign in, and no enabled administrator is linked to a sign-in provider that is on": "シングルサインオンが唯一のサインイン方法になりますが、有効な管理者で、有効なサインインプロバイダーにリンクされている人がいません",
 } satisfies Record<string, string>;

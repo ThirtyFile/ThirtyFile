@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CopyIcon, Loader2Icon, PlusIcon, Trash2Icon, TriangleAlertIcon } from "lucide-react";
 import { Link } from "react-router";
 import { toast } from "sonner";
-import { api, type SsoDomainRule, type SsoProviderReq, type SsoProvisioning, type SsoSettings, type SsoSettingsReq } from "@/api";
+import { api, type PasswordSignIn, type SsoAdmin, type SsoDomainRule, type SsoProviderReq, type SsoProvisioning, type SsoSettings, type SsoSettingsReq } from "@/api";
 import { keys, queries } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -52,7 +52,15 @@ function toReq(s: SsoSettings): SsoSettingsReq {
     defaults: s[id].defaults,
     groups: s[id].groups,
   });
-  return { microsoft: p("microsoft"), google: p("google"), github: p("github"), oidc: p("oidc"), allowed_domains: s.allowed_domains, domain_rules: s.domain_rules };
+  return {
+    microsoft: p("microsoft"),
+    google: p("google"),
+    github: p("github"),
+    oidc: p("oidc"),
+    allowed_domains: s.allowed_domains,
+    domain_rules: s.domain_rules,
+    password_sign_in: s.password_sign_in,
+  };
 }
 
 /** A rule as edited: the domain and the size are typed as text */
@@ -118,6 +126,95 @@ const PROVISIONING: { value: SsoProvisioning; label: string; help: string }[] = 
   { value: "create", label: t("Create accounts automatically"), help: t("Like the above, and people without an account get one on first sign-in, with the settings below.") },
 ];
 
+const PASSWORD_MODES: { value: PasswordSignIn; label: string; help: string }[] = [
+  { value: "everyone", label: t("Everyone"), help: t("People sign in with a user name and password, or with a provider below.") },
+  {
+    value: "administrators",
+    label: t("Administrators only"),
+    help: t("People sign in with a provider. Administrators can also use a password, at the address below: the way back in when a provider is down or set up wrongly."),
+  },
+  {
+    value: "nobody",
+    label: t("Nobody"),
+    help: t("Everyone signs in with a provider, administrators too. If the provider stops working, nobody can sign in until the command below is run on the server."),
+  },
+];
+
+/** Who may sign in with a password: with the administrators who keep the site reachable when it is not everyone */
+function PasswordSignInSection({
+  value,
+  onChange,
+  admins,
+  savedMode,
+  anyProviderOn,
+}: {
+  value: PasswordSignIn;
+  onChange(v: PasswordSignIn): void;
+  admins: SsoAdmin[];
+  savedMode: PasswordSignIn;
+  anyProviderOn: boolean;
+}) {
+  const off = value !== "everyone";
+  return (
+    <Section title={t("Password sign-in")}>
+      <div className="grid gap-4 p-4">
+        <fieldset className="grid gap-3">
+          <legend className="sr-only">{t("Who may sign in with a password")}</legend>
+          {PASSWORD_MODES.map((m) => (
+            <label key={m.value} className="flex items-start gap-2.5 text-sm">
+              <input type="radio" name="password-sign-in" className="mt-1" checked={value === m.value} onChange={() => onChange(m.value)} />
+              <span className="grid gap-0.5">
+                <span className="font-medium">{m.label}</span>
+                <span className="text-xs leading-relaxed text-muted-foreground">{m.help}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+
+        {off && (
+          <div className="grid gap-3 rounded-lg border p-3">
+            <div className="text-[13px] font-medium">{t("Administrators who can sign in with a provider")}</div>
+            {admins.length ? (
+              <ul className="grid gap-1 text-sm" aria-label={t("Administrators who can sign in with a provider")}>
+                {admins.map((a) => (
+                  <li key={a.id} className="flex flex-wrap items-center gap-x-2">
+                    <span className="font-medium">{a.username}</span>
+                    <span className="text-xs text-muted-foreground">{a.signed_in ? t("has signed in this way") : t("has not signed in this way yet")}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="flex items-start gap-2 text-xs leading-relaxed text-amber-800 dark:text-amber-200" role="alert">
+                <TriangleAlertIcon className="mt-px size-4 shrink-0" />
+                <span>
+                  {anyProviderOn
+                    ? t("No enabled administrator is linked to a sign-in provider that is on. Link your own account under My account › Sign-in methods first, then sign in once with it.")
+                    : t("Turn on and set up a sign-in provider first, then link your own account under My account › Sign-in methods and sign in once with it.")}
+                </span>
+              </p>
+            )}
+            {value === "nobody" && !!admins.length && !admins.some((a) => a.signed_in) && (
+              <p className="text-xs leading-relaxed text-muted-foreground">{t("Sign in through a provider once with your own account before choosing this, to be sure it works.")}</p>
+            )}
+            {value === "administrators" && (
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {t("Administrators sign in with a password at")} <code className="rounded bg-muted px-1">{`${location.origin}/sign-in/administrator`}</code>
+              </p>
+            )}
+          </div>
+        )}
+
+        {(off || savedMode !== "everyone") && (
+          <div className="grid gap-1 text-xs leading-relaxed text-muted-foreground">
+            <span>{t("If nobody can sign in, run this on the server (it takes effect at once):")}</span>
+            <code className="w-fit rounded bg-muted px-1.5 py-0.5 select-text">docker exec thirtyfile thirtyfile password-sign-in everyone</code>
+          </div>
+        )}
+      </div>
+    </Section>
+  );
+}
+
 export function SsoPage() {
   const q = useQuery({ queryKey: keys.ssoSettings(), queryFn: api.ssoSettings });
   return (
@@ -165,6 +262,7 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
     oidc: withPolicy("oidc"),
     allowed_domains: splitDomains(domains),
     domain_rules: rules.filter((r) => r.domain.trim()).map(ruleReq),
+    password_sign_in: draft.password_sign_in,
   };
   // A blank rule card counts as a change too, so it can be discarded
   const dirty = JSON.stringify(req) !== JSON.stringify(toReq(saved)) || rules.some((r) => !r.domain.trim());
@@ -227,6 +325,14 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
           </span>
         </p>
       )}
+
+      <PasswordSignInSection
+        value={draft.password_sign_in}
+        onChange={(password_sign_in) => setDraft((d) => ({ ...d, password_sign_in }))}
+        admins={saved.sso_admins}
+        savedMode={saved.password_sign_in}
+        anyProviderOn={PROVIDERS.some((id) => draft[id].enabled)}
+      />
 
       <Section title={t("Sign-in policy")}>
         <div className="grid gap-5 p-4">

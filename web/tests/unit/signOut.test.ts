@@ -68,7 +68,7 @@ describe("after a session expired", () => {
     expect(localStorage.getItem("tf-column-widths-1")).toBeNull();
     // The sign-in screen asks for the account again
     expect(localStorage.getItem("tf-last-user")).toBeNull();
-    expect(assign).toHaveBeenCalledWith("/login");
+    expect(assign).toHaveBeenCalledWith("/login?signed_out=1");
     vi.unstubAllGlobals();
   });
 });

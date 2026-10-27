@@ -82,6 +82,7 @@
             <li><a href="#who">Who may sign in</a></li>
             <li><a href="#rules">Different settings for different domains</a></li>
             <li><a href="#link">Linking an account yourself</a></li>
+            <li><a href="#passwords-off">Turning off passwords</a></li>
             <li><a href="#guests">Microsoft tenants with guests</a></li>
             <li><a href="#guest-provisioning">Create guests with single sign-on</a></li>
           </ol>
@@ -129,6 +130,22 @@
         <p>Anyone can link or unlink an account of each provider set up here (Microsoft, Google, GitHub or OpenID Connect) under <strong>Account menu › Sign-in methods</strong>. A linked account signs in without the password, so linking asks for the current password first, and with two-factor sign-in a code; accounts without a password link within 10 minutes of signing in. The person gets a notification, in the app and by email, for every account linked to theirs, including one matched by email.</p>
         <p>When a list of allowed domains is set, only an account whose email address the provider verified, in one of those domains, can be linked. Only verified addresses are kept with a linked account.</p>
         <div class="note">An account created by single sign-on has no password. Its last linked account can only be removed after an administrator gave it a password. When an administrator sets a new password for someone, their linked accounts are removed too: they link them again after signing in.</div>
+
+        <h2 id="passwords-off">Turning off passwords</h2>
+        <p>Once single sign-on works, you can stop people from signing in with a user name and password at all, so that your identity provider's rules (multi-factor sign-in, who may leave the company) apply to everyone. Choose under <strong>Control panel › Single sign-on › Password sign-in</strong>:</p>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Choice</th><th>What happens</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Everyone</strong></td><td>As before: a password or a provider</td></tr>
+              <tr><td><strong>Administrators only</strong></td><td>The sign-in page has no user name or password field, only the providers. Administrators sign in with a password at <code>/sign-in/administrator</code> of your site, an address no page links to. It is the way back in when the provider is down or set up wrongly</td></tr>
+              <tr><td><strong>Nobody</strong></td><td>Everyone signs in through a provider, administrators too, and no page offers a password</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Before it can be saved, at least one enabled administrator must be linked to a provider that is on, and you must be one of them. For <strong>Nobody</strong> you must also have signed in through the provider once, so a wrong setup is found now. The page lists these administrators. As long as passwords are off, the last such administrator can't be disabled, deleted, made a standard user or unlinked, and the last provider can't be turned off: ThirtyFile refuses, saying why. An administrator resetting a person's password removes their linked accounts (see above), which is refused for the same reason when it would leave nobody.</p>
+        <p>What changes: signing in with a password, the second step of a sign-in begun with a password, resetting a password by email (the link isn't offered and links already sent stop working) and changing a password. What doesn't: <a href="account.html#app-passwords">app passwords</a>, SFTP keys, S3 keys and FTP device passwords, which people make after signing in and which keep working until the account is disabled or deleted. Sessions that are already open stay open.</p>
+        <div class="note">If the provider stops working and nobody can sign in, run this on the server. It takes effect at once, with no restart: <pre><code>docker exec thirtyfile thirtyfile password-sign-in everyone</code></pre> The other choices are <code>administrators</code> and <code>nobody</code>. ThirtyFile also logs a warning at start while passwords are not open to everyone.</div>
 
         <h2 id="guests">Microsoft tenants with guests</h2>
         <p>With a tenant ID set, the members of your tenant are matched by email. Guests from other organisations sign in through your tenant too, but their email address comes from their own organisation, which can enter any address. So a guest's email doesn't match or create an account: guests sign in with a password and link their Microsoft account themselves.</p>

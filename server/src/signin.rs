@@ -144,11 +144,14 @@ pub async fn login(
             format!("Too many failed sign-in attempts for this account. Try again in {wait} seconds."),
         ));
     }
-    let row: Option<(i64, String, bool)> =
-        sqlx::query_as("SELECT id, password_hash, disabled FROM users WHERE username = ?").bind(username).fetch_optional(&st.db).await?;
+    let row: Option<(i64, String, bool, crate::auth::UserRole)> =
+        sqlx::query_as("SELECT id, password_hash, disabled, role FROM users WHERE username = ?").bind(username).fetch_optional(&st.db).await?;
     // Hash once even when the username doesn't exist, so response timing doesn't reveal whether it exists
-    let (id, hash, disabled) = row.unwrap_or((0, DUMMY_HASH.into(), false));
-    let password_ok = verify_password(req.password, hash).await?;
+    let (id, hash, disabled, role) = row.unwrap_or((0, DUMMY_HASH.into(), false, crate::auth::UserRole::User));
+    // An account that may not sign in with a password (Control panel › Single sign-on) is checked against a hash no
+    // password matches: the answer and the time it takes are those of a wrong password
+    let refused = id != 0 && !crate::sso::mode(&st.db).await?.allows(role);
+    let password_ok = verify_password(req.password, if refused { DUMMY_HASH.into() } else { hash }).await? && !refused;
     if !password_ok || id == 0 || disabled {
         // The attempt was already counted; the lockout begins when this failure was the last one allowed
         let locked = {
@@ -157,6 +160,8 @@ pub async fn login(
         };
         let event = if id == 0 {
             "unknown_user"
+        } else if refused {
+            "password_off"
         } else if !password_ok {
             "bad_password"
         } else {
@@ -281,6 +286,9 @@ pub async fn change_password(
     user: User,
     Json(req): Json<ChangePasswordReq>,
 ) -> AppResult<Json<serde_json::Value>> {
+    if !crate::sso::may_use_password(&st, user.id).await? {
+        return Err(AppError::forbidden("Your administrator requires single sign-on: you sign in without a password"));
+    }
     validate_password(&req.new, min_password(&st))?;
     confirm_password(&st, user.id, req.current).await?;
     let new_hash = hash_password(req.new).await?;
