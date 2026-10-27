@@ -82,6 +82,7 @@
             <li><a href="#password">忘记管理员密码</a></li>
             <li><a href="#shell">docker exec thirtyfile sh 无法运行</a></li>
             <li><a href="#two-factor">管理员丢失了手机和恢复码</a></li>
+            <li><a href="#passwords-off">关闭密码登录后没有人能登录</a></li>
             <li><a href="#links">分享链接以 http://127.0.0.1:8080 开头</a></li>
             <li><a href="#signed-out">刚登录就退出了</a></li>
             <li><a href="#locked">所有人都看到“失败尝试过多”</a></li>
@@ -103,6 +104,11 @@
         <h2 id="two-factor">管理员丢失了手机和恢复码</h2>
         <p>其他管理员可在<strong>控制面板 › 用户</strong>中重置。如果没有其他管理员，请在服务器上关闭：</p>
         <pre><code>docker exec thirtyfile thirtyfile reset-two-factor admin</code></pre>
+        <h2 id="passwords-off">关闭密码登录后没有人能登录</h2>
+        <p>如果单点登录无法工作，请在服务器上重新开启密码登录（不需要重启）：</p>
+        <pre><code>docker exec thirtyfile thirtyfile password-sign-in everyone</code></pre>
+        <p>然后用密码登录，并在 <strong>控制台 › 单点登录</strong> 修正提供商。<a href="sign-in.html#passwords-off">进一步了解如何关闭密码登录</a>。</p>
+
         <h2 id="links">分享链接以 http://127.0.0.1:8080 开头</h2>
         <p>在<strong>控制面板 › 常规 › 网站地址</strong>中设置大家实际访问的地址。</p>
         <h2 id="signed-out">刚登录就退出了</h2>

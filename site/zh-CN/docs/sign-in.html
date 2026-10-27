@@ -83,6 +83,7 @@
             <li><a href="#who">谁可以登录</a></li>
             <li><a href="#rules">不同域名采用不同设置</a></li>
             <li><a href="#link">自行关联账号</a></li>
+            <li><a href="#passwords-off">关闭密码登录</a></li>
             <li><a href="#guests">包含来宾的 Microsoft 租户</a></li>
             <li><a href="#guest-provisioning">通过单点登录创建访客</a></li>
           </ol>
@@ -121,6 +122,22 @@
         <p>所有人都可在<strong>账号菜单 › 登录方式</strong>中关联或取消关联已配置提供商的账号（Microsoft、Google、GitHub 或 OpenID Connect）。关联后的账号可绕过本地密码登录，因此关联前需要当前密码，两步验证账号还需验证码；无密码账号须在登录后 10 分钟内关联。每次关联（包括按邮箱匹配）都会通过应用内通知和邮件告知用户。</p>
         <p>设置了允许域名列表时，只有提供商已验证的、位于该列表域名中的邮箱才能关联。关联账号只保存已验证的邮箱地址。</p>
         <div class="note">单点登录创建的账号没有密码。只有管理员先为其设置密码后，才能移除最后一个关联账号。管理员为用户设置新密码时，关联账号也会移除；用户登录后需重新关联。</div>
+        <h2 id="passwords-off">关闭密码登录</h2>
+        <p>单点登录能正常工作之后，可以完全不让人用用户名和密码登录，让身份提供商的规则（多重验证、离职的人）适用于所有人。在 <strong>控制台 › 单点登录 › 密码登录</strong> 选择：</p>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>选项</th><th>结果</th></tr></thead>
+            <tbody>
+              <tr><td><strong>所有人</strong></td><td>和以前一样：密码或提供商都可以</td></tr>
+              <tr><td><strong>仅限管理员</strong></td><td>登录页没有用户名或密码栏，只有提供商。管理员使用密码登录的位置是网站的 <code>/sign-in/administrator</code>，没有任何页面链接到这个网址。提供商故障或配置错误时，这是回得来的路</td></tr>
+              <tr><td><strong>没有人</strong></td><td>所有人都通过提供商登录，管理员也一样，没有任何页面提供密码登录</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>保存之前，至少要有一位已启用的管理员关联到已开启的提供商，而且你自己必须是其中之一。选择 <strong>没有人</strong> 时，你还必须已经通过提供商登录过一次，让错误的配置现在就被发现。页面会列出这些管理员。只要密码登录没有对所有人开放，最后一位这样的管理员就不能被停用、删除、改成标准用户或解除关联，最后一个提供商也不能关闭：ThirtyFile 会拒绝并说明原因。管理员为某人重置密码会移除他关联的账号（见上文），如果因此没有人能登录，同样会被拒绝。</p>
+        <p>受影响的有：用密码登录、以密码开始的登录的第二步、用邮件重置密码（不再提供链接，已发出的链接也失效）和修改密码。不受影响的有：<a href="account.html#app-passwords">应用密码</a>、SFTP 密钥、S3 密钥和 FTP 设备密码，这些是登录后自己创建的，会一直有效，直到账号被停用或删除。已经打开的登录会话不会中断。</p>
+        <div class="note">如果提供商无法使用，没有人能登录，请在服务器上运行下列命令。立即生效，不需要重启：<pre><code>docker exec thirtyfile thirtyfile password-sign-in everyone</code></pre> 其他选项是 <code>administrators</code> 和 <code>nobody</code>。密码登录没有对所有人开放时，ThirtyFile 启动时也会在日志中发出警告。</div>
+
         <h2 id="guests">包含来宾的 Microsoft 租户</h2>
         <p>设置 tenant ID 后，租户成员可按邮箱匹配。其他组织的来宾也通过你的租户登录，但邮箱由其所属组织提供，而该组织可填写任意地址。所以来宾邮箱不用于匹配或创建账号：来宾应使用密码登录，自行关联 Microsoft 账号。</p>
         <p>若也需按邮箱匹配来宾，在 ID token 添加可选 claim <code>xms_edov</code>：应用注册中选择 <strong>Token configuration › Add optional claim › ID › xms_edov</strong>。Microsoft 会注明来宾邮箱域名是否属于其组织，仅匹配这些来宾。</p>

@@ -330,7 +330,9 @@ async fn ticket(st: &AppState, hash: &str) -> AppResult<(i64, Step, String)> {
         }
     };
     let Some((user_id, step, cred)) = found else { return Err(expired()) };
-    if !still_valid(st, user_id, &cred).await? {
+    // The setting may have changed since the password was checked: a sign-in begun by a password that may no longer be
+    // used ends here
+    if !still_valid(st, user_id, &cred).await? || !crate::sso::may_use_password(st, user_id).await? {
         st.part::<Memory>().logins.lock().remove(hash);
         return Err(expired());
     }
@@ -660,6 +662,25 @@ pub(crate) mod tests {
 
     fn next_code(secret: &[u8]) -> String {
         code_at(secret, now().div_euclid(STEP) + 1)
+    }
+
+    #[tokio::test]
+    async fn a_sign_in_begun_with_a_password_ends_when_passwords_are_turned_off() {
+        let env = testutil::env().await;
+        let amy = env.user("amy", true).await;
+        let (secret, _) = set_up(&env, &amy).await;
+        // The password was right and the code is the next step...
+        let v = body(login(&env, "amy").await).await;
+        let ticket = v["ticket"].as_str().unwrap().to_string();
+        // ...but passwords were turned off in between: the code is not asked for any more, and it doesn't sign in
+        sqlx::query("INSERT INTO settings (key, value) VALUES ('sso', '{\"password_sign_in\":\"nobody\"}')").execute(&env.st.db).await.unwrap();
+        let err = code(&env, &ticket, &next_code(&secret)).await.unwrap_err();
+        assert_eq!(err.code, Some("two_factor_expired"));
+        let (sessions,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sessions WHERE user_id = ?").bind(amy.id).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(sessions, 0);
+        // The ticket is gone for good, even if passwords are allowed again
+        sqlx::query("DELETE FROM settings WHERE key = 'sso'").execute(&env.st.db).await.unwrap();
+        assert!(code(&env, &ticket, &next_code(&secret)).await.is_err());
     }
 
     #[test]

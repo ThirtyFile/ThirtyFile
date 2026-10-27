@@ -41,7 +41,8 @@ export function leaveAfterSignOut(userId: number) {
   } catch {
     // Storage blocked by the browser: nothing was kept there either
   }
-  window.location.assign("/login");
+  // (signed_out: the sign-in page doesn't send the person straight back through the only provider they just left)
+  window.location.assign("/login?signed_out=1");
 }
 
 /** Who last signed in in this browser (to tell whether what is kept below belongs to someone else) */

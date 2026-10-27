@@ -318,6 +318,10 @@ pub async fn update(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
         } else if req.disabled == Some(true) {
             sqlx::query("DELETE FROM sessions WHERE user_id = ?").bind(id).execute(&mut *tx).await?;
         }
+        // Disabling, demoting or resetting the password of the last administrator who can sign in through a provider
+        // would leave no one when passwords are off
+        let sso = st.part::<crate::sso::Memory>().settings.read().clone();
+        crate::sso::ensure_sign_in_possible(&mut tx, &sso).await?;
         tx.commit().await?;
     }
     Ok(Json(get_row(&st, id).await?))
@@ -365,7 +369,8 @@ async fn delete_user(st: &AppState, me: &crate::auth::User, id: i64, username: &
     let res = {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
-        let res = delete_in(&mut tx, me, id, username, q, moved.as_ref()).await;
+        let sso = st.part::<crate::sso::Memory>().settings.read().clone();
+        let res = delete_in(&mut tx, &sso, me, id, username, q, moved.as_ref()).await;
         // Moving the files can fail after writing (the target space is full): rolled back before the lock goes
         crate::db::settle(tx, res).await
     };
@@ -393,6 +398,7 @@ async fn still_admin(tx: &mut sqlx::SqliteConnection, me: i64) -> AppResult<()> 
 /// Deletes the user in the transaction: returns their removed personal space and the uploads that were cancelled
 async fn delete_in(
     tx: &mut sqlx::SqliteConnection,
+    sso: &crate::sso::SsoSettings,
     me: &crate::auth::User,
     id: i64,
     username: &str,
@@ -421,6 +427,8 @@ async fn delete_in(
     sqlx::query("UPDATE nodes SET trashed_by = NULL WHERE trashed_by = ?").bind(id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM users WHERE id = ?").bind(id).execute(&mut *tx).await?;
     logs::record_activity(tx, me, None, "user_delete", &detail).await?;
+    // Deleting the last administrator who can sign in through a provider would leave no one when passwords are off
+    crate::sso::ensure_sign_in_possible(tx, sso).await?;
     Ok((removed, uploads))
 }
 
@@ -854,7 +862,7 @@ mod tests {
         let res = {
             let _w = env.st.write_lock.lock().await;
             let mut tx = crate::db::begin_write(&env.st.db).await.unwrap();
-            let res = delete_in(&mut tx, &admin, amy.id, "amy", &q, moved.as_ref()).await;
+            let res = delete_in(&mut tx, &crate::sso::SsoSettings::default(), &admin, amy.id, "amy", &q, moved.as_ref()).await;
             crate::db::settle(tx, res).await
         };
         let err = Moved::kept_on_error(moved.as_ref(), &env.st, res).await.map(|_| ()).unwrap_err();

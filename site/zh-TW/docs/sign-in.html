@@ -83,6 +83,7 @@
             <li><a href="#who">誰可以登入</a></li>
             <li><a href="#rules">不同網域採用不同設定</a></li>
             <li><a href="#link">自行關聯帳號</a></li>
+            <li><a href="#passwords-off">關閉密碼登入</a></li>
             <li><a href="#guests">包含來賓的 Microsoft 租戶</a></li>
             <li><a href="#guest-provisioning">透過單一登入建立訪客</a></li>
           </ol>
@@ -122,6 +123,22 @@
         <p>所有人都可在<strong>帳號選單 › 登入方式</strong>中關聯或取消關聯已設定提供者的帳號（Microsoft、Google、GitHub 或 OpenID Connect）。關聯後的帳號可繞過本機密碼登入，因此關聯前需要目前密碼，兩步驟驗證帳號還需驗證碼；無密碼帳號須在登入後 10 分鐘內關聯。每次關聯（包括按電子郵件比對）都會透過應用程式內通知和郵件告知使用者。</p>
         <p>設定了允許網域清單時，只有提供者已驗證的、位於該清單網域中的電子郵件信箱才能關聯。關聯帳號只儲存已驗證的電子郵件位址。</p>
         <div class="note">單一登入建立的帳號沒有密碼。只有管理員先為其設定密碼後，才能移除最後一個關聯帳號。管理員為使用者設定新密碼時，關聯帳號也會移除；使用者登入後需重新關聯。</div>
+        <h2 id="passwords-off">關閉密碼登入</h2>
+        <p>單一登入能運作之後，可以完全不讓人用帳號和密碼登入，讓身分提供者的規則（多重驗證、離職的人）適用於所有人。在 <strong>控制台 › 單一登入 › 密碼登入</strong> 選擇：</p>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>選項</th><th>結果</th></tr></thead>
+            <tbody>
+              <tr><td><strong>所有人</strong></td><td>和以前一樣：密碼或供應商都可以</td></tr>
+              <tr><td><strong>僅限管理員</strong></td><td>登入頁沒有帳號或密碼欄位，只有供應商。管理員用密碼登入的位置是網站的 <code>/sign-in/administrator</code>，沒有任何頁面連到這個網址。供應商故障或設定錯誤時，這是回得來的路</td></tr>
+              <tr><td><strong>沒有人</strong></td><td>所有人都透過供應商登入，管理員也一樣，沒有任何頁面提供密碼登入</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>儲存之前，至少要有一位已啟用的管理員連結到已開啟的供應商，而且你自己必須是其中之一。選擇 <strong>沒有人</strong> 時，你還必須已經透過供應商登入過一次，讓錯誤的設定現在就被發現。頁面會列出這些管理員。只要密碼登入沒有對所有人開放，最後一位這樣的管理員就不能被停用、刪除、改成標準使用者或解除連結，最後一個供應商也不能關閉：ThirtyFile 會拒絕並說明原因。管理員為某人重設密碼會移除他連結的帳號（見上文），如果因此沒有人能登入，同樣會被拒絕。</p>
+        <p>受影響的有：用密碼登入、以密碼開始的登入的第二步、用 email 重設密碼（不再提供連結，已寄出的連結也失效）和變更密碼。不受影響的有：<a href="account.html#app-passwords">應用程式密碼</a>、SFTP 金鑰、S3 金鑰和 FTP 裝置密碼，這些是登入後自己建立的，會一直有效，直到帳號被停用或刪除。已經開啟的登入階段不會中斷。</p>
+        <div class="note">如果供應商無法使用，沒有人能登入，請在伺服器上執行下列指令。立即生效，不需要重新啟動：<pre><code>docker exec thirtyfile thirtyfile password-sign-in everyone</code></pre> 其他選項是 <code>administrators</code> 和 <code>nobody</code>。密碼登入沒有對所有人開放時，ThirtyFile 啟動時也會在紀錄中發出警告。</div>
+
         <h2 id="guests">包含來賓的 Microsoft 租戶</h2>
         <p>設定 tenant ID 後，租戶成員可按電子郵件比對。其他組織的來賓也透過你的租戶登入，但電子郵件信箱由其所屬組織提供，而該組織可填寫任意位址。所以來賓電子郵件信箱不用於比對或建立帳號：來賓應使用密碼登入，自行關聯 Microsoft 帳號。</p>
         <p>若也需按電子郵件比對來賓，在 ID token 新增可選 claim <code>xms_edov</code>：應用程式註冊中選擇 <strong>Token configuration › Add optional claim › ID › xms_edov</strong>。Microsoft 會註明來賓電子郵件網域是否屬於其組織，僅比對這些來賓。</p>
