@@ -134,6 +134,7 @@
         <pre><code>cd server &amp;&amp; cargo fmt
 cd web &amp;&amp; pnpm format</code></pre>
         <p>伺服器使用 rustfmt（設定在 <code>server/rustfmt.toml</code>），介面使用 <a href="https://viteplus.dev/">Vite+</a>（<code>vp</code>：Vite、Vitest、oxlint 和 oxfmt，設定在 <code>web/vite.config.ts</code>；<code>pnpm dev</code>、<code>pnpm build</code>、<code>pnpm test</code>、<code>pnpm lint</code> 和 <code>pnpm format</code> 會執行它；oxfmt 格式化 <code>web/src</code>、<code>web/tests</code> 和 <code>web/scripts</code>）。編輯器安裝 rustfmt 或 oxfmt 擴充套件後可按同樣設定在儲存時格式化。手工排版、每行多項的表格可在上方加 <code>// oxfmt-ignore</code> 保持版面。<code>web/src/lib/i18n/</code> 中的詞典不格式化，保持每行一個條目。</p>
+        <p>介面需要 Node，版本寫在儲存庫最上層的 <code>.node-version</code>。工作流程讀取這個檔案；設定好 <a href="https://viteplus.dev/guide/env">vp env</a> 後，<code>vp env install</code> 會下載該版本，在儲存庫內的終端機也會使用它。Docker 映像的 Node 是相同的主版本與次版本（修補版本由 Dependabot 更新）。<code>scripts/check-toolchain.mjs</code>（屬於 <code>scripts/check.sh web</code>）會在兩者不同，或 <code>web/pnpm-workspace.yaml</code> 中的 <code>vite-plus</code> 與其核心別名 <code>vite</code> 不是同一版時失敗。Vite+ 由人工升級，兩者一起，並單獨開一個 pull request。</p>
         <p>僅調整格式的提交列在 <code>.git-blame-ignore-revs</code>。GitHub blame 檢視會跳過這些提交；如需本機 <code>git blame</code> 也跳過，在複製倉庫中執行一次 <code>git config blame.ignoreRevsFile .git-blame-ignore-revs</code>。</p>
         <ul>
           <li>程式碼、註解和指南源文使用英文。</li>

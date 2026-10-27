@@ -3,7 +3,8 @@
 # few days, so a broken or compromised release is usually withdrawn before it reaches us.
 # Actions and base images are pinned to a commit or digest; Dependabot updates the pin and its version comment.
 # The Rust version (server/rust-toolchain.toml and the rust image) and Vite+ are raised by hand, each in a pull request
-# of its own.
+# of its own. The Node of the workflows is the version in .node-version, which Dependabot doesn't see: a new minor
+# release of node in the Dockerfile fails scripts/check-toolchain.mjs until .node-version is raised in the same pull request.
 version: 2
 updates:
   - package-ecosystem: cargo

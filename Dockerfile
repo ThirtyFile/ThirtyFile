@@ -20,7 +20,9 @@
 # also listed in THIRD-PARTY-NOTICES.
 
 # ───────────── 1) Frontend ─────────────
-# The output is platform-independent, so multi-platform builds only build it once on the build machine's platform
+# The output is platform-independent, so multi-platform builds only build it once on the build machine's platform.
+# Dependabot updates the tag and digest; the version is the same major and minor release as .node-version, which the
+# workflows and `vp env` read (scripts/check-toolchain.mjs fails when they differ)
 FROM --platform=$BUILDPLATFORM node:26.12.0-alpine3.24@sha256:6f08a523443ddedf52941874c203475b0ad503e859ad70cb26ab8be9a517dbd5 AS web
 ARG BUILDKIT_SBOM_SCAN_STAGE=true
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
