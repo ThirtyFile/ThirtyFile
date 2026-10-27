@@ -1216,6 +1216,47 @@ export interface SsoSettingsReq {
   password_sign_in: PasswordSignIn;
 }
 
+/** The series of the dashboard, one figure for each period */
+export type DashboardSeries =
+  | "requests"
+  | "errors"
+  | "latency_p95_ms"
+  | "sessions"
+  | "tasks_running"
+  | "uploads"
+  | "storage_ops"
+  | "storage_errors"
+  | "failed_sign_ins"
+  | "disk_free_percent";
+
+/** Control panel › Dashboard: how the server is doing now, and the last day or week */
+export interface DashboardInfo {
+  now: number;
+  /** Seconds the page looks back, and how long each figure's period is */
+  span: number;
+  step: number;
+  from: number;
+  /** ok, degraded (see `warnings`) or error (the database can't be read) */
+  status: "ok" | "degraded" | "error";
+  warnings: string[];
+  alerts: { kind: string; params: AlertParams; since: number }[];
+  numbers: {
+    sessions: number;
+    /** People whose session was used in the last 24 hours */
+    active_accounts: number;
+    tasks_running: number | null;
+    uploads: number | null;
+    disk_free_percent: number | null;
+    disk_free_bytes: number | null;
+  };
+  /** Start of each period → its figure; periods without one are not listed */
+  series: Record<DashboardSeries, [number, number][]>;
+  errors: { at: number; kind: string; route: string; status: number | null; count: number; message: string }[];
+  failed_sign_ins: { at: number; event: string; username: string; ip: string }[];
+  /** /metrics answers */
+  monitoring: boolean;
+}
+
 /** Control panel › Monitoring: whether /metrics answers, and to whom */
 export interface MonitoringSettings {
   enabled: boolean;

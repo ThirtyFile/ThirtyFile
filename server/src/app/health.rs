@@ -71,10 +71,51 @@ fn from_this_machine(parts: &axum::http::request::Parts) -> bool {
 /// for the server itself and for administrators who are signed in, since they tell how the storage is laid out.
 pub async fn health(axum::extract::State(st): axum::extract::State<AppState>, mut parts: axum::http::request::Parts) -> axum::response::Response {
     use axum::{extract::FromRequestParts, response::IntoResponse};
-    if let Err(e) = sqlx::query_scalar::<_, i64>("SELECT 1").fetch_one(&st.db).await {
-        tracing::warn!("health check failed: {e}");
-        return (axum::http::StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({ "status": "error" }))).into_response();
+    let report = match report(&st).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("health check failed: {e}");
+            return (axum::http::StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({ "status": "error" }))).into_response();
+        }
+    };
+    let status = report.status();
+    if !report.warnings.is_empty() {
+        // Docker asks every 30 s: warn at most once an hour
+        static LAST: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+        let t = util::now();
+        if t - LAST.load(std::sync::atomic::Ordering::Relaxed) >= 3600 {
+            LAST.store(t, std::sync::atomic::Ordering::Relaxed);
+            tracing::warn!("Health check degraded: {}", report.warnings.join("; "));
+        }
     }
+    let detailed = from_this_machine(&parts) || crate::auth::User::from_request_parts(&mut parts, &st).await.is_ok_and(|u| u.is_admin());
+    // Still 200: restarting the container doesn't free disk space or bring a storage service back
+    if detailed {
+        axum::Json(serde_json::json!({ "status": status, "disks": report.disks, "locations": report.locations })).into_response()
+    } else {
+        axum::Json(serde_json::json!({ "status": status })).into_response()
+    }
+}
+
+/// What the health check found
+pub struct Report {
+    /// What is wrong, in words (empty: all well)
+    pub warnings: Vec<String>,
+    pub disks: serde_json::Map<String, serde_json::Value>,
+    /// Whether each storage location is reachable: "ok" or "offline"
+    pub locations: serde_json::Map<String, serde_json::Value>,
+}
+
+impl Report {
+    pub fn status(&self) -> &'static str {
+        if self.warnings.is_empty() { "ok" } else { "degraded" }
+    }
+}
+
+/// Looks at the database, the disks, the storage locations and the background tasks; an error when the database
+/// can't be read
+pub async fn report(st: &AppState) -> Result<Report, sqlx::Error> {
+    sqlx::query_scalar::<_, i64>("SELECT 1").fetch_one(&st.db).await?;
     let mut warnings = Vec::new();
     let mut disks = serde_json::Map::new();
     for (name, path) in [("data", &st.data_dir), ("storage", &st.storage_dir)] {
@@ -98,23 +139,7 @@ pub async fn health(axum::extract::State(st): axum::extract::State<AppState>, mu
     if util::last_restart().is_some_and(|t| util::now() - t < 86400) {
         warnings.push("a background task stopped on an error and was started again".into());
     }
-    let status = if warnings.is_empty() { "ok" } else { "degraded" };
-    if !warnings.is_empty() {
-        // Docker asks every 30 s: warn at most once an hour
-        static LAST: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
-        let t = util::now();
-        if t - LAST.load(std::sync::atomic::Ordering::Relaxed) >= 3600 {
-            LAST.store(t, std::sync::atomic::Ordering::Relaxed);
-            tracing::warn!("Health check degraded: {}", warnings.join("; "));
-        }
-    }
-    let detailed = from_this_machine(&parts) || crate::auth::User::from_request_parts(&mut parts, &st).await.is_ok_and(|u| u.is_admin());
-    // Still 200: restarting the container doesn't free disk space or bring a storage service back
-    if detailed {
-        axum::Json(serde_json::json!({ "status": status, "disks": disks, "locations": locations })).into_response()
-    } else {
-        axum::Json(serde_json::json!({ "status": status })).into_response()
-    }
+    Ok(Report { warnings, disks, locations })
 }
 
 #[cfg(test)]
