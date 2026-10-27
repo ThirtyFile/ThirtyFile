@@ -10,7 +10,8 @@ export const drivesApi = {
     post<Drive>("/drives", { name, quota_bytes, source_path, read_only, location_id }),
   /** Scans a folder space for changes made on the server's folder; the finished task's result is a `ScanReport` */
   scanDrive: (id: string) => post<Job>(enc`/admin/drives/${id}/scan`),
-  updateDrive: (id: string, req: { name?: string; quota_bytes?: number; read_only?: boolean; link_makers?: LinkMakers }) => request<Drive>("PATCH", enc`/drives/${id}`, req),
+  updateDrive: (id: string, req: { name?: string; quota_bytes?: number; read_only?: boolean; link_makers?: LinkMakers; retention_days?: number }) =>
+    request<Drive>("PATCH", enc`/drives/${id}`, req),
   /** The share links that work now and would stop with each choice of who makes them (the space's managers) */
   linksStopping: (id: string) => get<Record<Exclude<LinkMakers, "editors">, number>>(enc`/drives/${id}/links-stopping`),
   deleteDrive: (id: string) => request("DELETE", enc`/drives/${id}`),

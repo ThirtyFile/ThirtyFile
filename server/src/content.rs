@@ -237,7 +237,7 @@ pub async fn replace(conn: &mut SqliteConnection, st: &AppState, staged: &Staged
     if existing.is_folder() {
         return Err(AppError::bad_request("This isn't a file"));
     }
-    let policy = versions::Policy::of(st);
+    let policy = versions::policy_for(conn, versions::Policy::of(st), existing).await?;
     let result = match &staged.kind {
         Kind::Store(blob) => {
             let extra = tree::commit_blob(conn, blob).await?;

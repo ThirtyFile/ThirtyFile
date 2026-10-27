@@ -48,6 +48,8 @@ pub struct DriveInfo {
     read_only: bool,
     /// Who may make share links of its items
     link_makers: tree::LinkMakers,
+    /// Days after their last change before its files can be deleted for good (0 = no period)
+    retention_days: i64,
     /// Folder spaces, for administrators: the folder, when it was last scanned, and what the scan found
     #[serde(skip_serializing_if = "Option::is_none")]
     source_path: Option<String>,
@@ -91,13 +93,14 @@ async fn drive_infos(
         last_scan_at: Option<i64>,
         scan_report: Option<String>,
         restricted: bool,
+        retention_days: i64,
     }
     let ids = serde_json::to_string(&drives.iter().map(|(d, _)| d.id.as_str()).collect::<Vec<_>>()).unwrap();
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT d.id, d.location_id, COALESCE(l.name, '') AS location_name,
                 CASE WHEN d.kind = 'personal' THEN COALESCE(u.quota_bytes, 0) ELSE d.quota_bytes END AS quota_bytes,
                 COALESCE(u.username, '') AS owner_name, COALESCE(g.n, 0) AS member_count, d.last_scan_at, d.scan_report,
-                EXISTS(SELECT 1 FROM nodes n WHERE n.drive_id = d.id AND n.restricted = 1) AS restricted
+                EXISTS(SELECT 1 FROM nodes n WHERE n.drive_id = d.id AND n.restricted = 1) AS restricted, d.retention_days
          FROM drives d
          LEFT JOIN storage_locations l ON l.id = d.location_id
          LEFT JOIN users u ON u.id = d.owner_id
@@ -124,6 +127,7 @@ async fn drive_infos(
             mode: d.mode,
             read_only: d.read_only,
             link_makers: d.link_makers,
+            retention_days: r.retention_days,
             source_path: d.source_path.clone().filter(|_| details && !private),
             last_scan_at: r.last_scan_at.filter(|_| details),
             scan_report: r.scan_report.filter(|_| details).and_then(|r| serde_json::from_str(&r).ok()).map(|r| crate::folders::report_for(r, private)),
@@ -316,6 +320,8 @@ pub struct UpdateDriveReq {
     read_only: Option<bool>,
     /// Who may make share links of its items (managers who may share, and administrators)
     link_makers: Option<tree::LinkMakers>,
+    /// Administrators: days after their last change before its files can be deleted for good (0 = no period)
+    retention_days: Option<i64>,
 }
 
 pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<String>, Json(req): Json<UpdateDriveReq>) -> AppResult<Json<DriveInfo>> {
@@ -358,6 +364,21 @@ pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<Strin
         sqlx::query("UPDATE drives SET read_only = ? WHERE id = ?").bind(read_only).bind(&drive.id).execute(&mut *tx).await?;
     }
     let mut detail = "";
+    let mut retention_detail = String::new();
+    if let Some(days) = req.retention_days {
+        // Anyone who could shorten it could delete what it keeps
+        if !user.is_admin() {
+            return Err(AppError::forbidden("Only administrators can set a retention period"));
+        }
+        if !(0..=MAX_RETENTION_DAYS).contains(&days) {
+            return Err(AppError::bad_request(format!("A retention period is from 0 to {MAX_RETENTION_DAYS} days")));
+        }
+        let (was,): (i64,) = sqlx::query_as("SELECT retention_days FROM drives WHERE id = ?").bind(&drive.id).fetch_one(&mut *tx).await?;
+        if was != days {
+            sqlx::query("UPDATE drives SET retention_days = ? WHERE id = ?").bind(days).bind(&drive.id).execute(&mut *tx).await?;
+            retention_detail = if days == 0 { "retention period removed".to_string() } else { format!("retention period {days} days (it was {was})") };
+        }
+    }
     if let Some(makers) = req.link_makers.filter(|m| *m != drive.link_makers) {
         may_choose_link_makers(&user, &drive, role)?;
         sqlx::query("UPDATE drives SET link_makers = ? WHERE id = ?").bind(makers).bind(&drive.id).execute(&mut *tx).await?;
@@ -368,7 +389,8 @@ pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<Strin
         };
     }
     let root = tree::get_node(&mut tx, &drive.root_id).await?.unwrap();
-    logs::record_activity(&mut tx, &user, Some(&root), "drive_update", detail).await?;
+    let detail = if retention_detail.is_empty() { detail.to_string() } else { retention_detail };
+    logs::record_activity(&mut tx, &user, Some(&root), "drive_update", &detail).await?;
     let drive = tree::get_drive(&mut tx, &drive.id).await?.unwrap();
     let info = drive_info(&st, &mut tx, drive, role, &user).await?;
     tx.commit().await?;
@@ -425,6 +447,13 @@ pub async fn links_stopping(State(st): State<AppState>, user: User, Path(id): Pa
     Ok(Json(json!({ "managers": managers, "nobody": nobody })))
 }
 
+/// The longest retention period of a space: a hundred years
+pub const MAX_RETENTION_DAYS: i64 = 36_500;
+
+/// The refusal to delete a space that has something a hold or a retention period keeps
+pub const SPACE_KEPT: &str =
+    "This space has items kept by a legal hold or a retention period, so it can't be deleted. Release the hold, or wait until the period has passed.";
+
 /// Permanently deletes a team space (owner or administrator)
 pub async fn delete(State(st): State<AppState>, user: User, Path(id): Path<String>) -> AppResult<Json<Value>> {
     let _w = st.write_lock.lock().await;
@@ -441,6 +470,10 @@ pub async fn delete(State(st): State<AppState>, user: User, Path(id): Path<Strin
         return Err(AppError::forbidden("You don't have permission to delete here"));
     }
     crate::moves::refuse_busy(&mut tx, &drive.id).await?;
+    // Deleting the space deletes everything in it, for good
+    if tree::kept::space_has_kept(&mut tx, &drive.id).await? {
+        return Err(tree::kept::refusal(SPACE_KEPT));
+    }
     // The space disappears now; its files are deleted in the background, a batch at a time. A folder space's folder
     // stays on the disk with everything in it (space_folders.rs): only ThirtyFile's index of it is deleted
     sqlx::query("DELETE FROM drives WHERE id = ?").bind(&drive.id).execute(&mut *tx).await?;

@@ -2,7 +2,7 @@
 import { focusIsFree } from "@/lib/focus";
 import { useEffect, type DragEvent } from "react";
 import { toast } from "sonner";
-import { api, privateSource, type Node } from "@/api";
+import { api, privateSource, type KeptItem, type Node } from "@/api";
 import { keys } from "@/api/queryKeys";
 import { triggerDownload } from "@/downloads";
 import { setClipboard } from "@/lib/clipboard";
@@ -15,6 +15,7 @@ import { confirm } from "@/lib/confirm";
 import { carriesFiles, dropFiles, dropItems } from "@/lib/dnd";
 import { filesFromDrop, uploadFiles } from "@/uploads";
 import { runJob, waitForJob } from "@/lib/jobs";
+import { keptOf, keptToast } from "@/lib/kept";
 import { reportShown } from "@/lib/errorReport";
 import { type Item, isTyping } from "./types";
 import { isPending, listRefreshed } from "./newItems";
@@ -318,6 +319,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
     setSelected(new Set());
     s.newItems.drop(picked.ids);
     const parents = parentsOf(picked.ids);
+    const kept: KeptItem[] = [];
     try {
       await eachBatch(picked, t("Deleting permanently…"), async (ids) => {
         // Only items in the trash can be deleted for good: put them there first
@@ -325,9 +327,11 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
         const job = await api.deleteForever(ids);
         // The rows of what is picked one by one go at once; a span's folder loads again
         void changed(picked.span ? { folders: [picked.span.folder], trash: true, usage: true } : { removed: ids, usage: true });
-        await waitForJob(job);
+        kept.push(...keptOf(await waitForJob(job)));
       });
-      toast.success(t("Permanently deleted"));
+      // What a hold or a retention period keeps stays in the trash, and the message says so
+      if (kept.length) keptToast(kept);
+      else toast.success(t("Permanently deleted"));
       focusListAgain();
     } catch (e) {
       toast.error(errorMessage(e, t("Operation failed")));

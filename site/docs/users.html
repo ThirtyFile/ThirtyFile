@@ -83,6 +83,7 @@
             <li><a href="#security">Sign-in security</a></li>
             <li><a href="#groups">Groups</a></li>
             <li><a href="#spaces">Spaces</a></li>
+            <li><a href="#retention">Retention and legal holds</a></li>
             <li><a href="#email">Notification emails</a></li>
             <li><a href="#alerts">Administrator alerts</a></li>
             <li><a href="#privacy">What administrators can see</a></li>
@@ -146,6 +147,15 @@
           <li>Add members from the space's <strong>Members</strong> dialog and give each a <a href="sharing.html#people">role</a>. The same dialog chooses <a href="sharing.html#link-makers">who can make share links</a> in the space.</li>
           <li>To let everyone create team spaces themselves, switch it on under <strong>Control panel › General</strong>. A space created this way gets the same size limit as its creator, goes on the default location, and each person can create up to 20.</li>
         </ul>
+
+        <h2 id="retention">Retention and legal holds</h2>
+        <p>Some organisations have to keep records for a period, or keep everything of a case while it is open, whatever people do. Both are enforced by the server for every way of deleting: the web, WebDAV, S3, SFTP and FTP all move deleted items to the trash, and what is kept stays there.</p>
+        <ul>
+          <li><strong>Retention period.</strong> Under <strong>Control panel › Retention and holds</strong>, give a space a number of days. Its files, and their earlier versions, can't be deleted for good until that many days after their last change. Deleting still works: the item goes to the trash, marked <strong>Held until</strong> its date, and the automatic emptying (or <strong>Delete permanently</strong>) removes it once the period has passed. Only administrators set a period.</li>
+          <li><strong>Legal hold.</strong> An administrator places a hold, with a reason, on a folder or file (in its details pane, under <strong>Retention</strong>), on a whole space, or on the files a person owns (under <strong>Control panel › Retention and holds</strong>). Under a hold nothing it covers can be deleted for good; earlier versions are never removed, even with versions turned off, because what a change replaces is kept; a space or an account holding held items can't be deleted; and an item can't be moved out of a held folder, or to another space. A hold on a folder covers what is put in it later. Only an administrator releases a hold. Placing and releasing are in the activity log with the reason.</li>
+        </ul>
+        <p>What is kept shows <strong>Held until</strong> or <strong>On legal hold</strong> in the trash, and <strong>Delete permanently</strong>, <strong>Empty trash</strong> and the automatic emptying leave it there and say so. The managers of an item see what keeps it in its details pane. The Control panel lists the holds (search and release), the files each one covers, and exports them as a CSV file.</p>
+        <div class="note">Not covered: files of a <a href="storage.html#folder-spaces">folder space</a> that are removed on the disk itself, outside ThirtyFile (the space is checked again and they show as gone), and copies in a backup or a replica, which follow their own rules for deleting.</div>
 
         <h2 id="email">Notification emails</h2>
         <p>Everyone is told under the bell in the app when something is shared with them, when a space they own or manage is almost full, and when their access ends soon (see <a href="account.html#notifications">Notifications</a>). To also send these by email, enter your organization's email server under <strong>Control panel › Email</strong>:</p>

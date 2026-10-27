@@ -159,6 +159,7 @@
     "partial_usage": false,
     "quota_bytes": 0,
     "read_only": false,
+    "retention_days": 0,
     "role": "",
     "root_id": "",
     "used_bytes": 0

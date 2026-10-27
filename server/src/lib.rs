@@ -34,6 +34,7 @@ mod guests;
 
 mod hashing;
 mod history;
+mod holds;
 mod http_body;
 mod i18n;
 mod jobs;

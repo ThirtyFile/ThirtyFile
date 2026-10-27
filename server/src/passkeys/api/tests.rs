@@ -69,8 +69,12 @@ fn answer(device: &mut Device, challenge: &[u8], flags: u8, handle_of: Option<i6
     }
 }
 
+async fn ask_options(env: &testutil::TestEnv) -> AppResult<Json<Value>> {
+    login_options(State(env.st.clone()), addr(), HeaderMap::new()).await
+}
+
 async fn sign_in(env: &testutil::TestEnv, device: &mut Device, flags: u8) -> AppResult<Response> {
-    let Json(options) = login_options(State(env.st.clone())).await?;
+    let Json(options) = ask_options(env).await?;
     let req = answer(device, &challenge_of(&options), flags, None);
     login(State(env.st.clone()), addr(), HeaderMap::new(), Json(req)).await
 }
@@ -151,7 +155,7 @@ async fn adding_asks_for_the_password_and_takes_only_a_challenge_given_for_that_
     assert!(add_answer(&env, &amy, &mut Device::new(Alg::Es256), "Amy's", &challenge_of(&options)).await.is_err());
 
     // A challenge for signing in is not one for adding
-    let Json(login) = login_options(State(env.st.clone())).await.unwrap();
+    let Json(login) = ask_options(&env).await.unwrap();
     assert!(add_answer(&env, &amy, &mut Device::new(Alg::Es256), "Amy's", &challenge_of(&login)).await.is_err());
     // A passkey already added is named in what the next one must not be (so a device isn't registered twice)
     let mut device = Device::new(Alg::Ed25519);
@@ -213,7 +217,7 @@ async fn an_answer_is_used_once_and_only_for_what_it_was_asked() {
     add_passkey(&env, &amy, &mut device, "Phone").await.unwrap();
 
     // The same answer sent twice
-    let Json(options) = login_options(State(env.st.clone())).await.unwrap();
+    let Json(options) = ask_options(&env).await.unwrap();
     let first = answer(&mut device, &challenge_of(&options), UP | UV, None);
     let replay = AssertionReq {
         credential_id: first.credential_id.clone(),
@@ -253,10 +257,10 @@ async fn a_copied_passkey_an_unknown_one_and_another_users_handle_do_not_sign_in
     // A passkey nobody added
     assert!(sign_in(&env, &mut Device::new(Alg::Ed25519), UP | UV).await.is_err());
     // Its own user handle is accepted, another account's is not
-    let Json(options) = login_options(State(env.st.clone())).await.unwrap();
+    let Json(options) = ask_options(&env).await.unwrap();
     let req = answer(&mut device, &challenge_of(&options), UP | UV, Some(bob.id));
     assert!(login(State(env.st.clone()), addr(), HeaderMap::new(), Json(req)).await.is_err());
-    let Json(options) = login_options(State(env.st.clone())).await.unwrap();
+    let Json(options) = ask_options(&env).await.unwrap();
     let req = answer(&mut device, &challenge_of(&options), UP | UV, Some(amy.id));
     login(State(env.st.clone()), addr(), HeaderMap::new(), Json(req)).await.unwrap();
     assert_eq!(sessions(&env, &amy).await, 2);
@@ -281,7 +285,7 @@ async fn passkeys_are_offered_only_for_an_address_they_can_belong_to() {
     for url in ["", "http://files.example.com", "https://192.0.2.10"] {
         env.st.system.write().public_url = url.into();
         assert!(!available(&env.st), "{url}");
-        let err = login_options(State(env.st.clone())).await.unwrap_err();
+        let err = ask_options(&env).await.unwrap_err();
         assert_eq!(err.code, Some("passkeys_unavailable"));
     }
 }
@@ -322,7 +326,7 @@ async fn the_second_step_takes_only_its_own_challenge_and_a_few_wrong_answers() 
     let ticket = password_login(&env, "amy").await["ticket"].as_str().unwrap().to_string();
 
     // A challenge for signing in without a password is not one for this ticket
-    let Json(options) = login_options(State(env.st.clone())).await.unwrap();
+    let Json(options) = ask_options(&env).await.unwrap();
     let assertion = answer(&mut device, &challenge_of(&options), UP | UV, None);
     let err = second(State(env.st.clone()), addr(), HeaderMap::new(), Json(SecondReq { ticket: ticket.clone(), assertion })).await.unwrap_err();
     assert_eq!(err.code, Some("passkey_failed"));
@@ -430,4 +434,21 @@ async fn passkeys_are_used_where_passwords_are() {
     set_mode(&env, "everyone").await;
     sign_in(&env, &mut amys, UP | UV).await.unwrap();
     assert_eq!(sessions(&env, &amy).await, 1);
+}
+
+#[tokio::test]
+async fn one_address_cannot_ask_for_so_many_challenges_that_the_others_are_pushed_out() {
+    let env = env().await;
+    let mut device = Device::new(Alg::Es256);
+    let amy = env.user("amy", true).await;
+    add_passkey(&env, &amy, &mut device, "Phone").await.unwrap();
+    // Somebody else's challenge, waiting
+    let Json(waiting) = login_options(State(env.st.clone()), ConnectInfo("198.51.100.7:5000".parse().unwrap()), HeaderMap::new()).await.unwrap();
+    for _ in 0..OPTIONS_PER_WINDOW {
+        let Json(_) = ask_options(&env).await.unwrap();
+    }
+    assert_eq!(ask_options(&env).await.err().unwrap().status, StatusCode::TOO_MANY_REQUESTS);
+    // The other address's challenge is still good
+    let req = answer(&mut device, &challenge_of(&waiting), UP | UV, None);
+    login(State(env.st.clone()), ConnectInfo("198.51.100.7:5000".parse().unwrap()), HeaderMap::new(), Json(req)).await.unwrap();
 }

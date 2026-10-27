@@ -364,7 +364,15 @@ pub async fn delete(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
     Ok(Json(job))
 }
 
+/// The refusal to delete an account whose files are kept by a hold or a retention period
+const PERSON_KEPT: &str =
+    "This account has files kept by a legal hold or a retention period, so it can't be deleted. Release the hold, or wait until the period has passed.";
+
 async fn delete_user(st: &AppState, me: &crate::auth::User, id: i64, username: &str, q: &DeleteQuery, progress: &crate::jobs::Tracker) -> AppResult<()> {
+    // Before anything is moved: deleting the account deletes (or moves out of reach of) what is kept
+    if crate::tree::kept::person_kept(&mut *st.db.acquire().await?, id).await? {
+        return Err(crate::tree::kept::refusal(PERSON_KEPT));
+    }
     let moved = move_personal_first(st, me, id, username, q, progress).await?;
     let res = {
         let _w = st.write_lock.lock().await;
@@ -406,6 +414,9 @@ async fn delete_in(
     moved: Option<&Moved>,
 ) -> AppResult<(Option<Removed>, Vec<(String,)>)> {
     still_admin(tx, me.id).await?;
+    if crate::tree::kept::person_kept(tx, id).await? {
+        return Err(crate::tree::kept::refusal(PERSON_KEPT));
+    }
     let removed = remove_personal_in(tx, me, id, username, q, moved).await?;
     let detail = match removed.as_ref().and_then(|r| r.detail.as_deref()) {
         Some(d) => format!("{username}: {d}"),

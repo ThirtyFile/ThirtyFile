@@ -117,6 +117,69 @@ export interface Located extends Node {
   location_path: string[];
   /** Trash: who moved the item there; missing when unknown (deleted before this was recorded, or by a removed account) */
   deleted_by?: string;
+  /** Trash: what keeps it, and what is in it, from being deleted for good yet */
+  kept?: Kept;
+}
+
+/** Why something can't be deleted for good: a legal hold (its reason), or the retention period of its space until a date (seconds) */
+export interface Kept {
+  until: number | null;
+  hold: string | null;
+}
+
+/** An item a deletion left in the trash, in the task's report */
+export interface KeptItem extends Kept {
+  id: string;
+  name: string;
+}
+
+/** A legal hold. `present`: what it names still exists */
+export interface Hold {
+  id: string;
+  scope: "node" | "space" | "user";
+  /** What it was placed on, as it was named then */
+  label: string;
+  reason: string;
+  created_by_name: string;
+  created_at: number;
+  released_at: number | null;
+  released_by_name: string | null;
+  node_id: string | null;
+  drive_id: string | null;
+  user_id: number | null;
+  present: boolean;
+}
+
+export interface HoldList {
+  holds: Hold[];
+  /** Spaces with a retention period */
+  retention: { id: string; name: string; days: number }[];
+}
+
+export interface HeldItem {
+  id: string;
+  name: string;
+  space: string;
+  size: number;
+  updated_at: number;
+  owner: string;
+  path: string;
+}
+
+export interface HoldPlace {
+  scope: Hold["scope"];
+  node_id?: string;
+  drive_id?: string;
+  user_id?: number;
+  reason: string;
+}
+
+/** What keeps one item (its Properties): the space's retention period, and the holds on it or above it */
+export interface NodeRetention {
+  retention_days: number;
+  kept_until: number | null;
+  holds: Hold[];
+  can_place: boolean;
 }
 
 /** What folders hold, at any depth (not counting the folders themselves; items in the trash are left out) */
@@ -197,6 +260,8 @@ export interface Drive {
   /** Browse, download and share only (folder spaces) */
   read_only: boolean;
   link_makers: LinkMakers;
+  /** Days after their last change before its files can be deleted for good (0 = no period) */
+  retention_days: number;
   /** Folder spaces, for administrators */
   source_path?: string;
   last_scan_at?: number | null;
