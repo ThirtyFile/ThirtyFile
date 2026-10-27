@@ -10,6 +10,7 @@ import { t, tServer } from "@/lib/i18n";
 import { refreshFiles, type FileChange } from "@/lib/queries";
 import { reportShown } from "@/lib/errorReport";
 import { errorMessage } from "@/lib/utils";
+import { keptOf, keptToast } from "@/lib/kept";
 
 /** How often a running task is asked for its progress */
 const POLL_MS = 700;
@@ -95,8 +96,11 @@ function finished(job: Job): Job {
  */
 export async function followJob(job: Job, done: string, after: () => void) {
   try {
-    await waitForJob(job);
-    toast.success(done);
+    const finished = await waitForJob(job);
+    // What a hold or a retention period keeps stays in the trash, and the message says so
+    const kept = keptOf(finished);
+    if (kept.length) keptToast(kept);
+    else toast.success(done);
   } catch (e) {
     toast.error(errorMessage(e, t("Operation failed")));
     reportShown(job.kind, e, job.id);

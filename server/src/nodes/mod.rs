@@ -185,6 +185,10 @@ pub struct Located {
     /// Trash: who moved the item there; None when unknown (deleted by a removed account)
     #[serde(skip_serializing_if = "Option::is_none")]
     deleted_by: Option<String>,
+    /// Trash: what keeps the item (and what is in it) from being deleted for good: a legal hold, or the retention period
+    /// of its space until a date (tree/kept.rs)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kept: Option<tree::Kept>,
 }
 
 #[derive(Serialize, Clone)]
@@ -253,7 +257,7 @@ async fn locate(st: &AppState, user: &User, mut nodes: Vec<Node>) -> AppResult<V
         }
         let first = space.as_ref().map_or(paths::SHARED, |s| s.name.as_str());
         let location = std::iter::once(first).chain(location_path.iter().map(String::as_str)).collect::<Vec<_>>().join("/");
-        out.push(Located { node, location, location_space: space, location_path, deleted_by: None });
+        out.push(Located { node, location, location_space: space, location_path, deleted_by: None, kept: None });
     }
     Ok(out)
 }

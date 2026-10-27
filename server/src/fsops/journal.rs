@@ -336,7 +336,10 @@ async fn recover_version(st: &AppState, drive: &str, root: &Pinned, node: &str, 
     let removed = {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
-        let res = versions::record_found(&mut tx, policy, &file, version, to, size).await;
+        let res = match versions::policy_for(&mut tx, policy, &file).await {
+            Ok(policy) => versions::record_found(&mut tx, policy, &file, version, to, size).await,
+            Err(e) => Err(e),
+        };
         crate::db::settle(tx, res).await?
     };
     removed.finish(st);

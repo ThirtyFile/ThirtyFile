@@ -20,6 +20,7 @@ export const ADMIN_PAGES: Record<ControlPanelKey, () => Promise<ComponentType>> 
   monitoring: () => import("@/admin/system/MonitoringPage").then((m) => m.MonitoringPage),
   dashboard: () => import("@/admin/system/DashboardPage").then((m) => m.DashboardPage),
   replicas: () => import("@/admin/storage/ReplicasPage").then((m) => m.ReplicasPage),
+  retention: () => import("@/admin/system/RetentionPage").then((m) => m.RetentionPage),
   usage: () => import("@/admin/storage/UsageSettingsPage").then((m) => m.UsageSettingsPage),
   general: () => import("@/admin/system/GeneralSettingsPage").then((m) => m.GeneralSettingsPage),
   branding: () => import("@/admin/system/BrandingPage").then((m) => m.BrandingPage),

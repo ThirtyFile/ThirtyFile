@@ -237,6 +237,8 @@ pub async fn move_items(st: &AppState, user: &User, req: &BatchReq) -> AppResult
         if tree::is_within(&mut tx, &dest.id, &node.id).await? {
             return Err(AppError::bad_request(format!("Can't move \"{}\" into its own subfolder", node.name)));
         }
+        // What a hold or a retention period keeps doesn't leave its space, nor the folder a hold covers
+        tree::kept::check_move(&mut tx, &node.id, &dest.id, node.drive_id != dest.drive_id).await?;
         // The name the item has in the destination
         let mut name = node.name.clone();
         let mut replacing = None;

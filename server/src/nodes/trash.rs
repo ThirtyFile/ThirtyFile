@@ -109,9 +109,12 @@ pub async fn list_trash(State(st): State<AppState>, user: User, Query(q): Query<
         }
         nodes.push(r.node);
     }
+    let ids: Vec<String> = nodes.iter().map(|n| n.id.clone()).collect();
     let mut located = locate(&st, &user, nodes).await?;
+    let mut kept = tree::kept::subtrees(&mut *st.db.acquire().await?, &ids).await?;
     for l in &mut located {
         l.deleted_by = deleted_by.remove(&l.node.id);
+        l.kept = kept.remove(&l.node.id);
     }
     Ok(Json(Listing::new(located, limit, next)))
 }
@@ -363,6 +366,8 @@ fn merge<'a>(
             fsops::move_unindexed(conn, locks, from, into).await?;
         }
         hand_over(conn, &from.id, &into.id).await?;
+        // A legal hold on the folder goes on holding what is in it, now in `into`: the folder itself is about to go
+        sqlx::query("UPDATE holds SET node_id = ? WHERE node_id = ? AND released_at IS NULL").bind(&into.id).bind(&from.id).execute(&mut *conn).await?;
         // Empty now (in a folder space, its folder in the trash goes with the trash folder, `fsops::clean_trash`)
         sqlx::query("DELETE FROM nodes WHERE id = ?").bind(&from.id).execute(&mut *conn).await?;
         *budget -= 1;
@@ -521,15 +526,32 @@ pub async fn delete_forever(State(st): State<AppState>, user: User, Json(req): J
                 selected.push(id);
             }
         }
+        let mut nodes = Vec::new();
         for id in &selected {
-            let (node, _) = trash_root(&mut tx, &user, id, Need::Delete).await?;
+            nodes.push(trash_root(&mut tx, &user, id, Need::Delete).await?.0);
+        }
+        // What a hold or a retention period keeps stays in the trash, and the report says so
+        let (_, held) = tree::kept::split(&mut tx, selected).await?;
+        let mut kept = Vec::new();
+        for node in nodes {
+            if let Some((_, why)) = held.iter().find(|(id, _)| *id == node.id) {
+                kept.push(kept_entry(&node.id, &node.name, why));
+                continue;
+            }
             logs::record_activity(&mut tx, &user, Some(&node), "delete", "").await?;
             rows.push(changes::purge(&mut tx, &node.id).await?);
         }
         tx.commit().await?;
-        rows
+        (rows, kept)
     };
-    Ok(Json(purge_as_job(&st, pending, rows, None).await?))
+    let (rows, kept) = rows;
+    Ok(Json(purge_as_job(&st, pending, rows, (!kept.is_empty()).then(|| json!({ "kept": kept }))).await?))
+}
+
+/// One item the deletion left in the trash, for the job's report: what keeps it (`until`: the retention period of its
+/// space runs until then; `hold`: the reason of a hold)
+fn kept_entry(id: &str, name: &str, why: &tree::Kept) -> Value {
+    json!({ "id": id, "name": name, "until": why.until, "hold": why.hold })
 }
 
 /// Deletes what `rows` started deleting, as the job `pending`; its result is `result`
@@ -597,20 +619,34 @@ pub async fn empty_trash(State(st): State<AppState>, user: User) -> AppResult<Js
         );
         let selected: Vec<(String,)> =
             sqlx::query_as(sqlx::AssertSqlSafe(select.as_str())).bind(serde_json::to_string(&drive_ids).unwrap()).fetch_all(&mut *tx).await?;
+        let mut names = HashMap::new();
+        let mut ids = Vec::new();
         for (id,) in selected {
             let node = tree::get_node(&mut tx, &id).await?.ok_or_else(|| AppError::conflict("The trash changed"))?;
             tree::require_subtree(&mut tx, &user, &node, Need::Delete).await?;
+            names.insert(id.clone(), node.name);
+            ids.push(id);
         }
-        let rows = changes::purge_selected(&mut tx, &select, &serde_json::to_string(&drive_ids).unwrap()).await?;
+        // What a hold or a retention period keeps stays in the trash, and the report says so
+        let (free, held) = tree::kept::split(&mut tx, ids).await?;
+        let mut rows = Vec::new();
+        for id in &free {
+            rows.push(changes::purge(&mut tx, id).await?);
+        }
         let total = rows.len();
         if total > 0 {
             logs::record_activity(&mut tx, &user, None, "empty_trash", &format!("{total} {}", if total == 1 { "item" } else { "items" })).await?;
         }
         tx.commit().await?;
-        rows
+        let kept: Vec<Value> = held.iter().map(|(id, why)| kept_entry(id, names.get(id).map_or("", String::as_str), why)).collect();
+        (rows, kept)
     };
-    let deleted = json!({ "deleted": rows.len() });
-    Ok(Json(purge_as_job(&st, pending, rows, Some(deleted)).await?))
+    let (rows, kept) = rows;
+    let mut result = json!({ "deleted": rows.len() });
+    if !kept.is_empty() {
+        result["kept"] = json!(kept);
+    }
+    Ok(Json(purge_as_job(&st, pending, rows, Some(result)).await?))
 }
 
 /// Automatically purges trash items older than the retention period; returns how many there were
@@ -620,7 +656,13 @@ pub async fn purge_expired_trash(st: &AppState, days: i64) -> AppResult<usize> {
         let _w = st.write_lock.lock().await;
         let mut tx = crate::db::begin_write(&st.db).await?;
         let select = format!("SELECT id FROM nodes n WHERE n.trash_root = 1 AND n.trashed_at < ?1 AND {NOT_PURGING}");
-        let rows = changes::purge_selected(&mut tx, &select, &cutoff.to_string()).await?;
+        let old: Vec<(String,)> = sqlx::query_as(sqlx::AssertSqlSafe(select.as_str())).bind(cutoff.to_string()).fetch_all(&mut *tx).await?;
+        // What a hold or a retention period keeps stays, and is looked at again at the next emptying
+        let (free, _) = tree::kept::split(&mut tx, old.into_iter().map(|(id,)| id).collect()).await?;
+        let mut rows = Vec::new();
+        for id in &free {
+            rows.push(changes::purge(&mut tx, id).await?);
+        }
         tx.commit().await?;
         rows
     };

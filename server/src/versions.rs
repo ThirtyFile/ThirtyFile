@@ -52,6 +52,48 @@ impl Policy {
     }
 }
 
+/// The policy for one file. What a hold or a retention period keeps is kept as an earlier version whatever the settings
+/// say, even when versions are off: the content a change replaces has to stay for as long as the file would.
+pub async fn policy_for(conn: &mut SqliteConnection, policy: Policy, node: &Node) -> AppResult<Policy> {
+    if policy.keep > 0 || !tree::kept::in_force(conn).await? {
+        return Ok(policy);
+    }
+    let (retention,): (i64,) =
+        sqlx::query_as("SELECT COALESCE((SELECT retention_days FROM drives WHERE id = ?), 0)").bind(node.drive()).fetch_one(&mut *conn).await?;
+    Ok(if retention > 0 || held(conn, &node.id).await? { Policy { keep: 1, ..policy } } else { policy })
+}
+
+/// Whether a hold keeps this file, and with it all its versions
+async fn held(conn: &mut SqliteConnection, node_id: &str) -> AppResult<bool> {
+    Ok(tree::kept::nodes(conn, &[node_id.to_string()]).await?.get(node_id).is_some_and(|k| k.hold.is_some()))
+}
+
+/// The versions among `ids` that may be removed: not those of a file under a hold, nor those a retention period of their
+/// space still keeps (it runs from the day the file was replaced, which is when the version was made)
+async fn removable(conn: &mut SqliteConnection, ids: Vec<String>) -> AppResult<Vec<String>> {
+    if ids.is_empty() || !tree::kept::in_force(conn).await? {
+        return Ok(ids);
+    }
+    let mut out = Vec::with_capacity(ids.len());
+    for chunk in ids.chunks(5000) {
+        let rows: Vec<(String, String, bool)> = sqlx::query_as(
+            "SELECT v.id, v.node_id, EXISTS (SELECT 1 FROM nodes n JOIN drives d ON d.id = n.drive_id
+                                              WHERE n.id = v.node_id AND d.retention_days > 0 AND v.created_at + d.retention_days * 86400 > ?2)
+             FROM node_versions v WHERE v.id IN (SELECT value FROM json_each(?1))",
+        )
+        .bind(serde_json::to_string(chunk).unwrap())
+        .bind(now())
+        .fetch_all(&mut *conn)
+        .await?;
+        let mut files: Vec<String> = rows.iter().map(|(_, node, _)| node.clone()).collect();
+        files.sort_unstable();
+        files.dedup();
+        let under_hold = tree::kept::nodes(conn, &files).await?;
+        out.extend(rows.into_iter().filter(|(_, node, retained)| !retained && !under_hold.get(node).is_some_and(|k| k.hold.is_some())).map(|(id, _, _)| id));
+    }
+    Ok(out)
+}
+
 /// What goes when versions are removed: content no longer used, and files in folder spaces
 #[derive(Default)]
 #[must_use]
@@ -250,13 +292,20 @@ fn version_file(space: &Pinned, node_id: &str, id: &str) -> std::io::Result<Pinn
 
 /// Removes a file's versions beyond the number kept
 async fn prune_node(conn: &mut SqliteConnection, node_id: &str, policy: Policy) -> AppResult<Removed> {
+    // A hold keeps them all; a retention period keeps those not yet as old as it
+    if held(conn, node_id).await? {
+        return Ok(Removed::default());
+    }
     let rows: Vec<(Option<String>, Option<String>, Option<String>)> = sqlx::query_as(
         "DELETE FROM node_versions WHERE node_id = ?1 AND id NOT IN (
            SELECT id FROM node_versions WHERE node_id = ?1 ORDER BY created_at DESC, rowid DESC LIMIT ?2
-         ) RETURNING blob_hash, drive_id, fs_path",
+         ) AND NOT EXISTS (SELECT 1 FROM nodes n JOIN drives d ON d.id = n.drive_id
+                            WHERE n.id = node_versions.node_id AND d.retention_days > 0 AND node_versions.created_at + d.retention_days * 86400 > ?3)
+         RETURNING blob_hash, drive_id, fs_path",
     )
     .bind(node_id)
     .bind(policy.keep.max(0))
+    .bind(now())
     .fetch_all(&mut *conn)
     .await?;
     released(conn, rows).await
@@ -294,6 +343,8 @@ pub async fn prune(st: &AppState) -> AppResult<usize> {
     .await?);
     ids.sort_unstable();
     ids.dedup();
+    // What a hold or a retention period keeps stays
+    let ids = removable(&mut *st.db.acquire().await?, ids).await?;
     let mut n = 0;
     for batch in ids.chunks(PRUNE_BATCH) {
         let _w = st.write_lock.lock().await;

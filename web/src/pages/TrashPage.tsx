@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArchiveRestoreIcon, FilterIcon, FolderOpenIcon, RefreshCwIcon, SquareCheckIcon, Trash2Icon, TrashIcon } from "lucide-react";
+import { ArchiveRestoreIcon, FilterIcon, FolderOpenIcon, LockIcon, RefreshCwIcon, SquareCheckIcon, Trash2Icon, TrashIcon } from "lucide-react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { api, driveName, privateSource, type Located } from "@/api";
@@ -24,6 +24,7 @@ import { Frame, ToolButton } from "@/components/Frame";
 import { useMe } from "@/lib/session";
 import { locale, t } from "@/lib/i18n";
 import { followJob, waitForJob } from "@/lib/jobs";
+import { keptReason, keptText } from "@/lib/kept";
 import { useAllPages } from "@/lib/pages";
 import { refreshFiles, type FileChange } from "@/lib/queries";
 import { trashHint, errorMessage, formatList } from "@/lib/utils";
@@ -44,6 +45,10 @@ export function TrashPage() {
   const [confirm, setConfirm] = useState<"delete" | "empty" | null>(null);
   const items = q.items;
   const ids = [...selected];
+  // What a hold or a retention period keeps can't be deleted for good: it stays, and says why
+  const keptIds = new Set(items.filter((n) => (n as Located).kept).map((n) => n.id));
+  const allKept = ids.length > 0 && ids.every((id) => keptIds.has(id));
+  const someKept = ids.some((id) => keptIds.has(id));
 
   /** Restored: they leave the trash, and show again in the folders they were in */
   const restored = (sent: string[]) => {
@@ -77,7 +82,7 @@ export function TrashPage() {
   const toolbar = (
     <>
       <ToolButton icon={ArchiveRestoreIcon} label={t("Restore")} showLabel disabled={!ids.length} onClick={restore} />
-      <ToolButton icon={Trash2Icon} label={t("Delete permanently")} showLabel disabled={!ids.length || !me.can_delete} onClick={() => setConfirm("delete")} />
+      <ToolButton icon={Trash2Icon} label={t("Delete permanently")} showLabel disabled={!ids.length || !me.can_delete || allKept} onClick={() => setConfirm("delete")} />
       <DropdownMenu>
         <DropdownMenuTrigger render={<ToolButton icon={FilterIcon} label={mine ? t("Deleted by me") : t("Deleted by everyone")} showLabel className={mine ? "text-brand" : undefined} />} />
         <DropdownMenuContent className="w-48">
@@ -143,7 +148,23 @@ export function TrashPage() {
               showLocation
               dateLabel={t("Date deleted")}
               dateOf={(n) => n.trashed_at ?? n.updated_at}
-              extraColumn={{ label: t("Deleted by"), value: (n) => (n as Located).deleted_by ?? "—" }}
+              extraColumn={{
+                label: t("Deleted by"),
+                width: 260,
+                value: (n) => {
+                  const l = n as Located;
+                  return (
+                    <>
+                      {l.deleted_by ?? "—"}
+                      {l.kept && (
+                        <span className="ml-2 inline-flex items-center gap-1 text-amber-600 dark:text-amber-400" title={keptReason(l.kept)}>
+                          <LockIcon className="size-3" /> {keptText(l.kept)}
+                        </span>
+                      )}
+                    </>
+                  );
+                },
+              }}
               empty={
                 <div className="flex min-h-52 flex-col items-center justify-center gap-2 py-10 text-muted-foreground">
                   <Trash2Icon className="size-9 stroke-[1.4]" />
@@ -172,7 +193,7 @@ export function TrashPage() {
               {me.can_delete && (
                 <>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem variant="destructive" onClick={() => setConfirm("delete")}>
+                  <DropdownMenuItem variant="destructive" onClick={() => setConfirm("delete")} disabled={allKept}>
                     <Trash2Icon /> {t("Delete permanently")}
                   </DropdownMenuItem>
                 </>
@@ -210,7 +231,9 @@ export function TrashPage() {
               ? t("Empties the trash of: {spaces}. Permanently deleted items can't be recovered.", {
                   spaces: formatList((emptyable.data ?? []).map((s) => `${driveName(s)} (${s.items.toLocaleString(locale)})`)),
                 })
-              : t("Permanently deleted items can't be recovered.")
+              : someKept
+                ? t("Permanently deleted items can't be recovered. What a legal hold or a retention period keeps stays in the trash.")
+                : t("Permanently deleted items can't be recovered.")
           }
           confirmText={t("Delete permanently")}
           destructive

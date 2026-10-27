@@ -197,20 +197,6 @@ pub async fn purge(conn: &mut SqliteConnection, node_id: &str) -> AppResult<Unfi
     Ok(Unfinished { id: c.id, frontier: None })
 }
 
-/// Starts deleting, for good, the trash items `select` finds (their ids, from `?1` = `param`), all at once
-pub async fn purge_selected(conn: &mut SqliteConnection, select: &str, param: &str) -> AppResult<Vec<Unfinished>> {
-    let rows: Vec<(String,)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "INSERT INTO tree_changes (id, kind, node_id, created_at)
-         SELECT lower(hex(randomblob(16))), 'purge', id, ?2 FROM ({select}) WHERE true
-         RETURNING id"
-    )))
-    .bind(param)
-    .bind(now())
-    .fetch_all(conn)
-    .await?;
-    Ok(rows.into_iter().map(|(id,)| Unfinished { id, frontier: None }).collect())
-}
-
 /// How many items the deletions `rows` have left to delete (read without the write lock, for their progress)
 pub async fn items_left(st: &AppState, rows: &[Unfinished]) -> AppResult<u64> {
     let ids = serde_json::to_string(&rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>()).unwrap();

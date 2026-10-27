@@ -37,6 +37,8 @@ use crate::{
 /// How long a browser is told to wait for the person
 const TIMEOUT_MS: u64 = 120_000;
 const MAX_NAME: usize = 60;
+/// Challenges one address may ask for within the failure window (15 minutes)
+const OPTIONS_PER_WINDOW: usize = 300;
 /// Wrong second factors for one account within the failure window (as codes)
 const ACCOUNT_LIMIT: usize = 10;
 
@@ -82,8 +84,12 @@ pub fn available(st: &AppState) -> bool {
 }
 
 /// The challenge for signing in with a passkey, without a user name typed
-pub async fn login_options(State(st): State<AppState>) -> AppResult<Json<Value>> {
+pub async fn login_options(State(st): State<AppState>, ConnectInfo(addr): ConnectInfo<SocketAddr>, headers: HeaderMap) -> AppResult<Json<Value>> {
     let rp = relying_party_of(&st)?;
+    // Challenges are kept in memory, a limited number: one address can't ask for so many that the others' are pushed out
+    if !auth::begin_attempt(&st, &format!("pk-options:{}", limit_key_ip(&client_ip(&st, addr, &headers))), OPTIONS_PER_WINDOW) {
+        return Err(too_many());
+    }
     let challenge = st.part::<Memory>().issue(Scope::Login);
     Ok(Json(request_options(&rp, &challenge, &[], "required")))
 }

@@ -396,8 +396,18 @@ impl Across {
 /// keep their ids and with them their shares, permissions and favourites; then the originals are removed.
 /// `items`: each item with everything in it (not in the trash), ordered by depth. `held`: the caller holds the scan
 /// locks of both spaces for the whole change.
+/// Moving to another space copies and deletes: what a hold or a retention period keeps can't go
+async fn refuse_if_kept(conn: &mut SqliteConnection, top: &Node) -> AppResult<()> {
+    if tree::kept::subtrees(conn, std::slice::from_ref(&top.id)).await?.contains_key(&top.id) {
+        return Err(tree::kept::refusal(tree::kept::MOVE_KEPT));
+    }
+    Ok(())
+}
+
 async fn move_items_across(st: &AppState, user: &User, dest: &Node, items: Vec<Vec<Node>>, progress: &Tracker, held: bool) -> AppResult<()> {
     for nodes in items {
+        // Before its content is copied
+        refuse_if_kept(&mut *st.db.acquire().await?, &nodes[0]).await?;
         let mut turn = Turn::new(st, &nodes[0], dest, true, held);
         let mut placed = place(st, &nodes, dest, true, progress, &mut turn).await?;
         #[cfg(test)]
@@ -517,6 +527,7 @@ pub(super) async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: 
     let mut tx = crate::db::begin_write(&st.db).await?;
     let top = &nodes[0];
     authorize_move(&mut tx, user, dest, top, held).await?;
+    refuse_if_kept(&mut tx, top).await?;
     // Everything must still be as it was when the content was copied: items added to a folder of the content store
     // meanwhile would be left behind
     let changed = || AppError::conflict(format!("\"{}\" changed while it was being moved. Try again.", top.name));

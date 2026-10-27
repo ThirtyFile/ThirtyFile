@@ -3,11 +3,13 @@
 
 mod blobs;
 pub mod changes;
+pub mod kept;
 mod permissions;
 mod quota;
 mod restricted;
 
 pub use blobs::*;
+pub use kept::Kept;
 pub use permissions::*;
 pub use quota::*;
 pub use restricted::*;

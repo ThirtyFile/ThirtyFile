@@ -78,7 +78,18 @@ pub async fn remove(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
     Ok(Json(job))
 }
 
+/// Refuses when the personal space holds something a legal hold or a retention period keeps: removing it deletes it
+async fn refuse_if_kept(conn: &mut SqliteConnection, user_id: i64) -> AppResult<()> {
+    let space: Option<(String,)> = sqlx::query_as("SELECT id FROM drives WHERE kind = 'personal' AND owner_id = ?").bind(user_id).fetch_optional(&mut *conn).await?;
+    match space {
+        Some((drive,)) if crate::tree::kept::space_has_kept(conn, &drive).await? => Err(crate::tree::kept::refusal(crate::drives::SPACE_KEPT)),
+        _ => Ok(()),
+    }
+}
+
 async fn remove_now(st: &AppState, me: &crate::auth::User, id: i64, username: &str, q: &DeleteQuery, progress: &jobs::Tracker) -> AppResult<()> {
+    // Before anything is moved
+    refuse_if_kept(&mut *st.db.acquire().await?, id).await?;
     let moved = crate::personal::move_personal_first(st, me, id, username, q, progress).await?;
     let res = {
         let _w = st.write_lock.lock().await;
@@ -103,6 +114,7 @@ async fn remove_in(
     moved: Option<&crate::personal::Moved>,
 ) -> AppResult<Option<crate::personal::Removed>> {
     crate::auth::require_admin(tx, me).await?;
+    refuse_if_kept(tx, id).await?;
     let (pending,): (Option<String>,) = sqlx::query_as("SELECT personal_pending FROM users WHERE id = ?").bind(id).fetch_one(&mut *tx).await?;
     let removed = crate::personal::remove_personal_in(tx, me, id, username, q, moved).await?;
     let detail = match &removed {

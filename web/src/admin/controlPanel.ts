@@ -4,6 +4,7 @@ import {
   ArchiveIcon,
   ArchiveRestoreIcon,
   BellRingIcon,
+  GavelIcon,
   GaugeIcon,
   CopyCheckIcon,
   DatabaseIcon,
@@ -36,6 +37,7 @@ export type ControlPanelKey =
   | "moves"
   | "backups"
   | "replicas"
+  | "retention"
   | "usage"
   | "general"
   | "branding"
@@ -234,6 +236,16 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
     category: "users",
     keywords:
       "sso 單一登入 三方登入 第三方 oauth oidc microsoft entra azure ad office 365 google workspace github openid keycloak authentik 登入 帳號 連結 single sign-on third-party sign in login account link", // i18n-ignore: bilingual search keywords
+  },
+  {
+    key: "retention",
+    to: adminPath("retention"),
+    title: t("Retention and holds"),
+    desc: t("How long a space keeps its files before they can be deleted for good, and legal holds that keep what is held"),
+    icon: GavelIcon,
+    tone: "bg-violet-500/12 text-violet-700 dark:text-violet-300",
+    category: "storage",
+    keywords: "保留 保存 期限 法務 保全 訴訟 稽核 合規 刪除 資料保存 retention legal hold litigation audit compliance records delete eDiscovery", // i18n-ignore: bilingual search keywords
   },
   {
     key: "alerts",

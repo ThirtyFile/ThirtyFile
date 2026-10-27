@@ -12,8 +12,9 @@ import { Thumb } from "@/components/fileList/thumbs";
 import { Resizer } from "@/components/Resizer";
 import { VersionsSection } from "@/components/VersionsSection";
 import { S3FolderSection } from "@/components/S3Buckets";
+import { RetentionSection } from "@/components/RetentionSection";
 import { FtpFolderSection } from "@/components/FtpFolders";
-import { ROLE_LABEL, capsFor, capsOf } from "@/lib/drives";
+import { ROLE_LABEL, atLeast, capsFor, capsOf } from "@/lib/drives";
 import { actionLabel } from "@/components/logs/actions";
 import { useMediaQuery, useOverlayFocus } from "@/lib/focus";
 import { t, tServer } from "@/lib/i18n";
@@ -204,6 +205,8 @@ export function DetailsPane({ selected, folder, onClose, count, whole }: { selec
           )}
           {ready && node.kind === "folder" && me.s3_enabled && <S3FolderSection nodeId={node.id} />}
           {ready && node.kind === "folder" && me.ftp_enabled && <FtpFolderSection nodeId={node.id} />}
+          {/* What keeps it from being deleted for good: its managers see it, administrators place holds */}
+          {ready && !isRoot && !node.trashed_at && info.data && (me.role === "admin" || atLeast(info.data.role, "manager")) && <RetentionSection nodeId={node.id} name={node.name} ready />}
           <History node={node} query={history} />
           {error && (
             <ErrorState compact message={error.message} onRetry={() => Promise.all([info.error && info.refetch(), shares.error && shares.refetch(), contents.error && contents.refetch()])} />
