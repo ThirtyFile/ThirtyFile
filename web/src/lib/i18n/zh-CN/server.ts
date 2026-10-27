@@ -1181,4 +1181,5 @@ export default {
   "Link your own account to one of the sign-in providers first (My account › Sign-in methods): you have to be able to sign in that way": "请先把你自己的账号关联到其中一个登录提供商（账号菜单 › 登录方式）：你必须能用这种方式登录",
   "Sign in through a provider once with your own account first, to be sure it works": "请先用你自己的账号通过提供商登录一次，确认可以正常工作",
   "Single sign-on would be the only way to sign in, and no enabled administrator is linked to a sign-in provider that is on": "单点登录将是唯一的登录方式，但没有任何已启用的管理员关联到已开启的登录提供商",
+  "You don't have permission to see what takes the room of this space": "你没有权限查看这个空间占用空间的项目",
 } satisfies Record<string, string>;

@@ -6,6 +6,7 @@ import {
   FolderSyncIcon,
   LockIcon,
   LockOpenIcon,
+  ChartPieIcon,
   GaugeIcon,
   HardDriveIcon,
   PanelTopIcon,
@@ -275,6 +276,11 @@ export function AdminDrivesPage() {
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                 </>
+              )}
+              {selected.kind !== "personal" && (
+                <DropdownMenuItem onClick={() => navigate(`/analytics/${selected.id}`)}>
+                  <ChartPieIcon /> {t("Storage analytics")}
+                </DropdownMenuItem>
               )}
               <DropdownMenuItem onClick={() => setDialog({ t: "quota", drive: selected })}>
                 <GaugeIcon /> {t("Change quota")}

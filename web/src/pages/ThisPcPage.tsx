@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDownIcon,
+  ChartPieIcon,
   CirclePlusIcon,
   FolderOpenIcon,
   Grid2X2Icon,
@@ -191,6 +192,11 @@ export function ThisPcPage() {
       {d.kind === "team" && (atLeast(d.role, "manager") || me.role === "admin") && (
         <DropdownMenuItem onClick={() => setDialog({ t: "rename", drive: d })}>
           <PencilIcon /> {t("Rename")}
+        </DropdownMenuItem>
+      )}
+      {(d.kind === "personal" ? d.role === "owner" : atLeast(d.role, "manager") || me.role === "admin") && (
+        <DropdownMenuItem onClick={() => void navigate(`/analytics/${d.id}`)}>
+          <ChartPieIcon /> {t("Storage analytics")}
         </DropdownMenuItem>
       )}
       <DropdownMenuItem onClick={() => setDialog({ t: "props", drive: d })}>
