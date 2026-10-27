@@ -43,7 +43,7 @@ export function EmailPage() {
     onSuccess: (data) => {
       identity.clear();
       qc.setQueryData(keys.emailSettings(), data);
-      qc.invalidateQueries({ queryKey: keys.notificationSettings() });
+      void qc.invalidateQueries({ queryKey: keys.notificationSettings() });
       setForm(formOf(data));
       toast.success(t("Email settings saved"));
     },
@@ -62,7 +62,7 @@ export function EmailPage() {
       item="email"
       onRefresh={() => {
         setForm(null);
-        q.refetch();
+        void q.refetch();
       }}
     >
       {!form || !q.data ? (

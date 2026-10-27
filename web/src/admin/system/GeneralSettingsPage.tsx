@@ -144,7 +144,7 @@ export function GeneralSettingsPage() {
     onSuccess: (data) => {
       qc.setQueryData(keys.system(), data);
       // The left-hand menu and permissions both depend on the space list and me
-      invalidateFiles(qc);
+      void invalidateFiles(qc);
       toast.success(t("System settings updated"));
     },
     onError: (e) => toast.error(e.message),

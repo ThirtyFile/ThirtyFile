@@ -157,8 +157,8 @@ export function BackupsPage() {
     refetchInterval: (query) => (query.state.data?.running ? 2000 : 30_000),
   });
   const refresh = () => {
-    qc.invalidateQueries({ queryKey: keys.backups() });
-    invalidateFiles(qc, "admin-drives", "storage-locations");
+    void qc.invalidateQueries({ queryKey: keys.backups() });
+    void invalidateFiles(qc, "admin-drives", "storage-locations");
   };
   const act = async (what: () => Promise<unknown>, done: string) => {
     try {

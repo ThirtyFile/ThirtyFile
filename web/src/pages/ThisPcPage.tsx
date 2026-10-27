@@ -169,7 +169,7 @@ export function ThisPcPage() {
     const url = s.t === "drive" ? `/files/${s.drive.root_id}` : s.item.kind === "folder" ? `/files/${s.item.id}` : `/view/${s.item.id}`;
     if (newTab) tabs.open(url, { reuse: true });
     else if (s.t === "shared" && s.item.kind === "file") tabs.openFile(url);
-    else navigate(url);
+    else void navigate(url);
   };
 
   const refresh = () => qc.invalidateQueries({ queryKey: keys.drives() });
@@ -219,7 +219,7 @@ export function ThisPcPage() {
       className={className}
       onSubmit={async (name) => {
         await api.updateDrive(d.id, { name });
-        refresh();
+        void refresh();
       }}
       onDone={() => setDialog(null)}
     />
@@ -548,7 +548,7 @@ export function ThisPcPage() {
         <CreateDriveDialog
           onClose={() => setDialog(null)}
           onCreated={(d) => {
-            refresh();
+            void refresh();
             selectOnly({ t: "drive", drive: d });
           }}
         />
@@ -587,7 +587,7 @@ export function ThisPcPage() {
           nodeId={dialog.drive.root_id}
           onClose={() => {
             setDialog(null);
-            refresh();
+            void refresh();
           }}
         />
       )}

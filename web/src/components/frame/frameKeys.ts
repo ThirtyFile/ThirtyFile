@@ -62,7 +62,7 @@ export function useFrameKeys(o: { enabled?: boolean; upTo?: string | null; refre
       if (isTyping(e.target) || document.querySelector("[role=dialog]") || (e.target as HTMLElement | null)?.closest?.("[role=menu], [role=menuitem]")) return;
       if (pressed(e, withoutAlt(k.back))) back();
       else if (pressed(e, withoutAlt(k.forward))) forward();
-      else if (pressed(e, withoutAlt(k.upFolder))) up();
+      else if (pressed(e, withoutAlt(k.upFolder))) void up();
       else if (pressed(e, k.search)) o.focusSearch();
       else if (pressed(e, k.addressBar)) o.editPath();
       else if (pressed(e, k.shortcuts)) openShortcuts();
@@ -77,7 +77,7 @@ export function useFrameKeys(o: { enabled?: boolean; upTo?: string | null; refre
       if (!toParent && !backward && !pressed(e, withAlt(k.forward))) return;
       const at = e.target as HTMLElement | null;
       if (isTyping(at) || at?.tagName === "SELECT" || document.querySelector("[role=dialog]") || at?.closest?.("[role=menu]")) return;
-      if (toParent) up();
+      if (toParent) void up();
       else if (backward) back();
       else forward();
       e.preventDefault();

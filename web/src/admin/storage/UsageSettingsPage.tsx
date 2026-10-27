@@ -105,9 +105,9 @@ export function UsageSettingsPage() {
       ]
     : [];
   const refresh = () => {
-    q.refetch();
-    usage.refetch();
-    history.refetch();
+    void q.refetch();
+    void usage.refetch();
+    void history.refetch();
   };
   return (
     <SettingsFrame item="usage" onRefresh={refresh} footer={<span>{t("Includes all spaces and the trash")}</span>}>
@@ -632,7 +632,7 @@ function Thresholds({ value }: { value: UsageThresholds }) {
   const save = useMutation({
     mutationFn: () => api.setUsageThresholds({ disk_percent: Number(disk), error_percent: Number(errors) }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: keys.usage() });
+      void qc.invalidateQueries({ queryKey: keys.usage() });
       toast.success(t("Alert thresholds saved"));
     },
     onError: (e) => toast.error(e.message),

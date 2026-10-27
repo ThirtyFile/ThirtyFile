@@ -38,8 +38,31 @@ export default defineConfig({
       // Copying before a loop that removes items from the same collection (live attribute lists, maps) is deliberate
       "unicorn/no-useless-spread": "off",
       "vite-plus/prefer-vite-plus-imports": "error",
+      // Type-aware rules (the `options.typeAware` below). A promise nobody awaits or marks with `void` is a rejection nobody
+      // sees; a `.sort()` without a comparison puts 10 before 9
+      "typescript/no-floating-promises": "error",
+      "typescript/await-thenable": "error",
+      "typescript/require-array-sort-compare": ["error", { ignoreStringArrays: true }],
+      "typescript/no-redundant-type-constituents": "error",
+      "typescript/no-meaningless-void-operator": "error",
+      // Props are declared as methods (`onClose(): void`) and handed on as callbacks; nothing here relies on `this`
+      "typescript/unbound-method": "off",
+      // Event handlers are async functions throughout, and report their own failures (the `run` helpers of the dialogs)
+      "typescript/no-misused-promises": "off",
+      // [...text] splits a string into characters (code points) on purpose
+      "typescript/no-misused-spread": "off",
     },
+    overrides: [
+      {
+        // The tests' fetch mocks stringify a URL or a Request on purpose (String(url) in an expectation)
+        files: ["tests/**"],
+        rules: { "typescript/no-base-to-string": "off" },
+      },
+    ],
     ignorePatterns: ["dist", "node_modules", "public", "test-results"],
+    // Needs the tsconfig of each folder (tsconfig.json for src, tests/tsconfig.json for the tests): a file no tsconfig
+    // includes has no types, and every type from an `@/` import is an error type to the rules
+    options: { typeAware: true },
     jsPlugins: [
       {
         name: "vite-plus",

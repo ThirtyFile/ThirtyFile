@@ -59,9 +59,9 @@ export function Preview(props: {
       if ((e.target as HTMLElement)?.closest?.('[data-slot="dialog-content"]')) return;
       // Not while typing, editing, or seeking in a media player with the arrow keys
       const inEditor = (e.target as HTMLElement)?.closest?.(".cm-editor, video, audio, input, textarea, select, [contenteditable]");
-      if (e.key === "Escape" && !inEditor && !e.defaultPrevented) close();
-      else if (!inEditor && e.key === "ArrowLeft") go(-1);
-      else if (!inEditor && e.key === "ArrowRight") go(1);
+      if (e.key === "Escape" && !inEditor && !e.defaultPrevented) void close();
+      else if (!inEditor && e.key === "ArrowLeft") void go(-1);
+      else if (!inEditor && e.key === "ArrowRight") void go(1);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

@@ -105,8 +105,8 @@ export function ReplicasPage() {
   const newFor = params.get("new");
   const [making, setMaking] = useState<string | null>(null);
   const refresh = () => {
-    qc.invalidateQueries({ queryKey: keys.replicas() });
-    invalidateFiles(qc, "admin-drives", "storage-locations");
+    void qc.invalidateQueries({ queryKey: keys.replicas() });
+    void invalidateFiles(qc, "admin-drives", "storage-locations");
   };
   const act = async (what: () => Promise<unknown>, done: string) => {
     try {

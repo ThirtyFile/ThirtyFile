@@ -63,7 +63,7 @@ export function StorageDialog({ location, onClose, onSaved }: { location: Storag
   const [kind, setKind] = useState<StorageKind>(location?.kind ?? "s3");
   const [cfg, setCfg] = useState<StorageConfig>(location?.config ?? { ...PRESETS[0].config });
   const [preset, setPreset] = useState(location ? "" : "aws");
-  const [tested, setTested] = useState<"ok" | string | null>(null);
+  const [tested, setTested] = useState<string | null>(null);
   // SFTP: host key provided by the server on the first connection test (for the admin to verify)
   const [seenKey, setSeenKey] = useState<string | null>(null);
   const [auth, setAuth] = useState<"password" | "key">("password");

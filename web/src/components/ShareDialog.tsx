@@ -167,7 +167,7 @@ export function ShareDialog({ node, onClose }: { node: Node; onClose(): void }) 
       }),
     onSuccess: () => {
       setPassword("");
-      qc.invalidateQueries({ queryKey: keys.shares() });
+      void qc.invalidateQueries({ queryKey: keys.shares() });
     },
   });
   // The link is put on the clipboard from within the click (as it is being made): some browsers allow writing to the
@@ -191,7 +191,7 @@ export function ShareDialog({ node, onClose }: { node: Node; onClose(): void }) 
     mutationFn: (id: string) => api.deleteShare(id),
     onSuccess: () => {
       toast.success(t("Share link deleted"));
-      qc.invalidateQueries({ queryKey: keys.shares() });
+      void qc.invalidateQueries({ queryKey: keys.shares() });
     },
     onError: (e) => toast.error(e.message),
   });
@@ -335,7 +335,7 @@ export function EditShareDialog({ share, onClose }: { share: ShareInfo; onClose(
     },
     onSuccess: () => {
       toast.success(t("Share link updated"));
-      qc.invalidateQueries({ queryKey: keys.shares() });
+      void qc.invalidateQueries({ queryKey: keys.shares() });
       onClose();
     },
   });

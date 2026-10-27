@@ -78,7 +78,7 @@ export function ShareLinks({
     onSuccess: () => {
       toast.success(t("Share link deleted"));
       setSelected(null);
-      qc.invalidateQueries({ queryKey: keys.shares() });
+      void qc.invalidateQueries({ queryKey: keys.shares() });
     },
     onError: (e) => toast.error(e.message),
   });

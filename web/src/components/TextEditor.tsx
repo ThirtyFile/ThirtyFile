@@ -106,7 +106,7 @@ export default function TextEditor(props: {
       },
     );
     const desc = LanguageDescription.matchFilename(languages, props.node.name);
-    desc?.load().then((l) => !cancelled && setLang(l));
+    void desc?.load().then((l) => !cancelled && setLang(l));
     return () => {
       cancelled = true;
       stop();

@@ -114,7 +114,7 @@ function TabItem({ tab, active, onlyOne }: { tab: Tab; active: boolean; onlyOne:
             // Middle click closes the tab
             if (e.button === 1) {
               e.preventDefault();
-              requestClose();
+              void requestClose();
             }
           }}
           className={cn(
@@ -140,7 +140,7 @@ function TabItem({ tab, active, onlyOne }: { tab: Tab; active: boolean; onlyOne:
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
-              requestClose();
+              void requestClose();
             }}
             className={cn("flex size-5 shrink-0 items-center justify-center rounded hover:bg-accent", !active && !unsaved && "opacity-0 group-hover:opacity-100")}
           >
@@ -185,7 +185,7 @@ export function TabBar() {
     if (e.key === "Delete") {
       e.preventDefault();
       const bar = e.currentTarget;
-      close(active);
+      void close(active);
       // The tab that takes its place gets the focus (not when closing waits for an answer about unsaved changes)
       requestAnimationFrame(() => {
         if (!document.querySelector("[role=dialog], [role=alertdialog]")) {

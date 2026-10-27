@@ -20,7 +20,7 @@ export function LinkedAccountsDialog({ onClose }: { onClose(): void }) {
   const unlink = useMutation({
     mutationFn: api.unlinkIdentity,
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: keys.identities() });
+      void qc.invalidateQueries({ queryKey: keys.identities() });
       toast.success(t("Account unlinked"));
     },
     onError: (e) => toast.error(e.message),
