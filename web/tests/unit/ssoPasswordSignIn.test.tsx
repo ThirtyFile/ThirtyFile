@@ -80,7 +80,9 @@ async function mount(saved: SsoSettings) {
       </QueryClientProvider>,
     );
   });
-  await act(async () => void (await vi.waitFor(() => expect(host.querySelector('input[name="password-sign-in"]')).not.toBeNull())));
+  await act(async () => {
+    await vi.waitFor(() => expect(host.querySelector('input[name="password-sign-in"]')).not.toBeNull());
+  });
 }
 
 const radio = (label: string) => {
@@ -155,7 +157,9 @@ describe("Password sign-in", () => {
     });
     const save = [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Save")!;
     await act(async () => save.click());
-    await act(async () => void (await vi.waitFor(() => expect(sent).toHaveLength(1))));
+    await act(async () => {
+      await vi.waitFor(() => expect(sent).toHaveLength(1));
+    });
     expect(sent[0].password_sign_in).toBe("administrators");
     expect(sent[0].my_password).toBe("secret-password");
   });

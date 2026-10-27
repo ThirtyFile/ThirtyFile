@@ -75,7 +75,9 @@ describe("the sign-in page with password sign-in", () => {
   test("open to everyone: the form, the reset link and the providers", async () => {
     serve("everyone");
     await mount();
-    await act(async () => void (await vi.waitFor(() => expect(links()).toEqual(expect.arrayContaining(["Forgot password?", "Sign in with Google"])))));
+    await act(async () => {
+      await vi.waitFor(() => expect(links()).toEqual(expect.arrayContaining(["Forgot password?", "Sign in with Google"])));
+    });
     expect(fields()).toBe(2);
     expect(host.querySelector('input[type="password"]')).not.toBeNull();
     expect(links()).toContain("Sign in with Google");
@@ -84,7 +86,9 @@ describe("the sign-in page with password sign-in", () => {
   test("for administrators only: no form on the page everyone sees", async () => {
     serve("administrators");
     await mount("/login");
-    await act(async () => void (await vi.waitFor(() => expect(links()).toContain("Sign in with Google"))));
+    await act(async () => {
+      await vi.waitFor(() => expect(links()).toContain("Sign in with Google"));
+    });
     expect(fields()).toBe(0);
     expect(host.querySelector('input[type="password"]')).toBeNull();
     expect(links()).not.toContain("Forgot password?");
@@ -95,7 +99,9 @@ describe("the sign-in page with password sign-in", () => {
   test("for administrators only: the form is at the administrators' address", async () => {
     serve("administrators");
     await mount("/sign-in/administrator", true);
-    await act(async () => void (await vi.waitFor(() => expect(fields()).toBe(2))));
+    await act(async () => {
+      await vi.waitFor(() => expect(fields()).toBe(2));
+    });
     expect(host.querySelector('input[type="password"]')).not.toBeNull();
   });
 
@@ -106,7 +112,9 @@ describe("the sign-in page with password sign-in", () => {
       ["/sign-in/administrator", true],
     ] as const) {
       await mount(path, administrator);
-      await act(async () => void (await vi.waitFor(() => expect(links()).toContain("Sign in with GitHub"))));
+      await act(async () => {
+        await vi.waitFor(() => expect(links()).toContain("Sign in with GitHub"));
+      });
       expect({ path, fields: fields() }).toEqual({ path, fields: 0 });
       expect(host.querySelector('input[type="password"]')).toBeNull();
       act(() => root?.unmount());
@@ -117,7 +125,9 @@ describe("the sign-in page with password sign-in", () => {
   test("when everyone may, the administrators' address is the same page", async () => {
     serve("everyone");
     await mount("/sign-in/administrator", true);
-    await act(async () => void (await vi.waitFor(() => expect(fields()).toBe(2))));
+    await act(async () => {
+      await vi.waitFor(() => expect(fields()).toBe(2));
+    });
   });
 
   test("the form is not drawn while the server hasn't said, so it never flashes on screen", async () => {
@@ -140,20 +150,26 @@ describe("the sign-in page with password sign-in", () => {
     expect(host.querySelector('input[type="password"]')).toBeNull();
     // It answers: nobody. The form was never there
     answer(json({ password_reset: false, password_sign_in: "nobody" }));
-    await act(async () => void (await vi.waitFor(() => expect(links()).toContain("Sign in with Google"))));
+    await act(async () => {
+      await vi.waitFor(() => expect(links()).toContain("Sign in with Google"));
+    });
     expect(fields()).toBe(0);
   });
 
   test("when the setting can't be read the form stays (the server refuses a password where it isn't allowed)", async () => {
     serve(Promise.resolve(json({ message: "boom" }, 500)));
     await mount();
-    await act(async () => void (await vi.waitFor(() => expect(fields()).toBe(2))));
+    await act(async () => {
+      await vi.waitFor(() => expect(fields()).toBe(2));
+    });
   });
 
   test("with no password and no provider, it says so", async () => {
     serve("nobody", []);
     await mount();
-    await act(async () => void (await vi.waitFor(() => expect(text()).toContain("Ask your administrator"))));
+    await act(async () => {
+      await vi.waitFor(() => expect(text()).toContain("Ask your administrator"));
+    });
     expect(fields()).toBe(0);
   });
 });
@@ -162,7 +178,9 @@ describe("going straight to the only provider", () => {
   test("with no form and one provider, the page goes to it", async () => {
     serve("nobody", [GOOGLE]);
     await mount("/login?next=%2Ffiles%2Fabc");
-    await act(async () => void (await vi.waitFor(() => expect(assign).toHaveBeenCalled())));
+    await act(async () => {
+      await vi.waitFor(() => expect(assign).toHaveBeenCalled());
+    });
     expect(assign).toHaveBeenCalledWith("/api/auth/sso/google/start?next=%2Ffiles%2Fabc");
   });
 
