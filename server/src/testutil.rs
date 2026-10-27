@@ -116,6 +116,7 @@ async fn make_env(space_folders: bool) -> TestEnv {
             log_tx,
             branding: Default::default(),
             sso: Default::default(),
+            metrics: Default::default(),
         }),
     });
     let _writer = crate::logs::spawn_writer(st.clone(), log_rx);

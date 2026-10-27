@@ -94,6 +94,7 @@ async fn monitor(st: AppState) {
                     retry_in_background(&st, id);
                 }
             }
+            crate::metrics::beat(&st, "location_checks");
         }
     }
 }

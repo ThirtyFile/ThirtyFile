@@ -33,6 +33,8 @@ pub fn router(state: AppState) -> Router {
                 .route_layer(middleware::from_fn(error::note_route)),
         )
         // WebDAV (dav/): outside the request timeout too, as it receives and sends whole files
+        // Monitoring (metrics/): off until an administrator turns it on, and then asks for its token
+        .route("/metrics", get(crate::metrics::scrape))
         .route(dav::PREFIX, any(dav::handle))
         .route("/dav/", any(dav::handle))
         .route("/dav/{*path}", any(dav::handle))
@@ -53,6 +55,8 @@ pub fn router(state: AppState) -> Router {
         // Outermost, so a request that panicked is recorded too: gives each request an id and records the errors
         // people run into (logs/errors.rs)
         .layer(middleware::from_fn_with_state(state.clone(), logs::track))
+        // Counts the requests for monitoring, everything that came in
+        .layer(middleware::from_fn_with_state(state.clone(), crate::metrics::track))
         .with_state(state)
 }
 
@@ -261,6 +265,7 @@ fn admin_api() -> Router<AppState> {
         .route("/admin/groups/{id}", patch(drives::update_group).delete(drives::delete_group))
         .route("/admin/settings", get(admin::get_settings).patch(admin::update_settings))
         .route("/admin/sso", get(sso::get_settings).put(sso::update_settings))
+        .route("/admin/monitoring", get(crate::metrics::get_settings).put(crate::metrics::update_settings))
         .route("/admin/usage", get(usage::api::overview))
         .route("/admin/usage/history", get(usage::api::history))
         .route("/admin/usage/thresholds", put(usage::api::set_thresholds))

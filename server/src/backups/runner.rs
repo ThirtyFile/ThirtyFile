@@ -454,8 +454,9 @@ async fn run_queue<E: Engine>(st: AppState, engine: &'static E, restarted: bool)
             tracing::warn!("Couldn't continue the jobs of {} that were running: {}", engine.queue(&st).table, e.message);
         }
         loop {
-            if let Err(e) = start_due_in(&st, engine).await {
-                tracing::warn!("Couldn't start a job of {}: {}", engine.queue(&st).table, e.message);
+            match start_due_in(&st, engine).await {
+                Ok(()) => crate::metrics::beat(&st, engine.queue(&st).table),
+                Err(e) => tracing::warn!("Couldn't start a job of {}: {}", engine.queue(&st).table, e.message),
             }
             tokio::select! {
                 _ = engine.queue(&st).wake.notified() => {}

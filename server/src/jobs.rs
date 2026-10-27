@@ -215,7 +215,9 @@ fn snapshot(st: &AppState, id: &str) -> Option<Job> {
 }
 
 fn finish(st: &AppState, id: &str, result: &AppResult<Outcome>) {
+    let mut kind = "";
     update(st, id, |j| {
+        kind = j.kind;
         j.finished_at = Some(now());
         match result {
             Ok(o) => {
@@ -231,6 +233,9 @@ fn finish(st: &AppState, id: &str, result: &AppResult<Outcome>) {
             }
         }
     });
+    if !kind.is_empty() {
+        crate::metrics::task_finished(st, kind, result.is_ok());
+    }
 }
 
 /// Marks a job failed should its task end without recording how (a bug that panicked)
@@ -238,13 +243,18 @@ struct Unfinished(AppState, String);
 
 impl Drop for Unfinished {
     fn drop(&mut self) {
+        let mut ended = None;
         update(&self.0, &self.1, |j| {
             if j.finished_at.is_none() {
                 j.finished_at = Some(now());
                 j.state = "failed";
                 j.error = Some("A server error occurred".into());
+                ended = Some(j.kind);
             }
         });
+        if let Some(kind) = ended {
+            crate::metrics::task_finished(&self.0, kind, false);
+        }
     }
 }
 

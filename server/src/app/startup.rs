@@ -148,6 +148,7 @@ pub async fn start(cfg: Settings, storage: PathBuf, db: sqlx::SqlitePool) -> Res
     let log_settings = logs::load_settings(&db).await;
     let branding = branding::load(&db).await;
     let sso_settings = sso::load(&db).await;
+    let metrics_settings = crate::metrics::load(&db).await;
     if sso_settings.password_sign_in != sso::PasswordSignIn::Everyone {
         tracing::warn!(
             "Password sign-in is {} (Control panel › Single sign-on). If nobody can sign in, run `thirtyfile password-sign-in everyone`",
@@ -184,6 +185,7 @@ pub async fn start(cfg: Settings, storage: PathBuf, db: sqlx::SqlitePool) -> Res
             log_tx,
             branding,
             sso: sso_settings,
+            metrics: metrics_settings,
         }),
     });
 
@@ -203,6 +205,7 @@ pub async fn start(cfg: Settings, storage: PathBuf, db: sqlx::SqlitePool) -> Res
     spawn_maintenance(state.clone(), cfg.trash_days);
     locations::spawn_health_monitor(state.clone());
     usage::sample::spawn(state.clone());
+    crate::metrics::spawn_collector(state.clone());
     moves::spawn_runner(state.clone());
     backups::spawn_runner(state.clone());
     crate::access_review::spawn_reminder(state.clone());
@@ -229,6 +232,7 @@ pub struct Loaded {
     pub log_tx: tokio::sync::mpsc::Sender<logs::LogEvent>,
     pub branding: branding::Branding,
     pub sso: sso::SsoSettings,
+    pub metrics: crate::metrics::Settings,
 }
 
 /// What each feature keeps in memory: the parts of `AppState` (`state::Parts`)
@@ -239,6 +243,7 @@ pub fn parts(l: Loaded) -> Parts {
         .with(logs::Memory::new(l.logs, l.log_tx))
         .with(branding::Memory::new(l.branding))
         .with(sso::Memory::new(l.sso))
+        .with(crate::metrics::Memory::new(l.metrics))
         .with(twofactor::Memory::default())
         .with(moves::Memory::default())
         .with(backups::Memory::default())

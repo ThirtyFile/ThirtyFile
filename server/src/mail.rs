@@ -238,10 +238,16 @@ pub struct Message<'a> {
 
 /// Sends one message. The error is a short English reason, for the log and the test button.
 pub async fn send(cfg: &SmtpSettings, sender_name: &str, msg: &Message<'_>) -> Result<(), String> {
-    match tokio::time::timeout(SEND_TIMEOUT, send_inner(cfg, sender_name, msg)).await {
+    let result = match tokio::time::timeout(SEND_TIMEOUT, send_inner(cfg, sender_name, msg)).await {
         Ok(r) => r,
         Err(_) => Err("the email server didn't answer in time".into()),
+    };
+    if result.is_ok() {
+        crate::metrics::email_sent()
+    } else {
+        crate::metrics::email_failed()
     }
+    result
 }
 
 async fn send_inner(cfg: &SmtpSettings, sender_name: &str, msg: &Message<'_>) -> Result<(), String> {

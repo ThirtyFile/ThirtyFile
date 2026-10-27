@@ -70,6 +70,7 @@ async fn tick(st: &AppState, end: i64) {
     {
         tracing::warn!("Couldn't delete old storage usage samples: {}", e.message);
     }
+    crate::metrics::beat(st, "usage_sampler");
 }
 
 // ───────────── Operations ─────────────
@@ -256,7 +257,7 @@ async fn replica_bytes(db: &sqlx::SqlitePool) -> Result<Vec<(String, i64)>, sqlx
 
 /// Free and total bytes of the disk holding `path`, and which disk it is; None when the system doesn't tell within a
 /// few seconds (a network share that stopped answering must not hold the sampler)
-async fn disk(path: PathBuf) -> Option<(i64, i64, Option<String>)> {
+pub(crate) async fn disk(path: PathBuf) -> Option<(i64, i64, Option<String>)> {
     let task = tokio::task::spawn_blocking(move || {
         let (free, total) = crate::util::disk_space(&path)?;
         Some((clamp(free), clamp(total), disk_id(&path)))

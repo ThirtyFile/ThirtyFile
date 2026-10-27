@@ -40,6 +40,7 @@ mod location_tools;
 mod locations;
 mod logs;
 mod mail;
+mod metrics;
 mod moves;
 mod nodes;
 mod notify;

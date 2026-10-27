@@ -17,7 +17,7 @@
   // scripts/check-site.mjs reads both lists (keep each on one line): it fails when a page below is missing in a
   // language, or when the language links of the pages don't match.
   const LANGUAGES = [["en", "English"], ["zh-TW", "繁體中文"], ["zh-CN", "简体中文"], ["ja", "日本語"]];
-  const TRANSLATED = ["index.html", "docs/index.html", "docs/first-steps.html", "docs/files.html", "docs/preview.html", "docs/sharing.html", "docs/account.html", "docs/webdav.html", "docs/protocols.html", "docs/users.html", "docs/sign-in.html", "docs/storage.html", "docs/logs.html", "docs/settings.html", "docs/internet.html", "docs/backup.html", "docs/help.html", "docs/contributing.html"];
+  const TRANSLATED = ["index.html", "docs/index.html", "docs/first-steps.html", "docs/files.html", "docs/preview.html", "docs/sharing.html", "docs/account.html", "docs/webdav.html", "docs/protocols.html", "docs/users.html", "docs/sign-in.html", "docs/storage.html", "docs/logs.html", "docs/monitoring.html", "docs/settings.html", "docs/internet.html", "docs/backup.html", "docs/help.html", "docs/contributing.html"];
 
   const GUIDES = [
     ["Get started", [
@@ -37,6 +37,7 @@
       ["sign-in", "Single sign-on"],
       ["storage", "Storage locations"],
       ["logs", "Logs and branding"],
+      ["monitoring", "Monitoring"],
     ]],
     ["Running it", [
       ["settings", "Settings"],
@@ -79,6 +80,7 @@
       "Single sign-on": "單一登入",
       "Storage locations": "儲存位置",
       "Logs and branding": "紀錄與品牌",
+      "Monitoring": "監控",
       "Running it": "架設與維運",
       "Settings": "設定",
       "Putting it on the internet": "從網際網路存取",
@@ -124,6 +126,7 @@
       "Single sign-on": "单点登录",
       "Storage locations": "存储位置",
       "Logs and branding": "日志与品牌",
+      "Monitoring": "监控",
       "Running it": "部署与运维",
       "Settings": "设置",
       "Putting it on the internet": "通过互联网访问",
@@ -169,6 +172,7 @@
       "Single sign-on": "シングルサインオン",
       "Storage locations": "保存場所",
       "Logs and branding": "ログとブランド設定",
+      "Monitoring": "監視",
       "Running it": "運用",
       "Settings": "設定",
       "Putting it on the internet": "インターネットに公開",

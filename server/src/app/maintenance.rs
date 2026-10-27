@@ -123,6 +123,7 @@ async fn maintain(st: AppState, trash_days: i64, hours: Arc<AtomicU32>) {
                 .await;
         })
         .await;
+        crate::metrics::beat(&st, "maintenance");
     }
 }
 
