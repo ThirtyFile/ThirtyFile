@@ -1183,6 +1183,26 @@ export interface SsoSettings {
   max_created_per_hour: number;
   /** Site URL is configured (only then is the redirect URI the real production URL) */
   public_url_set: boolean;
+  /** Who may sign in with a user name and password */
+  password_sign_in: PasswordSignIn;
+  /** The enabled administrators linked to a sign-in provider that is on, which is what keeps the site reachable without passwords */
+  sso_admins: SsoAdmin[];
+}
+
+/** Who may sign in with a password: everyone, administrators only (at their own address), or nobody */
+export type PasswordSignIn = "everyone" | "administrators" | "nobody";
+
+export interface SsoAdmin {
+  id: number;
+  username: string;
+  /** Has signed in through the provider at least once, so it is known to work */
+  signed_in: boolean;
+}
+
+/** What the sign-in page needs before it draws anything */
+export interface AuthOptions {
+  password_reset: boolean;
+  password_sign_in: PasswordSignIn;
 }
 
 export type SsoProviderReq = SsoProviderPolicy & { enabled: boolean; client_id: string; client_secret: string; tenant: string; name: string; issuer: string };
@@ -1193,6 +1213,7 @@ export interface SsoSettingsReq {
   oidc: SsoProviderReq;
   allowed_domains: string[];
   domain_rules: SsoDomainRule[];
+  password_sign_in: PasswordSignIn;
 }
 
 /** The series of the dashboard, one figure for each period */
@@ -1306,7 +1327,7 @@ export interface LoginRecord {
   /** null when the account doesn't exist */
   user_id: number | null;
   username: string;
-  /** login, bad_password, unknown_user, disabled, locked, logout, password_change, sso_denied, sso_provisioned, sso_link, sso_unlink, device_signout, signout_others, admin_signout,
+  /** login, bad_password, password_off, unknown_user, disabled, locked, logout, password_change, sso_denied, sso_provisioned, sso_link, sso_unlink, device_signout, signout_others, admin_signout,
    * app_password_failed, app_password_created, app_password_revoked, 2fa_failed, 2fa_enabled, 2fa_disabled, 2fa_reset,
    * recovery_code_used, recovery_codes_new */
   event: string;

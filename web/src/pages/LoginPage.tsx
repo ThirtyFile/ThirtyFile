@@ -2,7 +2,7 @@ import { useEffect, useEffectEvent, useRef, useState, type FormEvent, type Keybo
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRightIcon, KeyRoundIcon, Loader2Icon } from "lucide-react";
-import { api, ApiError, type Me, type TwoFactorSetup } from "@/api";
+import { api, ApiError, type Me, type PasswordSignIn, type TwoFactorSetup } from "@/api";
 import { keys } from "@/api/queryKeys";
 import { logoUrl, useBranding } from "@/lib/branding";
 import { SiteName } from "@/components/SiteName";
@@ -79,7 +79,12 @@ function signInWasOpen(): boolean {
   }
 }
 
-export function LoginPage() {
+/**
+ * The sign-in page. With password sign-in off for everyone it has no user name or password field, no link to reset a
+ * password, and nothing that says a password exists: only the providers. With it on for administrators only, the
+ * form is at their own address (`administrator`, /sign-in/administrator), which no page links to.
+ */
+export function LoginPage({ administrator = false }: { administrator?: boolean }) {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const qc = useQueryClient();
@@ -87,6 +92,11 @@ export function LoginPage() {
   const providers = useQuery({ queryKey: keys.ssoProviders(), queryFn: api.ssoProviders, staleTime: 60_000 });
   const options = useQuery({ queryKey: keys.authOptions(), queryFn: api.authOptions, staleTime: 60_000 });
   const nextPath = safeNext(params.get("next"));
+  // The form is drawn only once the server has said who may use a password, so it never flashes on screen and goes
+  // away; when that can't be read the form stays (the server refuses a password where it isn't allowed)
+  const mode: PasswordSignIn | undefined = options.data?.password_sign_in ?? (options.isError ? "everyone" : undefined);
+  const showForm = mode === "everyone" || (mode === "administrators" && administrator);
+  const soleProvider = mode && !showForm && providers.data?.length === 1 ? providers.data[0] : null;
   // Not the title of the page signed out of
   useEffect(() => {
     document.title = `${t("Sign in")} - ${b.site_name}`;
@@ -108,6 +118,12 @@ export function LoginPage() {
       // Nothing was kept
     }
   }, []);
+  // With a single provider and no password form there is nothing to choose: go straight to it. Not when the person
+  // just signed out (the provider would sign them straight back in), came back with a reason, or was signed out
+  const goStraight = soleProvider && stage === "signin" && !error && !params.has("signed_out") && !params.has("ended");
+  useEffect(() => {
+    if (goStraight) window.location.assign(api.ssoStartUrl(soleProvider.id, nextPath));
+  }, [goStraight, soleProvider, nextPath]);
   const [lastUser] = useState(loadLastUser);
   /** Currently selected account; null = other user (type the account) */
   const [who, setWho] = useState<string | null>(lastUser);
@@ -284,7 +300,7 @@ export function LoginPage() {
     }
   };
 
-  const shownUser = stage === "lock" || stage === "signin" ? who : account;
+  const shownUser = stage === "lock" || stage === "signin" ? (showForm ? who : null) : account;
   const heading = shownUser ?? (b.login_title || b.site_name);
   const subtitle = tServer(b.login_subtitle);
   const logo = b.has_logo ? logoUrl(b, true) : "/favicon.svg";
@@ -403,6 +419,34 @@ export function LoginPage() {
                 {t("Back")}
               </button>
             </div>
+          ) : mode === undefined ? (
+            <div className="mt-6 flex items-center gap-3 text-sm" role="status" aria-label={t("Loading…")}>
+              <Loader2Icon className="size-5 animate-spin" />
+            </div>
+          ) : !showForm ? (
+            <div className="mt-6 grid w-full gap-2.5">
+              {providers.data?.length ? (
+                <>
+                  <p className="text-sm text-white/85">{t("Your administrator requires single sign-on.")}</p>
+                  {providers.data.map((p) => (
+                    <a
+                      key={p.id}
+                      href={api.ssoStartUrl(p.id, nextPath)}
+                      className="flex h-10 items-center justify-center gap-2 rounded-md bg-white/15 px-3 text-sm ring-1 ring-white/30 backdrop-blur-md hover:bg-white/25 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none"
+                    >
+                      <ProviderIcon provider={p.id} className="size-5" />
+                      <span className="truncate">{t("Sign in with {provider}", { provider: p.label })}</span>
+                    </a>
+                  ))}
+                </>
+              ) : providers.isPending ? (
+                <Loader2Icon className="mx-auto size-5 animate-spin" aria-label={t("Loading…")} />
+              ) : (
+                <p className="text-sm text-white/85" role="alert">
+                  {t("Signing in with a password is turned off, and no other way to sign in is available. Ask your administrator.")}
+                </p>
+              )}
+            </div>
           ) : (
             <div className="mt-6 grid w-full gap-2.5">
               {who ? (
@@ -452,7 +496,7 @@ export function LoginPage() {
             </div>
           )}
 
-          {stage === "signin" && !!providers.data?.length && (
+          {stage === "signin" && showForm && !!providers.data?.length && (
             <div className="mt-7 grid justify-items-center gap-2">
               <span className="text-xs text-white/75">{t("Sign-in options")}</span>
               <div className="flex flex-wrap justify-center gap-2">
@@ -475,7 +519,7 @@ export function LoginPage() {
           )}
 
           {/* Phones: switch-account goes below the sign-in box */}
-          {lastUser && (stage === "lock" || stage === "signin") && (
+          {lastUser && showForm && (stage === "lock" || stage === "signin") && (
             <button type="button" onClick={() => switchUser(who ? null : lastUser)} className="mt-6 text-sm text-white/85 underline-offset-4 hover:underline sm:hidden">
               {who ? t("Other user") : t("Sign in as {name}", { name: lastUser })}
             </button>
@@ -484,7 +528,7 @@ export function LoginPage() {
       </div>
 
       {/* Bottom left: account list */}
-      {lastUser && stage === "signin" && (
+      {lastUser && showForm && stage === "signin" && (
         <div className="absolute bottom-6 left-4 hidden gap-1 sm:grid">
           {[lastUser, null].map((u) => (
             <button

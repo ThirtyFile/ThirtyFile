@@ -82,6 +82,7 @@
             <li><a href="#password">管理者のパスワードを忘れた</a></li>
             <li><a href="#shell">docker exec thirtyfile sh が動かない</a></li>
             <li><a href="#two-factor">管理者がスマートフォンと回復コードをなくした</a></li>
+            <li><a href="#passwords-off">パスワードでのサインインをオフにして誰もサインインできない</a></li>
             <li><a href="#links">共有リンクが http://127.0.0.1:8080 で始まる</a></li>
             <li><a href="#signed-out">サインイン直後にサインアウトされる</a></li>
             <li><a href="#locked">全員に「失敗した試行が多すぎます」と表示される</a></li>
@@ -103,6 +104,11 @@
         <h2 id="two-factor">管理者がスマートフォンと回復コードをなくした</h2>
         <p>ほかの管理者が <strong>コントロールパネル › ユーザー</strong> でリセットできます。ほかに管理者がいない場合は、サーバーで無効にします。</p>
         <pre><code>docker exec thirtyfile thirtyfile reset-two-factor admin</code></pre>
+        <h2 id="passwords-off">パスワードでのサインインをオフにして誰もサインインできない</h2>
+        <p>シングルサインオンが動かなくなったら、サーバーでパスワードでのサインインを元に戻します（再起動は不要です）。</p>
+        <pre><code>docker exec thirtyfile thirtyfile password-sign-in everyone</code></pre>
+        <p>そのあとパスワードでサインインし、<strong>コントロールパネル › シングルサインオン</strong> でプロバイダーを直してください。<a href="sign-in.html#passwords-off">パスワードをオフにする方法の詳細</a></p>
+
         <h2 id="links">共有リンクが http://127.0.0.1:8080 で始まる</h2>
         <p><strong>コントロールパネル › 全般 › サイトの URL</strong> に、利用者がアクセスするアドレスを設定します。</p>
         <h2 id="signed-out">サインイン直後にサインアウトされる</h2>

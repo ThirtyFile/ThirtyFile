@@ -37,6 +37,9 @@ pub enum Command {
     ResetPassword { username: String, password: Option<String> },
     /// Turn a user's two-factor sign-in off (for when the phone and the recovery codes are lost)
     ResetTwoFactor { username: String },
+    /// Choose who may sign in with a password: `everyone`, `administrators` or `nobody` (Control panel › Single sign-on).
+    /// For when single sign-on no longer works and nobody can sign in; it takes effect at once, no restart needed
+    PasswordSignIn { mode: String },
     /// Check whether the running service is healthy (for Docker HEALTHCHECK): exit code 0 when healthy
     Health,
     /// Write a consistent copy of the database to a new file, also while ThirtyFile is running
@@ -163,6 +166,14 @@ pub async fn run(cfg: &Config, db: &sqlx::SqlitePool, storage: &Path, key_source
         return Ok(true);
     }
 
+    if let Some(Command::PasswordSignIn { mode }) = &cfg.command {
+        let Some(mode) = crate::sso::PasswordSignIn::parse(mode) else {
+            return Err(format!("Unknown mode \"{mode}\": use everyone, administrators or nobody").into());
+        };
+        let before = crate::sso::set_from_command_line(db, mode).await.map_err(|e| e.message)?;
+        println!("Password sign-in: {} (it was {})", mode.name(), before.name());
+        return Ok(true);
+    }
     if let Some(Command::ResetTwoFactor { username }) = &cfg.command {
         let id = user_id(db, username).await?;
         let mut tx = db::begin_write(db).await?;

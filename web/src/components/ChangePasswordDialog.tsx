@@ -45,7 +45,7 @@ export function ChangePasswordDialog({ onClose, required = false }: { onClose():
           </div>
           <DialogFooter>
             {required ? (
-              <Button type="button" variant="outline" onClick={() => void api.logout().then(() => window.location.assign("/login"))}>
+              <Button type="button" variant="outline" onClick={() => void api.logout().then(() => window.location.assign("/login?signed_out=1"))}>
                 {t("Sign out")}
               </Button>
             ) : (

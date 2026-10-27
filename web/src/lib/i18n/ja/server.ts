@@ -1176,4 +1176,9 @@ export default {
   "Make a token first: it is what a monitoring system sends to be let in": "先にトークンを作成してください。監視システムはこれを送って接続します",
   "Enter addresses or networks such as 203.0.113.7 or 10.1.0.0/16": "アドレスまたはネットワーク（例：203.0.113.7、10.1.0.0/16）を入力してください",
   "At most {n} addresses or networks": "アドレスまたはネットワークは最大 {n} 個です",
+  "Your administrator requires single sign-on: you sign in without a password": "管理者がシングルサインオンを求めています。パスワードなしでサインインします",
+  "Turn on and set up a sign-in provider first": "先にサインインプロバイダーを有効にして設定してください",
+  "Link your own account to one of the sign-in providers first (My account › Sign-in methods): you have to be able to sign in that way": "先に自分のアカウントをいずれかのサインインプロバイダーにリンクしてください（アカウントメニュー › サインイン方法）。その方法でサインインできる必要があります",
+  "Sign in through a provider once with your own account first, to be sure it works": "先に自分のアカウントでプロバイダー経由のサインインを一度行い、動作を確認してください",
+  "Single sign-on would be the only way to sign in, and no enabled administrator is linked to a sign-in provider that is on": "シングルサインオンが唯一のサインイン方法になりますが、有効な管理者で、有効なサインインプロバイダーにリンクされている人がいません",
 } satisfies Record<string, string>;

@@ -1,5 +1,5 @@
 import { request, get, post, enc, qs, send } from "@/api/client";
-import type { SsoProvider, LinkedIdentity, Me, TwoFactorPending, TwoFactorSetup, TwoFactorStatus, Device, AppPassword, NewAppPassword } from "@/api/types";
+import type { AuthOptions, SsoProvider, LinkedIdentity, Me, TwoFactorPending, TwoFactorSetup, TwoFactorStatus, Device, AppPassword, NewAppPassword } from "@/api/types";
 import type { Lang } from "@/lib/i18n";
 import type { StyleChoice } from "@/lib/style/device";
 
@@ -33,7 +33,7 @@ export const authApi = {
       () => undefined,
       () => undefined,
     ),
-  authOptions: () => get<{ password_reset: boolean }>("/auth/options"),
+  authOptions: () => get<AuthOptions>("/auth/options"),
   forgotPassword: (account: string) => post("/auth/forgot", { account }),
   resetPassword: (token: string, next: string) => post("/auth/reset", { token, new: next }),
   devices: () => get<Device[]>("/auth/sessions"),

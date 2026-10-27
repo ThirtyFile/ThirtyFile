@@ -1176,4 +1176,9 @@ export default {
   "Make a token first: it is what a monitoring system sends to be let in": "请先创建令牌：监控系统要靠它才能进入",
   "Enter addresses or networks such as 203.0.113.7 or 10.1.0.0/16": "请输入地址或网段，例如 203.0.113.7 或 10.1.0.0/16",
   "At most {n} addresses or networks": "最多 {n} 个地址或网段",
+  "Your administrator requires single sign-on: you sign in without a password": "你的管理员要求使用单点登录：登录时不使用密码",
+  "Turn on and set up a sign-in provider first": "请先开启并配置登录提供商",
+  "Link your own account to one of the sign-in providers first (My account › Sign-in methods): you have to be able to sign in that way": "请先把你自己的账号关联到其中一个登录提供商（账号菜单 › 登录方式）：你必须能用这种方式登录",
+  "Sign in through a provider once with your own account first, to be sure it works": "请先用你自己的账号通过提供商登录一次，确认可以正常工作",
+  "Single sign-on would be the only way to sign in, and no enabled administrator is linked to a sign-in provider that is on": "单点登录将是唯一的登录方式，但没有任何已启用的管理员关联到已开启的登录提供商",
 } satisfies Record<string, string>;

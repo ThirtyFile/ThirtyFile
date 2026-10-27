@@ -149,6 +149,12 @@ pub async fn start(cfg: Settings, storage: PathBuf, db: sqlx::SqlitePool) -> Res
     let branding = branding::load(&db).await;
     let sso_settings = sso::load(&db).await;
     let metrics_settings = crate::metrics::load(&db).await;
+    if sso_settings.password_sign_in != sso::PasswordSignIn::Everyone {
+        tracing::warn!(
+            "Password sign-in is {} (Control panel › Single sign-on). If nobody can sign in, run `thirtyfile password-sign-in everyone`",
+            sso_settings.password_sign_in.name()
+        );
+    }
     let (log_tx, log_rx) = logs::channel();
     // Thumbnails read the image into memory and decode it: fewer at a time, and a lower decoding limit, on small servers
     let memory = util::memory_limit();

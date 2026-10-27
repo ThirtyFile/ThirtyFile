@@ -30,6 +30,7 @@ pub async fn unlink(
 ) -> AppResult<Json<Value>> {
     let removed = {
         let _w = st.write_lock.lock().await;
+        let mut tx = crate::db::begin_write(&st.db).await?;
         // Without a password (an account created by single sign-on that never got one), the last linked account can't be removed
         let (password_hash, linked, this_one): (String, i64, i64) = sqlx::query_as(
             "SELECT password_hash,
@@ -39,7 +40,7 @@ pub async fn unlink(
         )
         .bind(&provider)
         .bind(user.id)
-        .fetch_one(&st.db)
+        .fetch_one(&mut *tx)
         .await?;
         if this_one == 0 {
             return Ok(Json(json!({ "ok": true })));
@@ -47,7 +48,13 @@ pub async fn unlink(
         if password_hash == NO_PASSWORD && linked <= 1 {
             return Err(AppError::bad_request("This is the only way to sign in to this account. Ask an administrator to set a password first."));
         }
-        sqlx::query("DELETE FROM user_identities WHERE user_id = ? AND provider = ?").bind(user.id).bind(&provider).execute(&st.db).await?.rows_affected()
+        let removed =
+            sqlx::query("DELETE FROM user_identities WHERE user_id = ? AND provider = ?").bind(user.id).bind(&provider).execute(&mut *tx).await?.rows_affected();
+        // Unlinking the last administrator who can sign in through a provider would leave no one when passwords are off
+        let sso = st.part::<Memory>().settings.read().clone();
+        ensure_sign_in_possible(&mut tx, &sso).await?;
+        tx.commit().await?;
+        removed
     };
     if removed > 0 {
         record_login_via(&st, Some(user.id), &user.username, "sso_unlink", &provider, &client_ip(&st, addr, &headers), &headers);

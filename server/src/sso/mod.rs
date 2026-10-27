@@ -11,12 +11,14 @@
 mod accounts;
 mod identity;
 mod linked;
+mod password;
 mod settings;
 mod signin;
 
 use accounts::*;
 use identity::*;
 pub use linked::*;
+pub use password::*;
 pub use settings::*;
 pub use signin::*;
 
@@ -156,7 +158,7 @@ pub struct ProviderConfig {
 }
 
 impl ProviderConfig {
-    fn ready(&self) -> bool {
+    pub(crate) fn ready(&self) -> bool {
         self.enabled && !self.client_id.trim().is_empty() && !self.client_secret.is_empty()
     }
 }
@@ -188,6 +190,8 @@ pub struct SsoSettings {
     pub allowed_domains: Vec<String>,
     /// Per-domain settings for automatically created accounts (a domain here still has to be allowed to sign in)
     pub domain_rules: Vec<DomainRule>,
+    /// Who may sign in with a user name and password (everyone, unless an administrator chose otherwise)
+    pub password_sign_in: PasswordSignIn,
 }
 
 impl SsoSettings {
