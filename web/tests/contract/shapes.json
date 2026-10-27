@@ -691,7 +691,9 @@
       "redirect_uri": "",
       "tenant": ""
     },
-    "public_url_set": false
+    "password_sign_in": "",
+    "public_url_set": false,
+    "sso_admins": []
   },
   "SystemInfo": {
     "allow_user_drives": false,

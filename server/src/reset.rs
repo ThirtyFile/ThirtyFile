@@ -23,6 +23,7 @@ use crate::{
     error::{AppError, AppResult},
     i18n::{Lang, Text, tr},
     logs,
+    sso::PasswordSignIn,
     state::AppState,
     util::{now, random_token, sha256_hex},
 };
@@ -43,7 +44,13 @@ fn link_base(st: &AppState) -> Option<String> {
 
 /// What the sign-in page offers
 pub async fn options(State(st): State<AppState>) -> AppResult<Json<Value>> {
-    Ok(Json(json!({ "password_reset": crate::mail::load(&st.db).await.enabled && link_base(&st).is_some() })))
+    let mode = crate::sso::mode(&st.db).await?;
+    Ok(Json(json!({
+        // A reset link would give a password to someone who may not use one: not offered unless everyone may
+        "password_reset": mode == PasswordSignIn::Everyone && crate::mail::load(&st.db).await.enabled && link_base(&st).is_some(),
+        // Who may sign in with a password: the sign-in page shows its form for no one, or only at the administrators' address
+        "password_sign_in": mode,
+    })))
 }
 
 #[derive(Deserialize)]
@@ -59,7 +66,8 @@ pub async fn forgot(
     Json(req): Json<ForgotReq>,
 ) -> AppResult<Json<Value>> {
     let smtp = crate::mail::load(&st.db).await;
-    let Some(base) = link_base(&st).filter(|_| smtp.enabled) else {
+    let everyone = crate::sso::mode(&st.db).await? == PasswordSignIn::Everyone;
+    let Some(base) = link_base(&st).filter(|_| smtp.enabled && everyone) else {
         return Err(AppError::bad_request("Ask your administrator to reset your password"));
     };
     let ip = client_ip(&st, addr, &headers);
@@ -124,6 +132,10 @@ pub struct ResetReq {
 }
 
 pub async fn reset(State(st): State<AppState>, ConnectInfo(addr): ConnectInfo<SocketAddr>, headers: HeaderMap, Json(req): Json<ResetReq>) -> AppResult<Json<Value>> {
+    // Links given out while everyone could use a password stop working when that changes
+    if crate::sso::mode(&st.db).await? != PasswordSignIn::Everyone {
+        return Err(AppError::bad_request("This link has expired or was already used. Ask for a new one."));
+    }
     validate_password(&req.new, min_password(&st))?;
     let ip = client_ip(&st, addr, &headers);
     let key = format!("reset-ip:{}", auth::limit_key_ip(&ip));
@@ -254,6 +266,39 @@ mod tests {
 
     fn reset_req(env: &testutil::TestEnv, token: &str, new: &str) -> impl std::future::Future<Output = AppResult<Json<Value>>> {
         reset(State(env.st.clone()), addr(), HeaderMap::new(), Json(ResetReq { token: token.into(), new: new.into() }))
+    }
+
+    #[tokio::test]
+    async fn passwords_turned_off_end_the_reset_by_email() {
+        let env = testutil::env().await;
+        let (amy, token) = amy_with_link(&env).await;
+        env.st.system.write().public_url = "https://files.example.com".into();
+        email_on(&env, 1).await;
+        let Json(o) = options(State(env.st.clone())).await.unwrap();
+        assert_eq!((o["password_reset"].clone(), o["password_sign_in"].clone()), (json!(true), json!("everyone")));
+
+        for mode in ["administrators", "nobody"] {
+            sqlx::query("INSERT INTO settings (key, value) VALUES ('sso', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
+                .bind(json!({ "password_sign_in": mode }).to_string())
+                .execute(&env.st.db)
+                .await
+                .unwrap();
+            // Not offered, not sent, and a link given out before can't be used
+            let Json(o) = options(State(env.st.clone())).await.unwrap();
+            assert_eq!((o["password_reset"].clone(), o["password_sign_in"].clone()), (json!(false), json!(mode)));
+            let asked = forgot(State(env.st.clone()), addr(), HeaderMap::new(), Json(ForgotReq { account: "amy".into() })).await;
+            assert!(asked.is_err(), "{mode}");
+            let new = random_token(20);
+            assert!(reset_req(&env, &token, &new).await.is_err(), "{mode}");
+        }
+        let (links,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM password_resets WHERE user_id = ?").bind(amy.id).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(links, 1, "the link is still there, unused");
+        let (old_hash,): (String,) = sqlx::query_as("SELECT password_hash FROM users WHERE id = ?").bind(amy.id).fetch_one(&env.st.db).await.unwrap();
+        assert!(auth::verify_password(testutil::password().into(), old_hash).await.unwrap(), "the password did not change");
+
+        // Back to everyone: the same link works
+        sqlx::query("DELETE FROM settings WHERE key = 'sso'").execute(&env.st.db).await.unwrap();
+        assert!(reset_req(&env, &token, &random_token(20)).await.is_ok());
     }
 
     #[tokio::test]

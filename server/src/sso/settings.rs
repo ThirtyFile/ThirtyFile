@@ -30,11 +30,24 @@ pub(super) fn admin_view(st: &AppState, headers: &HeaderMap) -> Value {
         "domain_rules": cfg.domain_rules,
         "max_created_per_hour": MAX_CREATED_PER_HOUR,
         "public_url_set": !st.system.read().public_url.is_empty(),
+        "password_sign_in": cfg.password_sign_in,
     })
 }
 
-pub async fn get_settings(State(st): State<AppState>, _: Admin, headers: HeaderMap) -> Json<Value> {
-    Json(admin_view(&st, &headers))
+/// The settings page's view, with the administrators who could sign in through a provider
+async fn full_view(st: &AppState, headers: &HeaderMap) -> AppResult<Value> {
+    let mut view = admin_view(st, headers);
+    let mut cfg = st.part::<Memory>().settings.read().clone();
+    // What is in force, which the command line may have changed since the server started
+    cfg.password_sign_in = mode(&st.db).await?;
+    view["password_sign_in"] = json!(cfg.password_sign_in);
+    let admins = sso_admins(&mut *st.db.acquire().await?, &cfg).await?;
+    view["sso_admins"] = json!(admins);
+    Ok(view)
+}
+
+pub async fn get_settings(State(st): State<AppState>, _: Admin, headers: HeaderMap) -> AppResult<Json<Value>> {
+    Ok(Json(full_view(&st, &headers).await?))
 }
 
 /// Saving the settings: the administrator confirms who they are, since a provider set up here signs people in
@@ -49,7 +62,8 @@ pub struct SaveReq {
 pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, headers: HeaderMap, Json(save): Json<SaveReq>) -> AppResult<Json<Value>> {
     let SaveReq { settings: mut req, me } = save;
     me.check(&st, &user).await?;
-    let old = st.part::<Memory>().settings.read().clone();
+    let mut old = st.part::<Memory>().settings.read().clone();
+    old.password_sign_in = mode(&st.db).await?;
     for p in PROVIDERS {
         check_provider(&st, p, req.provider_mut(p).unwrap(), old.provider(p).unwrap()).await?;
     }
@@ -71,12 +85,18 @@ pub async fn update_settings(State(st): State<AppState>, Admin(user): Admin, hea
                 crate::guests::validate_guest_groups(&mut tx, &rule.groups).await?;
             }
         }
+        // Passwords off: the administrator saving it can sign in through a provider that is on, and stays able to
         store(&mut tx, &req).await?;
+        // (the saver has to be able to when the setting changes; other changes only have to leave someone who can)
+        if req.password_sign_in != old.password_sign_in {
+            check_saving(&mut tx, &req, user.id).await?;
+        }
+        ensure_sign_in_possible(&mut tx, &req).await?;
         logs::record_activity(&mut tx, &user, None, "settings", &detail).await?;
         tx.commit().await?;
         *st.part::<Memory>().settings.write() = req.clone();
     }
-    Ok(Json(admin_view(&st, &headers)))
+    Ok(Json(full_view(&st, &headers).await?))
 }
 
 /// Checks and tidies one provider's new settings (`prev`: its current ones)
@@ -209,8 +229,13 @@ pub(super) fn summary(req: &SsoSettings) -> String {
     let providers: Vec<String> =
         PROVIDERS.iter().map(|p| format!("{} {} ({})", label(p), if req.provider(p).is_some_and(|c| c.enabled) { "on" } else { "off" }, policy(p))).collect();
     format!(
-        "Single sign-on settings: {}{}{}",
+        "Single sign-on settings: {}{}{}{}",
         providers.join("; "),
+        match req.password_sign_in {
+            PasswordSignIn::Everyone => String::new(),
+            PasswordSignIn::Administrators => "; passwords: administrators only".to_string(),
+            PasswordSignIn::Nobody => "; passwords: nobody".to_string(),
+        },
         if req.allowed_domains.is_empty() { String::new() } else { format!("; allowed domains: {}", req.allowed_domains.join(", ")) },
         if req.domain_rules.is_empty() {
             String::new()

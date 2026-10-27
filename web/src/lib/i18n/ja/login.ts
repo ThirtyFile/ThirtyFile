@@ -18,4 +18,7 @@ export default {
   // Server messages and activity log
   "The background image can't be larger than 5 MB": "背景画像は 5 MB 以下にしてください",
   "Your session ended. Sign in again.": "セッションが終了しました。もう一度サインインしてください。",
+  "Your administrator requires single sign-on.": "管理者がシングルサインオンの使用を求めています。",
+  "Signing in with a password is turned off, and no other way to sign in is available. Ask your administrator.": "パスワードでのサインインは無効で、ほかに使えるサインイン方法もありません。管理者に問い合わせてください。",
+  "Password sign-in is off": "パスワードでのサインインは無効",
 } satisfies Record<string, string>;

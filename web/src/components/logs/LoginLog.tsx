@@ -19,6 +19,7 @@ const PAGE = 100;
 export const LOGIN_EVENTS: Record<string, { label: string; tone?: string }> = {
   login: { label: t("Signed in"), tone: "text-emerald-600 dark:text-emerald-400" },
   bad_password: { label: t("Wrong password"), tone: "text-destructive" },
+  password_off: { label: t("Password sign-in is off"), tone: "text-destructive" },
   unknown_user: { label: t("Account doesn't exist"), tone: "text-destructive" },
   disabled: { label: tc("event", "Account disabled"), tone: "text-amber-600 dark:text-amber-400" },
   locked: { label: t("Temporarily locked"), tone: "text-destructive font-medium" },
@@ -74,7 +75,10 @@ const EVENT_GROUPS = [
   },
   {
     label: t("Failed"),
-    options: ["bad_password", "unknown_user", "disabled", "locked", "sso_denied", "app_password_failed", "ftp_failed", "2fa_failed"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })),
+    options: ["bad_password", "password_off", "unknown_user", "disabled", "locked", "sso_denied", "app_password_failed", "ftp_failed", "2fa_failed"].map((v) => ({
+      value: v,
+      label: LOGIN_EVENTS[v].label,
+    })),
   },
   { label: t("External accounts"), options: ["sso_provisioned", "sso_link", "sso_unlink"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
   {
