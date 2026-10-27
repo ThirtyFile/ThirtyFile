@@ -84,6 +84,7 @@
             <li><a href="#prometheus">在 Prometheus 中</a></li>
             <li><a href="#series">有哪些数据</a></li>
             <li><a href="#grafana">Grafana</a></li>
+            <li><a href="#dashboard">仪表板</a></li>
             <li><a href="#privacy">不在其中的东西</a></li>
           </ol>
         </details>
@@ -161,6 +162,8 @@
         </div>
         <h2 id="grafana">Grafana</h2>
         <p>导入 <a href="../../assets/thirtyfile-grafana.json">thirtyfile-grafana.json</a>（<strong>Dashboards › New › Import</strong>）并选择你的 Prometheus。画面会显示请求与响应时间、登录、存储操作、磁盘、任务、备份和正在发出的告警。</p>
+        <h2 id="dashboard">仪表板</h2>
+        <p><strong>控制台 › 仪表板</strong> 不需要 Prometheus。它会告诉你服务器是否正常（与 <code>/api/health</code> 相同的检查，并附上原因）、当前发出的管理员告警、登录与活跃的人数、任务、上传和可用磁盘空间，以及最近 24 小时或 7 天的图表：请求与服务器错误、响应时间、用户与任务、存储操作、登录失败和可用磁盘空间。也会列出最近的服务器错误与登录失败，并链接到 <strong>活动日志</strong>。图表由服务器每五分钟记下一次、保存八天的数据画成，不论是否开启 <code>/metrics</code>；没有数据的区段表示当时服务器没有在运行。</p>
         <h2 id="privacy">不在其中的东西</h2>
         <p>没有人名、文件名、访客地址或路径：标签只有固定的词（请求方法、任务种类、事件种类），以及管理员自己取的存储位置和备份策略名称。名称中若含引号或换行，会按格式要求转义。</p>
         <p>服务器重启时计数会从零开始，这是 Prometheus 预期的行为（<code>rate()</code> 和 <code>increase()</code> 会处理）。需要查询才知道的数据（登录会话、账号、磁盘、数据库、备份）在监控开启期间每 15 秒查看一次并放在内存：读取指标不会加锁、也不读磁盘，所以频繁抓取不会有负担。内存、打开的文件和线程数只在 Linux 上提供。</p>
