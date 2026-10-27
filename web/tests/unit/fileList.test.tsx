@@ -79,6 +79,9 @@ function mount(props: Parameters<typeof Harness>[0]) {
   container.style.overflowY = "auto";
   Object.defineProperty(container, "offsetHeight", { value: 600 });
   Object.defineProperty(container, "offsetWidth", { value: 1000 });
+  // The virtualizer measures the viewport by its client size
+  Object.defineProperty(container, "clientHeight", { value: 600 });
+  Object.defineProperty(container, "clientWidth", { value: 1000 });
   document.body.append(container);
   root = createRoot(container);
   act(() => root!.render(<Harness {...props} />));
