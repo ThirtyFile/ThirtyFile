@@ -52,8 +52,8 @@ export function MovesPage() {
   const selected = moves.find((m) => m.id === selectedId) ?? null;
   const [dialog, setDialog] = useState<{ t: "details" | "cancel"; move: SpaceMove } | null>(null);
   const refresh = () => {
-    qc.invalidateQueries({ queryKey: keys.moves() });
-    invalidateFiles(qc, "admin-drives", "storage-locations");
+    void qc.invalidateQueries({ queryKey: keys.moves() });
+    void invalidateFiles(qc, "admin-drives", "storage-locations");
   };
   const act = async (what: () => Promise<unknown>, done: string) => {
     try {

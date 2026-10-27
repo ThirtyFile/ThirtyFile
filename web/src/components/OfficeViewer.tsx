@@ -110,7 +110,8 @@ function FramePreview({ node, source, kind }: { node: Node; source: FileSource; 
       } else if (msg.type === "link") {
         // Only open http(s) / mailto links, and cut the link to this page. The frame only asks when a link is clicked, so the
         // person must have just clicked (a click in the frame activates this page too), and each click opens at most one tab
-        const href = String((msg as { href?: unknown }).href ?? "");
+        const link = (msg as { href?: unknown }).href;
+        const href = typeof link === "string" ? link : "";
         if (!/^(https?:|mailto:)/i.test(href) || !navigator.userActivation?.isActive) return;
         const now = performance.now();
         if (now - lastOpen < LINK_INTERVAL) return;

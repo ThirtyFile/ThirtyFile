@@ -44,7 +44,9 @@ describe("dialogs", () => {
     expect(dialog()?.textContent).toContain("New folder");
     const input = dialog()!.querySelector("input")!;
     type(input, "  Reports  ");
-    act(() => void input.form!.requestSubmit());
+    act(() => {
+      input.form!.requestSubmit();
+    });
     await settle();
     expect(onSubmit).toHaveBeenLastCalledWith("Reports");
     const alert = document.querySelector('[role="alert"]');
@@ -52,7 +54,9 @@ describe("dialogs", () => {
     expect(input.getAttribute("aria-invalid")).toBe("true");
 
     refuse = false;
-    act(() => void input.form!.requestSubmit());
+    act(() => {
+      input.form!.requestSubmit();
+    });
     await settle();
     expect(document.querySelector('[role="alert"]')).toBeNull();
   });

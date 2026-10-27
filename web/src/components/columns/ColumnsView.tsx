@@ -84,7 +84,7 @@ export function ColumnsView({ p, s, a, list }: { p: ExplorerProps; s: ExplorerSt
   /** Opens the folder of another column, with `how` done there (lib/columns) */
   const go = (folder: string, how: Omit<Arrival, "folder"> = {}) => {
     arriveAt({ folder, ...how });
-    s.navigate(`/files/${folder}`);
+    void s.navigate(`/files/${folder}`);
   };
   /**
    * The keys for the column before (-1) and the next one (1), on `item` in the column at `depth` of `shown` (in a list

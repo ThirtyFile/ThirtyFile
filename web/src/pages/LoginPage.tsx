@@ -245,7 +245,7 @@ export function LoginPage({ administrator = false }: { administrator?: boolean }
     setStage("welcome");
     await new Promise((r) => setTimeout(r, 700));
     qc.setQueryData(keys.me(), me);
-    navigate(nextPath, { replace: true });
+    void navigate(nextPath, { replace: true });
   };
 
   const account = (who ?? username).trim();

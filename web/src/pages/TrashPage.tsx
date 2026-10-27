@@ -163,7 +163,7 @@ export function TrashPage() {
               <DropdownMenuItem
                 onClick={() => {
                   const n = items.find((i) => i.id === ids[0]);
-                  if (n?.parent_id) navigate(`/files/${n.parent_id}`);
+                  if (n?.parent_id) void navigate(`/files/${n.parent_id}`);
                 }}
                 disabled={ids.length !== 1}
               >

@@ -375,7 +375,7 @@ export function AdminDrivesPage() {
             setDialog(null);
             setChecked([]);
             refresh();
-            qc.invalidateQueries({ queryKey: keys.moves() });
+            void qc.invalidateQueries({ queryKey: keys.moves() });
           }}
         />
       )}

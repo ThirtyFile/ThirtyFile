@@ -28,6 +28,8 @@ const parseXml = (text: string) => new DOMParser().parseFromString(text, "applic
 const byTag = (el: Element | Document, name: string) => Array.from(el.getElementsByTagNameNS(NS, name));
 const child = (el: Element, name: string) => Array.from(el.children).find((c) => c.localName === name) ?? null;
 const serialize = (doc: Document) => new XMLSerializer().serializeToString(doc);
+/** Orders the entries of a map by their key, to compare two maps whatever order they were filled in */
+const byKey = (a: [number, number], b: [number, number]) => a[0] - b[0];
 
 function ref(r: string): [number, number] {
   const p = parseCellName(r);
@@ -1085,8 +1087,8 @@ export async function buildXlsx(
       touched = true;
     }
     const colsChanged =
-      JSON.stringify([...sheet.colWidths].sort()) !== JSON.stringify([...before.colWidths].sort()) ||
-      JSON.stringify([...sheet.colStyles].sort()) !== JSON.stringify([...before.colStyles].sort());
+      JSON.stringify([...sheet.colWidths].sort(byKey)) !== JSON.stringify([...before.colWidths].sort(byKey)) ||
+      JSON.stringify([...sheet.colStyles].sort(byKey)) !== JSON.stringify([...before.colStyles].sort(byKey));
     if (colsChanged || colOps.has(sheet.id)) {
       rewriteCols(doc, sheet);
       touched = true;

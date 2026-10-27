@@ -44,7 +44,7 @@ export function AppShell() {
     params.delete("sso_linked");
     params.delete("sso_error");
     const rest = params.toString();
-    navigate(location.pathname + (rest ? `?${rest}` : ""), { replace: true });
+    void navigate(location.pathname + (rest ? `?${rest}` : ""), { replace: true });
   }, [location.search, location.pathname, navigate]);
 
   // Record URL changes in the current tab's history

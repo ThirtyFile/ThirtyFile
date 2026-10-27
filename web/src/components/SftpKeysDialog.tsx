@@ -29,7 +29,7 @@ export function SftpKeysDialog({ onClose }: { onClose(): void }) {
       setName("");
       setPublicKey("");
       identity.clear();
-      qc.invalidateQueries({ queryKey: keys.sftpKeys() });
+      void qc.invalidateQueries({ queryKey: keys.sftpKeys() });
       toast.success(t("SSH key added"));
     },
   });

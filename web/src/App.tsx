@@ -86,7 +86,7 @@ function RequireAuth() {
       if (leaving.current) return;
       leaving.current = true;
       void qc.cancelQueries();
-      navigate(`/login?next=${encodeURIComponent(location.pathname + location.search)}${hadSession.current ? "&ended=1" : ""}`);
+      void navigate(`/login?next=${encodeURIComponent(location.pathname + location.search)}${hadSession.current ? "&ended=1" : ""}`);
     };
     window.addEventListener("tf:unauthorized", onUnauthorized);
     return () => window.removeEventListener("tf:unauthorized", onUnauthorized);

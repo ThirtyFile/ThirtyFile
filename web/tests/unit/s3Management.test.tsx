@@ -66,7 +66,10 @@ function mount(element: ReactNode) {
   qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } } });
   act(() => root!.render(<QueryClientProvider client={qc}>{element}</QueryClientProvider>));
 }
-const settle = (assertion: () => void) => act(async () => void (await vi.waitFor(assertion)));
+const settle = (assertion: () => void) =>
+  act(async () => {
+    await vi.waitFor(assertion);
+  });
 const button = (name: string) => {
   const found = [...document.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.trim() === name);
   expect(found, `button ${name}`).toBeDefined();
@@ -141,14 +144,14 @@ describe("S3 settings", () => {
     expect(input("S3 hostname").required).toBe(true);
     type("S3 hostname", "s3.files.example.com");
     type("Region", "eu-west-1");
-    submit("Save");
+    void submit("Save");
     await settle(() => expect(button("Saving…").disabled).toBe(true));
     expect(payload(requests("PUT")[0])).toEqual({ enabled: true, hostname: "s3.files.example.com", region: "eu-west-1", managers_publish: true });
     await act(async () => save.resolve(json({ error: "Invalid S3 hostname" }, 400)));
     await settle(() => expect(toast.error).toHaveBeenCalledWith("Invalid S3 hostname"));
     await settle(() => expect(button("Save").disabled).toBe(false));
     expect(input("S3 hostname").value).toBe("s3.files.example.com");
-    submit("Save");
+    void submit("Save");
     await settle(() => expect(toast.success).toHaveBeenCalledWith("S3 settings updated"));
     expect(qc.getQueryData(["s3-config"])).toEqual({ ...config, enabled: true, hostname: "s3.files.example.com", region: "eu-west-1", managers_publish: true });
   });
@@ -193,7 +196,7 @@ describe("folder buckets", () => {
     // Publishing asks who is acting, as making other credentials does
     expect(button("Publish").disabled).toBe(true);
     typePassword("s3-publish", "current-password");
-    submit("Publish");
+    void submit("Publish");
     await settle(() => expect(button("Publish").disabled).toBe(true));
     expect(payload(requests("POST")[0])).toEqual({ node_id: "folder-1", name: "client-backups", password: "current-password" });
     await act(async () => publish.resolve(json({ error: "Bucket name is already in use" }, 409)));
@@ -201,7 +204,7 @@ describe("folder buckets", () => {
     await settle(() => expect(button("Publish").disabled).toBe(false));
     expect(input("Bucket name").value).toBe("  client-backups  ");
     expect((document.getElementById("s3-publish-password") as HTMLInputElement).value).toBe("current-password");
-    submit("Publish");
+    void submit("Publish");
     await settle(() => expect(document.querySelector('section[aria-label="client-backups"]')).not.toBeNull());
     expect(input("Bucket name").value).toBe("");
     expect(requests("POST")).toHaveLength(2);
@@ -213,7 +216,9 @@ describe("folder buckets", () => {
     await settle(() => expect(qc.getQueryState(keys.buckets("folder-1"))?.status).toBe("success"));
     expect(document.body.textContent).toBe("");
     folderResponses([{ ...bucket, enabled: false, active: false, keys: [] }], false);
-    await act(async () => void (await qc.invalidateQueries({ queryKey: keys.bucketLists() })));
+    await act(async () => {
+      await qc.invalidateQueries({ queryKey: keys.bucketLists() });
+    });
     await settle(() => expect(document.body.textContent).toContain("client-backups · 0 Access Keys"));
     click("Manage buckets and keys");
     await settle(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("No Access Keys yet"));
@@ -236,7 +241,7 @@ describe("Access Keys", () => {
     type("Key description", "  Backup reader  ");
     expect(button("Create key").disabled).toBe(true);
     typePassword("s3-key", "current-password");
-    submit("Create key");
+    void submit("Create key");
     await settle(() => expect(button("Creating…").disabled).toBe(true));
     expect(String(requests("POST")[0][0])).toBe("/api/s3/buckets/bucket-1/keys");
     expect(payload(requests("POST")[0])).toEqual({ description: "Backup reader", writable: false, expires_at: null, password: "current-password" });
@@ -273,12 +278,12 @@ describe("Access Keys", () => {
     act(() => input("Read and change files").click());
     type("End date (optional)", "2030-05-01T12:30");
     typePassword("s3-key", "current-password");
-    submit("Create key");
+    void submit("Create key");
     await settle(() => expect(toast.error).toHaveBeenCalledWith("S3 key limit reached"));
     await settle(() => expect(button("Create key").disabled).toBe(false));
     expect(input("Key description").value).toBe(" Writer ");
     expect(input("Read and change files").checked).toBe(true);
-    submit("Create key");
+    void submit("Create key");
     await settle(() => expect(input("Secret Key").value).toBe("test-retry-secret"));
     const sent = { description: "Writer", writable: true, expires_at: Math.floor(new Date("2030-05-01T12:30").getTime() / 1000), password: "current-password" };
     expect(requests("POST").map(payload)).toEqual([sent, sent]);

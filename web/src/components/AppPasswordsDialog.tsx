@@ -66,14 +66,14 @@ export function AppPasswordsDialog({ onClose }: { onClose(): void }) {
       setCreated({ name: r.app_password.name, token: r.token });
       setName("");
       identity.clear();
-      qc.invalidateQueries({ queryKey: keys.notifications() });
-      qc.invalidateQueries({ queryKey: keys.appPasswords() });
+      void qc.invalidateQueries({ queryKey: keys.notifications() });
+      void qc.invalidateQueries({ queryKey: keys.appPasswords() });
     },
   });
   const remove = useMutation({
     mutationFn: (p: AppPassword) => api.deleteAppPassword(p.id),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: keys.appPasswords() });
+      void qc.invalidateQueries({ queryKey: keys.appPasswords() });
       toast.success(t("App password removed"));
     },
     onError: (e) => toast.error(e.message),

@@ -119,7 +119,7 @@ export function GroupsPage() {
             toast.success(t("Group deleted"));
             setDeleting(null);
             setSelectedId(null);
-            qc.invalidateQueries({ queryKey: keys.groups() });
+            void qc.invalidateQueries({ queryKey: keys.groups() });
           }}
         />
       )}
@@ -142,7 +142,7 @@ function GroupDialog({ group, onClose }: { group: Group | null; onClose(): void 
     },
     onSuccess: () => {
       toast.success(group ? t("Group updated") : t("Group created"));
-      qc.invalidateQueries({ queryKey: keys.groups() });
+      void qc.invalidateQueries({ queryKey: keys.groups() });
       onClose();
     },
   });

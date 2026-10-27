@@ -85,7 +85,7 @@ export function NotificationBell() {
   const open = (n: AppNotification) => {
     if (!n.read) read.mutate([n.id]);
     const to = notificationLink(n);
-    if (to) navigate(to);
+    if (to) void navigate(to);
   };
 
   return (

@@ -72,7 +72,7 @@ export function ControlPanelPage() {
   const open = (item: ControlPanelItem | null, newTab = false) => {
     if (!item) return;
     if (newTab) tabs.open(item.to, { reuse: true });
-    else navigate(item.to);
+    else void navigate(item.to);
   };
 
   // In the order shown: by category as tiles, as listed in Details
@@ -98,8 +98,8 @@ export function ControlPanelPage() {
         icon={RefreshCwIcon}
         label={t("Refresh")}
         onClick={() => {
-          system.refetch();
-          locations.refetch();
+          void system.refetch();
+          void locations.refetch();
         }}
       />
       <div className="flex-1" />
@@ -267,8 +267,8 @@ export function ControlPanelPage() {
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={() => {
-                  system.refetch();
-                  locations.refetch();
+                  void system.refetch();
+                  void locations.refetch();
                 }}
               >
                 <RefreshCwIcon /> {t("Refresh")}

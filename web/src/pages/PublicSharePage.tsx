@@ -383,7 +383,7 @@ function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
               }}
               onOpen={(n) => {
                 setSelected(new Set());
-                if (n.kind === "folder") navigate(`/share/${share.token}/${n.id}`);
+                if (n.kind === "folder") void navigate(`/share/${share.token}/${n.id}`);
                 else setPreviewId(n.id);
               }}
               empty={<div className="py-16 text-center text-sm text-muted-foreground">{t("This folder is empty")}</div>}
@@ -395,7 +395,7 @@ function SharedFolder({ share, root }: { share: PublicShare; root: Node }) {
                 onClick={() => {
                   const n = selectedNodes[0];
                   setSelected(new Set());
-                  if (n.kind === "folder") navigate(`/share/${share.token}/${n.id}`);
+                  if (n.kind === "folder") void navigate(`/share/${share.token}/${n.id}`);
                   else setPreviewId(n.id);
                 }}
               >

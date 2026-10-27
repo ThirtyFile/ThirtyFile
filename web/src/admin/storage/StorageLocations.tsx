@@ -305,7 +305,7 @@ export function StorageLocations() {
           onDone={() => {
             setEmptying(null);
             refresh();
-            qc.invalidateQueries({ queryKey: keys.moves() });
+            void qc.invalidateQueries({ queryKey: keys.moves() });
           }}
         />
       )}

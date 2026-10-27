@@ -296,7 +296,7 @@ function SsoForm({ saved }: { saved: SsoSettings }) {
       shown.current = data;
       reset(data);
       qc.setQueryData(keys.ssoSettings(), data);
-      qc.invalidateQueries({ queryKey: keys.ssoProviders() });
+      void qc.invalidateQueries({ queryKey: keys.ssoProviders() });
       toast.success(t("Single sign-on settings updated"));
     },
     onError: (e) => toast.error(e.message),
