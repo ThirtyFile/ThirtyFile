@@ -157,6 +157,12 @@ impl Hist {
         self.0.iter().sum()
     }
 
+    /// For each upper bound (microseconds, ascending), how many durations were no longer than it. A bucket counts
+    /// for a bound when all of it lies at or below, so a duration is never counted as shorter than it was.
+    pub fn cumulative(&self, bounds_us: &[f64]) -> Vec<u64> {
+        bounds_us.iter().map(|bound| self.0.iter().enumerate().filter(|(i, _)| *i + 1 < BUCKETS && lower(*i + 1) <= *bound).map(|(_, n)| n).sum()).collect()
+    }
+
     /// The duration below which a share `q` (0 to 1) of the operations took, in microseconds; None without any
     pub fn quantile(&self, q: f64) -> Option<f64> {
         let total = self.count();
@@ -255,19 +261,23 @@ pub type Windows = HashMap<String, HashMap<(Op, Work), Window>>;
 #[derive(Default)]
 pub struct Meters {
     windows: Mutex<Windows>,
+    /// The same counters since the server started, which never start again (the monitoring page, metrics/)
+    totals: Mutex<Windows>,
     active: Mutex<HashMap<String, Active>>,
     /// Folder spaces' folders → their storage location (sample.rs, `folder_location`)
     pub(super) folders: Mutex<super::sample::FolderMap>,
 }
 
 impl Meters {
-    fn with(&self, location: &str, op: Op, work: Work, f: impl FnOnce(&mut Window)) {
-        let mut all = self.windows.lock();
-        let per = match all.get_mut(location) {
-            Some(per) => per,
-            None => all.entry(location.to_string()).or_default(),
-        };
-        f(per.entry((op, work)).or_default());
+    fn with(&self, location: &str, op: Op, work: Work, f: impl Fn(&mut Window)) {
+        for counters in [&self.windows, &self.totals] {
+            let mut all = counters.lock();
+            let per = match all.get_mut(location) {
+                Some(per) => per,
+                None => all.entry(location.to_string()).or_default(),
+            };
+            f(per.entry((op, work)).or_default());
+        }
     }
 
     /// Counts an operation that took `took`
@@ -298,6 +308,11 @@ impl Meters {
     /// The counters so far, which start again from nothing
     pub fn take(&self) -> Windows {
         std::mem::take(&mut *self.windows.lock())
+    }
+
+    /// Everything counted since the server started
+    pub fn totals(&self) -> Windows {
+        self.totals.lock().clone()
     }
 
     /// The counters so far, left as they are
@@ -556,6 +571,28 @@ mod tests {
             assert!(mid / lo < 1.1 && hi / mid < 1.1, "{i}");
         }
         assert!(lower(BUCKETS - 1) > 400e6, "about seven minutes before the last bucket");
+    }
+
+    #[test]
+    fn a_histogram_counts_under_fixed_bounds_and_never_calls_a_duration_shorter_than_it_was() {
+        let durations: Vec<u64> = (1..=40).map(|i| i * i * 37).chain([0, 99, 100, 5_000_000, 600_000_000, u64::MAX]).collect();
+        let mut h = Hist::default();
+        for d in &durations {
+            h.add(*d);
+        }
+        let bounds = [1_000.0, 5_000.0, 10_000.0, 100_000.0, 1_000_000.0, 60_000_000.0];
+        let counted = h.cumulative(&bounds);
+        assert!(counted.windows(2).all(|w| w[0] <= w[1]), "{counted:?} only grows");
+        for (bound, n) in bounds.iter().zip(&counted) {
+            let really = durations.iter().filter(|d| (**d as f64) <= *bound).count() as u64;
+            assert!(*n <= really, "under {bound}: {n} counted but {really} were that short");
+        }
+        assert!(*counted.last().unwrap() < h.count(), "the slowest ones are above every bound");
+        assert_eq!(Hist::default().cumulative(&bounds), vec![0; bounds.len()]);
+        // A duration well under a bound is counted under it
+        let mut one = Hist::default();
+        one.add(300);
+        assert_eq!(one.cumulative(&[1_000.0, 100.0]), vec![1, 0]);
     }
 
     #[test]

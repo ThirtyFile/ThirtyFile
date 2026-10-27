@@ -1173,4 +1173,7 @@ export default {
   "Search inside files is off": "文件内容搜索未开启",
   "The largest file read is 1 to 100 MB": "读取的文件大小上限为 1 至 100 MB",
   "The text kept is 10 to 100,000 MB in all": "文字存储总量为 10 至 100,000 MB",
+  "Make a token first: it is what a monitoring system sends to be let in": "请先创建令牌：监控系统要靠它才能进入",
+  "Enter addresses or networks such as 203.0.113.7 or 10.1.0.0/16": "请输入地址或网段，例如 203.0.113.7 或 10.1.0.0/16",
+  "At most {n} addresses or networks": "最多 {n} 个地址或网段",
 } satisfies Record<string, string>;

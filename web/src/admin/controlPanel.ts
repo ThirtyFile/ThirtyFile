@@ -4,6 +4,7 @@ import {
   ArchiveIcon,
   ArchiveRestoreIcon,
   BellRingIcon,
+  GaugeIcon,
   CopyCheckIcon,
   DatabaseIcon,
   HardDriveIcon,
@@ -40,6 +41,7 @@ export type ControlPanelKey =
   | "sso"
   | "email"
   | "alerts"
+  | "monitoring"
   | "activity"
   | "logs";
 
@@ -230,6 +232,16 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
     tone: "bg-red-500/12 text-red-700 dark:text-red-300",
     category: "system",
     keywords: "警示 通知 警報 告警 webhook 郵件 磁碟 離線 登入失敗 憑證 alerts email webhook disk offline sign-in certificate monitoring", // i18n-ignore: bilingual search keywords
+  },
+  {
+    key: "monitoring",
+    to: adminPath("monitoring"),
+    title: t("Monitoring"),
+    desc: t("Figures about the server for Prometheus and other monitoring systems, behind a token"),
+    icon: GaugeIcon,
+    tone: "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300",
+    category: "system",
+    keywords: "監控 監測 指標 prometheus grafana metrics 權杖 token 儀表板 效能 monitoring observability scrape", // i18n-ignore: bilingual search keywords
   },
   {
     key: "email",

@@ -1,6 +1,6 @@
 import type { Branding } from "@/lib/branding";
 import { request, get, post, enc } from "@/api/client";
-import type { BrandingReq, EmailSettings, EmailSettingsReq, SsoSettings, SsoSettingsReq, SystemSettingsReq, SystemInfo } from "@/api/types";
+import type { BrandingReq, EmailSettings, EmailSettingsReq, MonitoringReq, MonitoringSettings, SsoSettings, SsoSettingsReq, SystemSettingsReq, SystemInfo } from "@/api/types";
 
 /** Who is saving, asked again (see `useConfirmIdentity`) */
 type Confirmation = { my_password?: string; my_code?: string };
@@ -20,6 +20,8 @@ export const settingsApi = {
   updateEmailSettings: (req: EmailSettingsReq & Confirmation) => request<EmailSettings>("PUT", "/admin/email", req),
   testEmail: (req: EmailSettingsReq & { to: string }) => post("/admin/email/test", req),
   ssoSettings: () => get<SsoSettings>("/admin/sso"),
+  monitoring: () => get<MonitoringSettings>("/admin/monitoring"),
+  saveMonitoring: (s: MonitoringReq & Confirmation) => request<MonitoringSettings & { token?: string }>("PUT", "/admin/monitoring", s),
   /** Saving takes the administrator's own password (and code), like the email settings */
   updateSsoSettings: (s: SsoSettingsReq & Confirmation) => request<SsoSettings>("PUT", "/admin/sso", s),
 };

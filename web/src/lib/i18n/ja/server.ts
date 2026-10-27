@@ -1173,4 +1173,7 @@ export default {
   "Search inside files is off": "ファイル内検索はオフです",
   "The largest file read is 1 to 100 MB": "読み取るファイルの最大サイズは 1〜100 MB です",
   "The text kept is 10 to 100,000 MB in all": "保存する文字の合計は 10〜100,000 MB です",
+  "Make a token first: it is what a monitoring system sends to be let in": "先にトークンを作成してください。監視システムはこれを送って接続します",
+  "Enter addresses or networks such as 203.0.113.7 or 10.1.0.0/16": "アドレスまたはネットワーク（例：203.0.113.7、10.1.0.0/16）を入力してください",
+  "At most {n} addresses or networks": "アドレスまたはネットワークは最大 {n} 個です",
 } satisfies Record<string, string>;

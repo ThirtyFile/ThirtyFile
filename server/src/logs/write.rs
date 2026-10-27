@@ -330,6 +330,7 @@ pub fn record_login(st: &AppState, user_id: Option<i64>, username: &str, event: 
 
 /// Same as record_login, also recording the sign-in method (password, microsoft, google, github)
 pub fn record_login_via(st: &AppState, user_id: Option<i64>, username: &str, event: &'static str, method: &str, ip: &str, headers: &HeaderMap) {
+    crate::metrics::sign_in_event(st, event);
     let user_agent = crate::auth::user_agent(headers);
     enqueue(
         st,

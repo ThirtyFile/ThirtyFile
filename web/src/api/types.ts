@@ -1195,6 +1195,25 @@ export interface SsoSettingsReq {
   domain_rules: SsoDomainRule[];
 }
 
+/** Control panel › Monitoring: whether /metrics answers, and to whom */
+export interface MonitoringSettings {
+  enabled: boolean;
+  has_token: boolean;
+  /** When the token was made (it is never shown again) */
+  token_created_at: number | null;
+  /** Addresses and networks that may ask; empty: any, with the token */
+  allow: string[];
+  /** Where the metrics are, on this site */
+  path: string;
+}
+
+export interface MonitoringReq {
+  enabled: boolean;
+  allow: string[];
+  /** Make a new token (the old one stops working); it is in the answer, once */
+  new_token: boolean;
+}
+
 export interface Page<T> {
   items: T[];
   /** `before` parameter for the next page; null when there are no more */

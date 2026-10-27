@@ -116,6 +116,7 @@ export const keys = {
   promotePreflight: (id: string, target: string) => ["promote-preflight", id, target],
   emailSettings: () => ["email-settings"],
   ssoSettings: () => ["sso-settings"],
+  monitoring: () => ["admin-monitoring"],
   logStatus: () => ["log-status"],
   activity: (filter?: ActivityFilter) => (filter === undefined ? ["activity"] : ["activity", filter]),
   loginLog: (filter?: LoginFilter) => (filter === undefined ? ["login-log"] : ["login-log", filter]),

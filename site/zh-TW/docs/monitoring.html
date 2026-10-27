@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="zh-TW" data-root="../.." data-page="monitoring">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>監控 · ThirtyFile</title>
+    <meta name="description" content="在 Prometheus 與 Grafana 看伺服器的狀況。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/monitoring.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/monitoring.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/monitoring.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/monitoring.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/monitoring.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">跳到主要內容</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="網站">
+          <a href="../index.html#features" class="hide-small">功能</a>
+          <a href="index.html" aria-current="page">指南</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">語言 </span><span class="lang-name">繁體中文</span></summary>
+            <ul>
+              <li><a href="../../docs/monitoring.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="monitoring.html" hreflang="zh-TW" lang="zh-TW" aria-current="true">繁體中文</a></li>
+              <li><a href="../../zh-CN/docs/monitoring.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+              <li><a href="../../ja/docs/monitoring.html" hreflang="ja" lang="ja">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="指南">
+        <details open>
+          <summary>所有指南</summary>
+          <p>開始使用</p>
+          <a href="index.html">安裝</a>
+          <a href="first-steps.html">初次設定</a>
+          <p>日常使用</p>
+          <a href="files.html">檔案操作</a>
+          <a href="preview.html">預覽與編輯</a>
+          <a href="sharing.html">分享</a>
+          <a href="account.html">你的帳號</a>
+          <a href="webdav.html">連線為網路磁碟機</a>
+          <a href="protocols.html">SFTP、S3 與 FTP</a>
+          <p>管理</p>
+          <a href="users.html">使用者與空間</a>
+          <a href="sign-in.html">單一登入</a>
+          <a href="storage.html">儲存位置</a>
+          <a href="logs.html">紀錄與品牌</a>
+          <a href="monitoring.html" aria-current="page">監控</a>
+          <p>架設與維運</p>
+          <a href="settings.html">設定</a>
+          <a href="internet.html">從網際網路存取</a>
+          <a href="backup.html">升級與備份</a>
+          <a href="help.html">疑難排解</a>
+          <p>專案</p>
+          <a href="contributing.html">參與貢獻</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+
+        <h1>監控</h1>
+        <p class="lead">在 Prometheus 與 Grafana 看伺服器的狀況，數據中不含人名或檔案名稱。</p>
+        <details class="guide-toc">
+          <summary>本頁內容</summary>
+          <ol>
+            <li><a href="#on">開啟</a></li>
+            <li><a href="#prometheus">在 Prometheus 中</a></li>
+            <li><a href="#series">有哪些數據</a></li>
+            <li><a href="#grafana">Grafana</a></li>
+            <li><a href="#privacy">不在其中的東西</a></li>
+          </ol>
+        </details>
+        <h2 id="on">開啟</h2>
+        <p>開啟 <strong>控制台 › 監控</strong>。建立一個 <strong>權杖</strong>：它只會顯示一次，伺服器只保留它的指紋，請現在複製。然後開啟 <strong>回應指標請求</strong>。數據在網站的 <code>/metrics</code>，只有帶著 <code>Authorization: Bearer &lt;權杖&gt;</code> 的請求才拿得到。關閉時這個網址不存在。</p>
+        <p>可以列出允許請求的位址或網段（<code>203.0.113.7</code>、<code>10.1.0.0/16</code>）；其他位址的請求會在檢查權杖之前就被拒絕。不列的話，任何位址都可以，但要有權杖。新的權杖會立即取代舊的。錯誤的權杖和錯誤的密碼一樣會記在該位址上，連續 20 次後要等一段時間。建立和更換權杖需要輸入你的密碼，也會記在活動紀錄。</p>
+        <h2 id="prometheus">在 Prometheus 中</h2>
+        <p>新增一個抓取工作，把權杖當作憑證：</p>
+        <pre><code>scrape_configs:
+  - job_name: thirtyfile
+    scheme: https
+    authorization:
+      credentials: tfm_…
+    static_configs:
+      - targets: ["files.example.com"]</code></pre>
+        <p>警示規則的範例：</p>
+        <pre><code>groups:
+  - name: thirtyfile
+    rules:
+      - alert: ThirtyFileDown
+        expr: up{job="thirtyfile"} == 0
+        for: 5m
+      - alert: ThirtyFileLocationDown
+        expr: thirtyfile_storage_location_up == 0
+        for: 5m
+      - alert: ThirtyFileDiskNearlyFull
+        expr: thirtyfile_disk_free_bytes / thirtyfile_disk_total_bytes < 0.1
+        for: 15m
+      - alert: ThirtyFileBackupOverdue
+        expr: thirtyfile_backup_last_complete_age_seconds > 2 * 86400
+      - alert: ThirtyFileBackgroundLoopStuck
+        expr: time() - thirtyfile_background_last_success_timestamp_seconds{job="maintenance"} > 3 * 3600
+      - alert: ThirtyFileCertificateEnds
+        expr: thirtyfile_ftps_certificate_expiry_seconds < 14 * 86400</code></pre>
+        <h2 id="series">有哪些數據</h2>
+        <p>每個名稱都以 <code>thirtyfile_</code> 開頭。發佈過的名稱不會更改；新版本可能增加數據。</p>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>名稱</th><th>標籤</th><th>意義</th></tr></thead>
+            <tbody>
+              <tr><td><code>thirtyfile_build_info</code></td><td><code>version</code></td><td>版本；值固定為 1</td></tr>
+              <tr><td><code>thirtyfile_process_start_time_seconds</code></td><td></td><td>伺服器何時啟動</td></tr>
+              <tr><td><code>thirtyfile_process_uptime_seconds</code></td><td></td><td>啟動後經過的秒數</td></tr>
+              <tr><td><code>thirtyfile_process_resident_memory_bytes</code></td><td></td><td>佔用的記憶體（Linux）</td></tr>
+              <tr><td><code>thirtyfile_process_open_files</code></td><td></td><td>開啟的檔案與連線（Linux）</td></tr>
+              <tr><td><code>thirtyfile_process_threads</code></td><td></td><td>執行緒數（Linux）</td></tr>
+              <tr><td><code>thirtyfile_http_requests_total</code></td><td><code>method, code</code></td><td>已回應的請求，依方法和狀態類別</td></tr>
+              <tr><td><code>thirtyfile_http_request_duration_seconds</code></td><td></td><td>從請求到開始回應的秒數（直方圖）</td></tr>
+              <tr><td><code>thirtyfile_http_requests_in_flight</code></td><td></td><td>正在處理的請求</td></tr>
+              <tr><td><code>thirtyfile_sign_in_events_total</code></td><td><code>event</code></td><td>登入紀錄所用名稱的登入事件：<code>login</code>、<code>bad_password</code>、<code>locked</code>、<code>2fa_failed</code>…</td></tr>
+              <tr><td><code>thirtyfile_sessions</code></td><td></td><td>尚未結束的登入階段</td></tr>
+              <tr><td><code>thirtyfile_accounts</code></td><td><code>state</code></td><td>帳號，<code>active</code> 或 <code>disabled</code></td></tr>
+              <tr><td><code>thirtyfile_storage_operations_total</code></td><td><code>location, op, outcome</code></td><td>儲存位置的操作，依結果：<code>ok</code>、<code>error</code>、<code>timeout</code></td></tr>
+              <tr><td><code>thirtyfile_storage_bytes_total</code></td><td><code>location, op</code></td><td>從儲存位置讀取與寫入的位元組</td></tr>
+              <tr><td><code>thirtyfile_storage_operation_duration_seconds</code></td><td><code>location, op</code></td><td>儲存操作花的時間（直方圖）</td></tr>
+              <tr><td><code>thirtyfile_storage_location_up</code></td><td><code>location</code></td><td>位置可使用為 1，不能用為 0</td></tr>
+              <tr><td><code>thirtyfile_storage_location_live_bytes, _trash_bytes, _version_bytes</code></td><td><code>location</code></td><td>位置上各空間的檔案位元組：現有、垃圾桶、較早版本</td></tr>
+              <tr><td><code>thirtyfile_storage_location_disk_free_bytes, _disk_total_bytes</code></td><td><code>location</code></td><td>位置所在磁碟的可用與總位元組</td></tr>
+              <tr><td><code>thirtyfile_disk_free_bytes, thirtyfile_disk_total_bytes</code></td><td><code>volume</code></td><td>資料資料夾與儲存資料夾所在磁碟的可用與總位元組（<code>data</code>、<code>storage</code>）</td></tr>
+              <tr><td><code>thirtyfile_database_size_bytes, thirtyfile_database_wal_size_bytes</code></td><td></td><td>資料庫及其預寫日誌的大小</td></tr>
+              <tr><td><code>thirtyfile_tasks_running</code></td><td><code>kind</code></td><td>正在執行的工作（壓縮、解壓縮、複製、移動…）</td></tr>
+              <tr><td><code>thirtyfile_tasks_finished_total</code></td><td><code>kind, outcome</code></td><td>結束的工作，<code>done</code> 或 <code>failed</code></td></tr>
+              <tr><td><code>thirtyfile_background_last_success_timestamp_seconds</code></td><td><code>job</code></td><td>背景迴圈上次完成工作的時間（<code>maintenance</code>、<code>usage_sampler</code>、<code>location_checks</code>、<code>backup_jobs</code>、<code>replica_jobs</code>、<code>space_moves</code>）</td></tr>
+              <tr><td><code>thirtyfile_backup_last_complete_age_seconds</code></td><td><code>policy</code></td><td>已開啟的政策上次完成快照至今的秒數；從未完成則沒有</td></tr>
+              <tr><td><code>thirtyfile_backup_policies</code></td><td><code>snapshot</code></td><td>已開啟的政策，有或沒有完成過快照</td></tr>
+              <tr><td><code>thirtyfile_replica_sync_age_seconds</code></td><td><code>policy</code></td><td>副本政策的每個目標都同步到最新後經過的秒數；有目標從未同步則沒有</td></tr>
+              <tr><td><code>thirtyfile_content_search_queue, thirtyfile_content_search_failed</code></td><td></td><td>等待讀取內容以供搜尋的檔案，以及讀取失敗的檔案</td></tr>
+              <tr><td><code>thirtyfile_alert_deliveries_pending, thirtyfile_alert_deliveries_failed</code></td><td></td><td>等待寄出的警示訊息（email、webhook），以及已放棄的</td></tr>
+              <tr><td><code>thirtyfile_alerts_firing</code></td><td><code>kind</code></td><td>目前正在發出的管理員警示，依種類</td></tr>
+              <tr><td><code>thirtyfile_ftps_certificate_expiry_seconds</code></td><td></td><td>FTPS 憑證到期前的秒數（過期後為負數）</td></tr>
+              <tr><td><code>thirtyfile_emails_total</code></td><td><code>outcome</code></td><td>寄出的 email，<code>sent</code> 或 <code>failed</code></td></tr>
+              <tr><td><code>thirtyfile_metrics_requests_total</code></td><td><code>outcome</code></td><td>對這些數據的請求：<code>ok</code>、<code>unauthorized</code>、<code>forbidden</code>、<code>too_many</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h2 id="grafana">Grafana</h2>
+        <p>匯入 <a href="../../assets/thirtyfile-grafana.json">thirtyfile-grafana.json</a>（<strong>Dashboards › New › Import</strong>）並選擇你的 Prometheus。畫面會顯示請求與回應時間、登入、儲存操作、磁碟、工作、備份和正在發出的警示。</p>
+        <h2 id="privacy">不在其中的東西</h2>
+        <p>沒有人名、檔案名稱、訪客位址或路徑：標籤只有固定的詞（請求方法、工作種類、事件種類），以及管理員自己取的儲存位置和備份政策名稱。名稱中若含引號或換行，會依格式要求跳脫。</p>
+        <p>伺服器重新啟動時計數會從零開始，這是 Prometheus 預期的行為（<code>rate()</code> 和 <code>increase()</code> 會處理）。需要查詢才知道的數據（登入階段、帳號、磁碟、資料庫、備份）在監控開啟期間每 15 秒查看一次並放在記憶體：讀取指標不會鎖定、也不讀磁碟，所以頻繁抓取不會有負擔。記憶體、開啟的檔案和執行緒數只在 Linux 上提供。</p>
+        <nav class="next" aria-label="更多指南">
+          <a href="logs.html"><span>上一篇</span>紀錄與品牌</a>
+          <a class="forward" href="settings.html"><span>下一篇</span>設定</a>
+        </nav>
+
+      </main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">指南</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">原始碼</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">回報問題</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker 映像檔</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>
