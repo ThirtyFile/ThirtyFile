@@ -12,13 +12,7 @@ export default defineConfig({
   // written to run in parallel (tests/e2e/helpers.ts)
   workers: process.env.E2E_WORKERS ? Number(process.env.E2E_WORKERS) : undefined,
   // On CI also a report for the job summary (scripts/e2e-summary.mjs), which lists the tests that passed only when run again
-  reporter: process.env.CI
-    ? [
-        ["list"],
-        ["github"],
-        ["json", { outputFile: "test-results/report.json" }],
-      ]
-    : "list",
+  reporter: process.env.CI ? [["list"], ["github"], ["json", { outputFile: "test-results/report.json" }]] : "list",
   use: {
     baseURL: `http://127.0.0.1:${port}`,
     locale: "en-US",

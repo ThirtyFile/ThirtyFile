@@ -13,9 +13,10 @@
     "dev": "vp dev --host 127.0.0.1",
     "build": "tsc --noEmit && vp build && vp build -c vite.frame.config.ts && node scripts/build-dictionaries.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
+    "check": "vp check --deny-warnings",
     "lint": "vp lint --deny-warnings",
-    "format": "vp fmt src tests scripts",
-    "format:check": "vp fmt --check src tests scripts",
+    "format": "vp fmt",
+    "format:check": "vp fmt --check",
     "test": "vp test run",
     "test:e2e": "playwright test"
   },
