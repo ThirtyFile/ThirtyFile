@@ -74,6 +74,15 @@ pub async fn reseal_secrets(db: &SqlitePool, new_key: &[u8; 32]) -> Result<usize
         set_setting(&mut tx, "smtp", &json.to_string()).await?;
         n += 1;
     }
+    if let Some((v,)) = sqlx::query_as::<_, (String,)>("SELECT value FROM settings WHERE key = 'directory'").fetch_optional(&mut *tx).await?
+        && let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&v)
+        && let Some(secret) = json["bind_password"].as_str().map(str::to_string)
+        && let Some(sealed) = fix(crate::directory::SEAL, &secret)?
+    {
+        json["bind_password"] = sealed.into();
+        set_setting(&mut tx, "directory", &json.to_string()).await?;
+        n += 1;
+    }
     let totp: Vec<(i64, String)> = sqlx::query_as("SELECT id, totp_secret FROM users WHERE totp_secret IS NOT NULL").fetch_all(&mut *tx).await?;
     for (id, secret) in totp {
         if let Some(sealed) = fix(&format!("user:{id}:totp"), &secret)? {

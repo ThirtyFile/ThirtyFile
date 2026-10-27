@@ -24,6 +24,7 @@ pub const ACTIONS: &[&str] = &[
     "scan",
     "drive_create",
     "drive_update",
+    "directory_update",
     "hold_place",
     "hold_release",
     "hold_export",

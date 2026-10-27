@@ -93,7 +93,7 @@ impl Config {
     pub fn wants(&self, kind: &str) -> bool {
         match kind {
             "usage_disk" | "usage_errors" => self.usage,
-            "offline" => self.offline,
+            "offline" | "directory" => self.offline,
             "data_disk" => self.data_disk,
             "sign_ins_ip" | "sign_ins_user" => self.sign_ins,
             "backup" | "replica" => self.backups,

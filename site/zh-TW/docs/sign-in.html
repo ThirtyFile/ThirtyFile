@@ -84,6 +84,7 @@
             <li><a href="#who">誰可以登入</a></li>
             <li><a href="#rules">不同網域採用不同設定</a></li>
             <li><a href="#link">自行關聯帳號</a></li>
+            <li><a href="#directory">目錄登入：LDAP 與 Active Directory</a></li>
             <li><a href="#passwords-off">關閉密碼登入</a></li>
             <li><a href="#guests">包含來賓的 Microsoft 租戶</a></li>
             <li><a href="#guest-provisioning">透過單一登入建立訪客</a></li>
@@ -124,6 +125,35 @@
         <p>所有人都可在<strong>帳號選單 › 登入方式</strong>中關聯或取消關聯已設定提供者的帳號（Microsoft、Google、GitHub 或 OpenID Connect）。關聯後的帳號可繞過本機密碼登入，因此關聯前需要目前密碼，兩步驟驗證帳號還需驗證碼；無密碼帳號須在登入後 10 分鐘內關聯。每次關聯（包括按電子郵件比對）都會透過應用程式內通知和郵件告知使用者。</p>
         <p>設定了允許網域清單時，只有提供者已驗證的、位於該清單網域中的電子郵件信箱才能關聯。關聯帳號只儲存已驗證的電子郵件位址。</p>
         <div class="note">單一登入建立的帳號沒有密碼。只有管理員先為其設定密碼後，才能移除最後一個關聯帳號。管理員為使用者設定新密碼時，關聯帳號也會移除；使用者登入後需重新關聯。</div>
+        <h2 id="directory">目錄登入：LDAP 與 Active Directory</h2>
+        <p>如果你的人員資料放在 Active Directory、OpenLDAP 或 FreeIPA，而且沒有 OpenID 供應商，他們可以用目錄的密碼登入，帳號和群組也會跟著目錄走。開啟<strong>控制台 › 目錄登入</strong>，先選一種目錄套用範本，然後填入：</p>
+        <ul>
+          <li><strong>位址。</strong><code>ldaps://dc.example.com</code>（從一開始就加密），或 <code>ldap://dc.example.com</code> 並勾選<strong>使用 StartTLS</strong>。不使用 StartTLS 時連線不加密，只允許連到私人網路上的目錄。如果目錄的憑證由你自己的授權單位簽發，請貼上該授權單位的憑證（PEM）。</li>
+          <li><strong>服務帳號。</strong>可以搜尋目錄的帳號。它的密碼以伺服器的金鑰加密保存，絕不會送回頁面。它只負責找人：人員的密碼是用他們自己的身分登入來檢查。</li>
+          <li><strong>人員。</strong>搜尋基底、含 <code>{username}</code>（代表使用者輸入的內容）的篩選條件，以及存放穩定識別碼（帳號靠它連結，所以目錄中改名不會多出第二個帳號）、使用者名稱、姓名和電子郵件地址的屬性。</li>
+          <li><strong>群組。</strong>從這個人自己的 <code>memberOf</code> 值取得，或搜尋把這個人當成成員的群組（含 <code>{dn}</code> 的篩選條件；在 Active Directory 中，<code>(member:1.2.840.113556.1.4.1941:={dn})</code> 還會一併處理群組中的群組）。可以要求某個群組的成員才能登入，並選擇這裡的哪些群組要跟著哪些目錄群組走。</li>
+        </ul>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>目錄</th><th>人員篩選條件</th><th>穩定識別碼</th><th>使用者名稱</th><th>群組</th></tr></thead>
+            <tbody>
+              <tr><td>Active Directory</td><td><code>(&amp;(objectClass=user)(objectCategory=person)(|(sAMAccountName={username})(userPrincipalName={username})))</code></td><td><code>objectGUID</code></td><td><code>sAMAccountName</code></td><td><code>memberOf</code></td></tr>
+              <tr><td>OpenLDAP</td><td><code>(&amp;(objectClass=inetOrgPerson)(uid={username}))</code></td><td><code>entryUUID</code></td><td><code>uid</code></td><td><code>(&amp;(objectClass=groupOfNames)(member={dn}))</code></td></tr>
+              <tr><td>FreeIPA</td><td><code>(&amp;(objectClass=posixAccount)(uid={username}))</code></td><td><code>ipaUniqueID</code></td><td><code>uid</code></td><td><code>memberOf</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p><strong>測試</strong>按鈕會在儲存之前，用輸入的內容試一次：連線（憑證的問題會用文字說明：授權單位不受信任、名稱不符、憑證過期）、服務帳號，然後針對你給的使用者名稱，列出找到的人與各屬性的內容，以及他的群組。遇到第一個出錯的地方就停下，並附上目錄自己的原因。</p>
+        <h3>人員登入時</h3>
+        <ul>
+          <li>這裡沒有帳號的使用者名稱會到目錄中查找，並用該人的身分綁定來檢查密碼。密碼絕不會被保存或寫入記錄。手動建立的帳號（第一位管理員、管理員建立的帳號）使用自己的密碼，絕不會送到目錄。</li>
+          <li>帳號在第一次登入時建立（關閉後只連結已存在的帳號），個人空間比照<a href="#setup">單一登入</a>，並以目錄的穩定識別碼連結。</li>
+          <li>登入失敗的次數和密碼一樣受到限制；由於每次猜測都是對目錄的一次綁定，同一個名稱在 15 分鐘內錯誤五次後會被暫停（不論來自哪個位址），以免猜測觸及目錄自己的鎖定。無法連線的目錄會如實告知，不算作密碼錯誤，並在開始與結束時各發出一次<a href="users.html#alerts">管理員警示</a>。如果某人<a href="#passwords-off">不能使用密碼</a>，他的目錄密碼也不能用。管理員要求時，兩步驟驗證和密碼金鑰仍然適用。SFTP、WebDAV、FTP 和 S3 繼續使用應用程式密碼和金鑰，絕不使用目錄密碼。</li>
+        </ul>
+        <h3>人員離開時</h3>
+        <p>每 15 分鐘，以及按下<strong>立即同步</strong>時，群組會跟著目錄更新；在目錄中已不存在，或在那裡被停用（Active Directory 帳號帶有停用旗標、FreeIPA 或 389 的鎖定）的人，帳號會被停用，登入工作階段也會結束。帳號絕不會被刪除，檔案會保留。人員回到目錄後，帳號會再次啟用；管理員停用的帳號則維持停用。搜尋找不到任何人時不會停用任何人，因為搜尋基底錯誤的可能性更高。屬於跟著目錄走的群組中、由目錄登入的人員，不能在<strong>控制台 › 群組</strong>中手動更改。</p>
+        <div class="note">使用者名稱只會作為值放進篩選條件：像 <code>*)(uid=*</code> 這樣的名稱找不到任何人。搜尋結果對同一個名稱有多個項目時會被拒絕，不會跟隨轉介，每次搜尋都有時間與數量上限。</div>
+
         <h2 id="passwords-off">關閉密碼登入</h2>
         <p>單一登入能運作之後，可以完全不讓人用帳號和密碼登入，讓身分提供者的規則（多重驗證、離職的人）適用於所有人。在 <strong>控制台 › 單一登入 › 密碼登入</strong> 選擇：</p>
         <div class="table-scroll">

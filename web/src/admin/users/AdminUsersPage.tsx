@@ -33,7 +33,7 @@ import { t, tc } from "@/lib/i18n";
 import { formatBytes, formatDate, formatDateTime, errorMessage } from "@/lib/utils";
 import { LoginLogDialog } from "@/components/logs/LoginLog";
 import { DevicesDialog } from "@/components/DevicesDialog";
-import { ProviderIcon, SSO_LABEL, type SsoProviderId } from "@/components/ProviderIcon";
+import { ProviderIcon, providerLabel } from "@/components/ProviderIcon";
 import { AddPersonalDialog, RemovePersonalDialog, DeleteUserDialog, ResetTwoFactorDialog } from "@/admin/users/AccountDialogs";
 import { UserDialog } from "@/admin/users/UserDialog";
 import { PERMISSION_LABEL, PERMISSIONS } from "@/admin/users/permissions";
@@ -96,16 +96,12 @@ export function AdminUsersPage() {
           )}
           {u.sso &&
             u.sso.split(",").map((p) => (
-              <span key={p} title={t("Linked to {provider} sign-in", { provider: SSO_LABEL[p as SsoProviderId] ?? p })}>
+              <span key={p} title={t("Linked to {provider} sign-in", { provider: providerLabel(p) })}>
                 <ProviderIcon provider={p} className="size-3.5" />
               </span>
             ))}
           {u.source !== "password" && (
-            <Badge
-              variant="outline"
-              className="h-4 px-1.5 text-[10px]"
-              title={t("Created automatically by {provider} sign-in", { provider: SSO_LABEL[u.source as SsoProviderId] ?? u.source })}
-            >
+            <Badge variant="outline" className="h-4 px-1.5 text-[10px]" title={t("Created automatically by {provider} sign-in", { provider: providerLabel(u.source) })}>
               {t("Auto-created")}
             </Badge>
           )}

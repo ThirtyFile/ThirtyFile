@@ -143,6 +143,7 @@ pub async fn notice(st: &AppState, notice: &str, problem: bool, data: &Value) {
     let kind = match notice {
         "backup" => "backup",
         "replica" => "replica",
+        "directory" => "directory",
         _ => return,
     };
     if let Err(e) = event(st, kind, problem, data).await {

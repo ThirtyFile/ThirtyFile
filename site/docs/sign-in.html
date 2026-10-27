@@ -83,6 +83,7 @@
             <li><a href="#who">Who may sign in</a></li>
             <li><a href="#rules">Different settings for different domains</a></li>
             <li><a href="#link">Linking an account yourself</a></li>
+            <li><a href="#directory">Directory sign-in: LDAP and Active Directory</a></li>
             <li><a href="#passwords-off">Turning off passwords</a></li>
             <li><a href="#guests">Microsoft tenants with guests</a></li>
             <li><a href="#guest-provisioning">Create guests with single sign-on</a></li>
@@ -131,6 +132,35 @@
         <p>Anyone can link or unlink an account of each provider set up here (Microsoft, Google, GitHub or OpenID Connect) under <strong>Account menu › Sign-in methods</strong>. A linked account signs in without the password, so linking asks for the current password first, and with two-factor sign-in a code; accounts without a password link within 10 minutes of signing in. The person gets a notification, in the app and by email, for every account linked to theirs, including one matched by email.</p>
         <p>When a list of allowed domains is set, only an account whose email address the provider verified, in one of those domains, can be linked. Only verified addresses are kept with a linked account.</p>
         <div class="note">An account created by single sign-on has no password. Its last linked account can only be removed after an administrator gave it a password. When an administrator sets a new password for someone, their linked accounts are removed too: they link them again after signing in.</div>
+
+        <h2 id="directory">Directory sign-in: LDAP and Active Directory</h2>
+        <p>When your people are kept in Active Directory, OpenLDAP or FreeIPA and you have no OpenID provider, they can sign in with their directory password, and their accounts and groups follow the directory. Open <strong>Control panel › Directory sign-in</strong>, choose a kind of directory to start from, and fill in:</p>
+        <ul>
+          <li><strong>Address.</strong> <code>ldaps://dc.example.com</code> (secure from the first byte), or <code>ldap://dc.example.com</code> with <strong>Use StartTLS</strong>. Without StartTLS the connection is unencrypted and only allowed to a directory on the private network. When the directory's certificate was made by an authority of your own, paste that authority's certificate (PEM).</li>
+          <li><strong>Service account.</strong> An account that may search the directory. Its password is stored encrypted with the server's key and never sent back to the page. It only finds people: their passwords are checked by signing in as them.</li>
+          <li><strong>People.</strong> The search base, a filter with <code>{username}</code> standing for what the person typed, and the attributes that hold the stable id (what an account is linked by, so a rename in the directory doesn't make a second account), the user name, the name and the email address.</li>
+          <li><strong>Groups.</strong> Found from the person's own <code>memberOf</code> values, or by searching the groups that have the person as a member (a filter with <code>{dn}</code>; in Active Directory, <code>(member:1.2.840.113556.1.4.1941:={dn})</code> also follows groups inside groups). You can require a group for signing in, and choose which directory groups the groups here follow.</li>
+        </ul>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Directory</th><th>People's filter</th><th>Stable id</th><th>User name</th><th>Groups</th></tr></thead>
+            <tbody>
+              <tr><td>Active Directory</td><td><code>(&amp;(objectClass=user)(objectCategory=person)(|(sAMAccountName={username})(userPrincipalName={username})))</code></td><td><code>objectGUID</code></td><td><code>sAMAccountName</code></td><td><code>memberOf</code></td></tr>
+              <tr><td>OpenLDAP</td><td><code>(&amp;(objectClass=inetOrgPerson)(uid={username}))</code></td><td><code>entryUUID</code></td><td><code>uid</code></td><td><code>(&amp;(objectClass=groupOfNames)(member={dn}))</code></td></tr>
+              <tr><td>FreeIPA</td><td><code>(&amp;(objectClass=posixAccount)(uid={username}))</code></td><td><code>ipaUniqueID</code></td><td><code>uid</code></td><td><code>memberOf</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>The <strong>Test</strong> button tries what is typed, before it is saved: the connection (with the certificate's problem in words: an authority that isn't trusted, a name that doesn't fit, an expired certificate), the service account, then, for a user name you give, the person with what was found in the attributes, and their groups. It stops at the first thing that goes wrong, with the directory's own reason.</p>
+        <h3>When people sign in</h3>
+        <ul>
+          <li>A user name that has no account made here is looked up in the directory, and the password is checked by binding as that person. It is never stored or logged. Accounts made by hand (the first administrator, accounts an administrator created) keep their own passwords and never go to the directory.</li>
+          <li>The account is created at the first sign-in (turn that off to link only accounts that exist), with a personal space as for <a href="#setup">single sign-on</a>, and linked by the directory's stable id.</li>
+          <li>Failed attempts are limited like passwords, and since every guess is a bind at the directory, a name is paused after five wrong passwords within 15 minutes, from any address, before the directory's own lockout could be reached by guessing. A directory that can't be reached is told as such, isn't counted as a wrong password, and sends an <a href="users.html#alerts">administrator alert</a> once it begins and once it is over. If <a href="#passwords-off">passwords are turned off</a> for someone, so is their directory password. Two-factor sign-in and passkeys apply on top when an administrator requires them. SFTP, WebDAV, FTP and S3 keep using app passwords and keys, never the directory password.</li>
+        </ul>
+        <h3>When someone leaves</h3>
+        <p>Every 15 minutes, and when you press <strong>Sync now</strong>, groups follow the directory, and a person who is gone from the directory, or turned off there (an Active Directory account with the disabled flag, a FreeIPA or 389 lock), has their account turned off and their sessions ended. Accounts are never deleted and their files stay. When the person is back, the account is turned on again; one an administrator turned off stays off. A search that finds no one turns nobody off, since a wrong search base is the likelier reason. People of the directory who are in a group that follows it can't be changed by hand in <strong>Control panel › Groups</strong>.</p>
+        <div class="note">The user name is only ever put into the filter as a value: a name like <code>*)(uid=*</code> finds nobody. A search that finds more than one entry for a name is refused, referrals are not followed, and every search has a time and a size limit.</div>
 
         <h2 id="passwords-off">Turning off passwords</h2>
         <p>Once single sign-on works, you can stop people from signing in with a user name and password at all, so that your identity provider's rules (multi-factor sign-in, who may leave the company) apply to everyone. Choose under <strong>Control panel › Single sign-on › Password sign-in</strong>:</p>

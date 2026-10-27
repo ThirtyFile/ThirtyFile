@@ -51,6 +51,7 @@ pub(super) const TEXTS: &[(Text, &str)] = &[
     (AlertWhatSignInsIp, "最近 {minutes} 分鐘內，來自 {ip} 的登入失敗 {count} 次"),
     (AlertWhatSignInsUser, "最近 {minutes} 分鐘內，帳號「{username}」登入失敗 {count} 次"),
     (AlertWhatCertificate, "FTP 憑證將在 {days} 天後到期"),
+    (AlertWhatDirectory, "無法連線用於登入的目錄"),
     (AlertWhatBackup, "備份「{name}」需要處理"),
     (AlertWhatReplica, "鏡像規則「{name}」需要處理"),
     // Replicas

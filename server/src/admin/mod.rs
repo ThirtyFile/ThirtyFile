@@ -292,7 +292,8 @@ pub async fn update(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
                can_delete = COALESCE(?, can_delete),
                can_share = COALESCE(?, can_share),
                quota_bytes = COALESCE(?, quota_bytes),
-               disabled = COALESCE(?, disabled)
+               disabled = COALESCE(?, disabled),
+               directory_disabled = CASE WHEN ? IS NOT NULL THEN 0 ELSE directory_disabled END
              WHERE id = ?",
         )
         .bind(&password_hash)
@@ -303,6 +304,7 @@ pub async fn update(State(st): State<AppState>, Admin(me): Admin, Path(id): Path
         .bind(req.can_delete)
         .bind(req.can_share)
         .bind(req.quota_bytes.map(|q| q.max(0)))
+        .bind(req.disabled)
         .bind(req.disabled)
         .bind(id)
         .execute(&mut *tx)

@@ -51,6 +51,7 @@ pub(super) const TEXTS: &[(Text, &str)] = &[
     (AlertWhatSignInsIp, "最近 {minutes} 分钟内，来自 {ip} 的登录失败 {count} 次"),
     (AlertWhatSignInsUser, "最近 {minutes} 分钟内，账号“{username}”登录失败 {count} 次"),
     (AlertWhatCertificate, "FTP 证书将在 {days} 天后到期"),
+    (AlertWhatDirectory, "无法连接用于登录的目录"),
     (AlertWhatBackup, "备份“{name}”需要处理"),
     (AlertWhatReplica, "镜像“{name}”需要处理"),
     // Replicas

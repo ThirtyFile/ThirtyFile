@@ -124,8 +124,14 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml') }}
+      # A real OpenLDAP with a few people (server/src/directory/testdata/seed.ldif), for the test of directory sign-in
+      # (server/src/directory/real.rs), which waits for it to load its people; without it that test does nothing
+      - name: OpenLDAP
+        run: |
+          docker run -d --name ldap -p 10389:389 -e LDAP_DOMAIN=example.org -e LDAP_ADMIN_PASSWORD=admin -e LDAP_TLS=false             -v "$PWD/server/src/directory/testdata:/container/service/slapd/assets/config/bootstrap/ldif/custom"             osixia/openldap:1.5.0@sha256:18742e9c449c9c1afe129d3f2f3ee15fb34cc43e5f940a20f3399728f41d7c28 --copy-service
       - name: Backend and end-to-end test
         env:
+          THIRTYFILE_LDAP_URL: ldap://127.0.0.1:10389
           # The end-to-end tests run 4 at a time, more than Playwright's default here (2), so that a test that isn't
           # safe to run next to the others fails here rather than on main
           E2E_WORKERS: 4

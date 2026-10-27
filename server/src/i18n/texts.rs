@@ -96,6 +96,7 @@ texts! {
     AlertWhatSignInsIp = "{count} failed sign-ins from {ip} in the last {minutes} minutes",
     AlertWhatSignInsUser = "{count} failed sign-ins for the account “{username}” in the last {minutes} minutes",
     AlertWhatCertificate = "The FTP certificate ends in {days} days",
+    AlertWhatDirectory = "The directory used for sign-in can't be reached",
     AlertWhatBackup = "The backup “{name}” needs attention",
     AlertWhatReplica = "The replicas “{name}” need attention",
 

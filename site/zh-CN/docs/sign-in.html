@@ -84,6 +84,7 @@
             <li><a href="#who">谁可以登录</a></li>
             <li><a href="#rules">不同域名采用不同设置</a></li>
             <li><a href="#link">自行关联账号</a></li>
+            <li><a href="#directory">目录登录：LDAP 与 Active Directory</a></li>
             <li><a href="#passwords-off">关闭密码登录</a></li>
             <li><a href="#guests">包含来宾的 Microsoft 租户</a></li>
             <li><a href="#guest-provisioning">通过单点登录创建访客</a></li>
@@ -123,6 +124,35 @@
         <p>所有人都可在<strong>账号菜单 › 登录方式</strong>中关联或取消关联已配置提供商的账号（Microsoft、Google、GitHub 或 OpenID Connect）。关联后的账号可绕过本地密码登录，因此关联前需要当前密码，两步验证账号还需验证码；无密码账号须在登录后 10 分钟内关联。每次关联（包括按邮箱匹配）都会通过应用内通知和邮件告知用户。</p>
         <p>设置了允许域名列表时，只有提供商已验证的、位于该列表域名中的邮箱才能关联。关联账号只保存已验证的邮箱地址。</p>
         <div class="note">单点登录创建的账号没有密码。只有管理员先为其设置密码后，才能移除最后一个关联账号。管理员为用户设置新密码时，关联账号也会移除；用户登录后需重新关联。</div>
+        <h2 id="directory">目录登录：LDAP 与 Active Directory</h2>
+        <p>如果你的人员数据放在 Active Directory、OpenLDAP 或 FreeIPA，而且没有 OpenID 提供商，他们可以用目录的密码登录，账号和群组也会跟着目录走。打开<strong>控制台 › 目录登录</strong>，先选一种目录套用模板，然后填入：</p>
+        <ul>
+          <li><strong>地址。</strong><code>ldaps://dc.example.com</code>（从一开始就加密），或 <code>ldap://dc.example.com</code> 并勾选<strong>使用 StartTLS</strong>。不使用 StartTLS 时连接不加密，只允许连到私有网络上的目录。如果目录的证书由你自己的颁发机构签发，请粘贴该机构的证书（PEM）。</li>
+          <li><strong>服务账号。</strong>可以搜索目录的账号。它的密码以服务器的密钥加密保存，绝不会发回页面。它只负责找人：人员的密码是用他们自己的身份登录来检查。</li>
+          <li><strong>人员。</strong>搜索基准、含 <code>{username}</code>（代表用户输入的内容）的过滤条件，以及存放稳定标识符（账号靠它关联，所以目录中改名不会多出第二个账号）、用户名、姓名和电子邮件地址的属性。</li>
+          <li><strong>群组。</strong>从这个人自己的 <code>memberOf</code> 值获取，或搜索把这个人当成成员的群组（含 <code>{dn}</code> 的过滤条件；在 Active Directory 中，<code>(member:1.2.840.113556.1.4.1941:={dn})</code> 还会一并处理群组中的群组）。可以要求某个群组的成员才能登录，并选择这里的哪些群组要跟着哪些目录群组走。</li>
+        </ul>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>目录</th><th>人员过滤条件</th><th>稳定标识符</th><th>用户名</th><th>群组</th></tr></thead>
+            <tbody>
+              <tr><td>Active Directory</td><td><code>(&amp;(objectClass=user)(objectCategory=person)(|(sAMAccountName={username})(userPrincipalName={username})))</code></td><td><code>objectGUID</code></td><td><code>sAMAccountName</code></td><td><code>memberOf</code></td></tr>
+              <tr><td>OpenLDAP</td><td><code>(&amp;(objectClass=inetOrgPerson)(uid={username}))</code></td><td><code>entryUUID</code></td><td><code>uid</code></td><td><code>(&amp;(objectClass=groupOfNames)(member={dn}))</code></td></tr>
+              <tr><td>FreeIPA</td><td><code>(&amp;(objectClass=posixAccount)(uid={username}))</code></td><td><code>ipaUniqueID</code></td><td><code>uid</code></td><td><code>memberOf</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p><strong>测试</strong>按钮会在保存之前，用输入的内容试一次：连接（证书的问题会用文字说明：颁发机构不受信任、名称不符、证书过期）、服务账号，然后针对你给的用户名，列出找到的人与各属性的内容，以及他的群组。遇到第一个出错的地方就停下，并附上目录自己的原因。</p>
+        <h3>人员登录时</h3>
+        <ul>
+          <li>这里没有账号的用户名会到目录中查找，并用该人的身份绑定来检查密码。密码绝不会被保存或写入日志。手动创建的账号（第一位管理员、管理员创建的账号）使用自己的密码，绝不会发到目录。</li>
+          <li>账号在第一次登录时创建（关闭后只关联已存在的账号），个人空间比照<a href="#setup">单点登录</a>，并以目录的稳定标识符关联。</li>
+          <li>登录失败的次数和密码一样受到限制；由于每次猜测都是对目录的一次绑定，同一个名称在 15 分钟内错误五次后会被暂停（不论来自哪个地址），以免猜测触及目录自己的锁定。无法连接的目录会如实告知，不算作密码错误，并在开始与结束时各发出一次<a href="users.html#alerts">管理员警报</a>。如果某人<a href="#passwords-off">不能使用密码</a>，他的目录密码也不能用。管理员要求时，两步验证和通行密钥仍然适用。SFTP、WebDAV、FTP 和 S3 继续使用应用密码和密钥，绝不使用目录密码。</li>
+        </ul>
+        <h3>人员离开时</h3>
+        <p>每 15 分钟，以及点击<strong>立即同步</strong>时，群组会跟着目录更新；在目录中已不存在，或在那里被禁用（Active Directory 账号带有禁用标志、FreeIPA 或 389 的锁定）的人，账号会被停用，登录会话也会结束。账号绝不会被删除，文件会保留。人员回到目录后，账号会再次启用；管理员停用的账号则保持停用。搜索找不到任何人时不会停用任何人，因为搜索基准错误的可能性更高。属于跟着目录走的群组中、由目录登录的人员，不能在<strong>控制台 › 群组</strong>中手动更改。</p>
+        <div class="note">用户名只会作为值放进过滤条件：像 <code>*)(uid=*</code> 这样的名称找不到任何人。搜索结果对同一个名称有多个条目时会被拒绝，不会跟随转介，每次搜索都有时间与数量上限。</div>
+
         <h2 id="passwords-off">关闭密码登录</h2>
         <p>单点登录能正常工作之后，可以完全不让人用用户名和密码登录，让身份提供商的规则（多重验证、离职的人）适用于所有人。在 <strong>控制台 › 单点登录 › 密码登录</strong> 选择：</p>
         <div class="table-scroll">

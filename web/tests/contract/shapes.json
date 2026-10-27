@@ -237,12 +237,14 @@
     "id": 0,
     "members": [
       {
+        "directory": false,
         "guest": false,
         "id": 0,
         "username": ""
       }
     ],
-    "name": ""
+    "name": "",
+    "source": ""
   },
   "GuestConversionPreview": {
     "changed_grants": [

@@ -4,6 +4,7 @@ import {
   ArchiveIcon,
   ArchiveRestoreIcon,
   BellRingIcon,
+  FolderTreeIcon,
   GavelIcon,
   GaugeIcon,
   CopyCheckIcon,
@@ -42,6 +43,7 @@ export type ControlPanelKey =
   | "general"
   | "branding"
   | "sso"
+  | "directory"
   | "email"
   | "dashboard"
   | "alerts"
@@ -246,6 +248,16 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
     tone: "bg-violet-500/12 text-violet-700 dark:text-violet-300",
     category: "storage",
     keywords: "保留 保存 期限 法務 保全 訴訟 稽核 合規 刪除 資料保存 retention legal hold litigation audit compliance records delete eDiscovery", // i18n-ignore: bilingual search keywords
+  },
+  {
+    key: "directory",
+    to: adminPath("directory"),
+    title: t("Directory sign-in"),
+    desc: t("Sign in with the password of an LDAP directory, Active Directory, OpenLDAP or FreeIPA, with accounts and groups that follow it"),
+    icon: FolderTreeIcon,
+    tone: "bg-sky-500/12 text-sky-700 dark:text-sky-300",
+    category: "users",
+    keywords: "ldap 目錄 目录 活動目錄 活动目录 網域 域 ad active directory openldap freeipa 389 ldaps 登入 密碼 群組 同步 directory domain controller sync group sign in", // i18n-ignore: bilingual search keywords
   },
   {
     key: "alerts",
