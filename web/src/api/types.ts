@@ -1203,6 +1203,8 @@ export interface SsoAdmin {
 export interface AuthOptions {
   password_reset: boolean;
   password_sign_in: PasswordSignIn;
+  /** Passkeys can be used on this site's address: the page offers signing in with one */
+  passkeys: boolean;
 }
 
 export type SsoProviderReq = SsoProviderPolicy & { enabled: boolean; client_id: string; client_secret: string; tenant: string; name: string; issuer: string };
@@ -1378,11 +1380,11 @@ export interface LoginRecord {
   username: string;
   /** login, bad_password, password_off, unknown_user, disabled, locked, logout, password_change, sso_denied, sso_provisioned, sso_link, sso_unlink, device_signout, signout_others, admin_signout,
    * app_password_failed, app_password_created, app_password_revoked, 2fa_failed, 2fa_enabled, 2fa_disabled, 2fa_reset,
-   * recovery_code_used, recovery_codes_new */
+   * recovery_code_used, recovery_codes_new, passkey_failed, passkey_added, passkey_removed */
   event: string;
   ip: string;
   user_agent: string;
-  /** password, microsoft, google, github */
+  /** password, microsoft, google, github, passkey */
   method: string;
 }
 
@@ -1497,6 +1499,62 @@ export interface TwoFactorPending {
   /** code: ask for a code; setup: the administrator requires it and it isn't set up yet */
   two_factor: "code" | "setup";
   ticket: string;
+  /** What can answer the second step: a code from an app (or a recovery code), a passkey, or both */
+  totp: boolean;
+  passkey: boolean;
+}
+
+/** What a passkey is asked to sign (from the server; base64url) */
+export interface PasskeyRequestOptions {
+  challenge: string;
+  rp_id: string;
+  timeout: number;
+  user_verification: UserVerificationRequirement;
+  allow: { id: string; transports: string[] }[];
+}
+
+/** What a passkey is asked to make when it is added */
+export interface PasskeyCreationOptions {
+  challenge: string;
+  rp: { id: string; name: string };
+  user: { id: string; name: string; display_name: string };
+  timeout: number;
+  algorithms: number[];
+  exclude: { id: string; transports: string[] }[];
+}
+
+/** A passkey's answer to a challenge to sign in (all base64url) */
+export interface PasskeyAnswer {
+  credential_id: string;
+  client_data_json: string;
+  authenticator_data: string;
+  signature: string;
+  user_handle?: string;
+}
+
+/** A passkey made: what the server keeps it by */
+export interface PasskeyCreated {
+  client_data_json: string;
+  attestation_object: string;
+  transports: string[];
+}
+
+export interface Passkey {
+  id: number;
+  name: string;
+  created_at: number;
+  last_used_at: number | null;
+  /** Kept in a phone's keychain or a password manager: on more than one device */
+  backup_eligible: boolean;
+}
+
+export interface Passkeys {
+  passkeys: Passkey[];
+  /** The site's address can carry passkeys */
+  available: boolean;
+  /** A password is asked for before changing the list */
+  has_password: boolean;
+  max: number;
 }
 
 /** What an authenticator app needs to be set up */

@@ -6,6 +6,7 @@ import {
   AppWindowIcon,
   BellIcon,
   ChevronsUpDownIcon,
+  FingerprintIcon,
   HistoryIcon,
   KeyRoundIcon,
   KeySquareIcon,
@@ -38,6 +39,7 @@ import { DevicesDialog } from "@/components/DevicesDialog";
 import { AppPasswordsDialog } from "@/components/AppPasswordsDialog";
 import { SftpKeysDialog } from "@/components/SftpKeysDialog";
 import { TwoFactorDialog } from "@/components/TwoFactor";
+import { PasskeysDialog } from "@/components/PasskeysDialog";
 import { NotificationSettingsDialog } from "@/components/NotificationSettingsDialog";
 import { useMe } from "@/lib/session";
 import { useTheme, type ThemeMode } from "@/lib/theme";
@@ -61,6 +63,7 @@ export function AccountMenu({ usage }: { usage: string | null }) {
   const [showAppPasswords, setShowAppPasswords] = useState(false);
   const [showSftpKeys, setShowSftpKeys] = useState(false);
   const [showTwoFactor, setShowTwoFactor] = useState(false);
+  const [showPasskeys, setShowPasskeys] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
 
   const logout = async () => {
@@ -121,6 +124,9 @@ export function AccountMenu({ usage }: { usage: string | null }) {
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => setShowTwoFactor(true)}>
             <ShieldCheckIcon /> {t("Two-factor sign-in")}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setShowPasskeys(true)}>
+            <FingerprintIcon /> {t("Passkeys")}
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => setShowAccounts(true)}>
             <Link2Icon /> {t("Sign-in methods")}
@@ -200,6 +206,7 @@ export function AccountMenu({ usage }: { usage: string | null }) {
       {showAppPasswords && <AppPasswordsDialog onClose={() => setShowAppPasswords(false)} />}
       {showSftpKeys && <SftpKeysDialog onClose={() => setShowSftpKeys(false)} />}
       {showTwoFactor && <TwoFactorDialog onClose={() => setShowTwoFactor(false)} />}
+      {showPasskeys && <PasskeysDialog onClose={() => setShowPasskeys(false)} />}
       {showNotifications && <NotificationSettingsDialog onClose={() => setShowNotifications(false)} />}
       {showLogins && (
         <LoginLogDialog

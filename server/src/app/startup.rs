@@ -246,6 +246,7 @@ pub fn parts(l: Loaded) -> Parts {
         .with(sso::Memory::new(l.sso))
         .with(crate::metrics::Memory::new(l.metrics))
         .with(twofactor::Memory::default())
+        .with(crate::passkeys::state::Memory::default())
         .with(moves::Memory::default())
         .with(backups::Memory::default())
         .with(backups::database::Memory::default())

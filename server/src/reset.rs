@@ -50,6 +50,8 @@ pub async fn options(State(st): State<AppState>) -> AppResult<Json<Value>> {
         "password_reset": mode == PasswordSignIn::Everyone && crate::mail::load(&st.db).await.enabled && link_base(&st).is_some(),
         // Who may sign in with a password: the sign-in page shows its form for no one, or only at the administrators' address
         "password_sign_in": mode,
+        // Passkeys can be used on this site's address, and where passwords are allowed: the page offers signing in with one
+        "passkeys": crate::passkeys::api::offered(&st).await?,
     })))
 }
 

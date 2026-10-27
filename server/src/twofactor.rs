@@ -237,6 +237,14 @@ async fn turn_on(st: &AppState, user_id: i64, secret: &str, step: i64) -> AppRes
     Ok(codes)
 }
 
+async fn reset(st: &AppState, user_id: i64) -> AppResult<bool> {
+    let _w = st.write_lock.lock().await;
+    let mut tx = crate::db::begin_write(&st.db).await?;
+    let off = reset_in(&mut tx, user_id).await?;
+    tx.commit().await?;
+    Ok(off)
+}
+
 async fn turn_off(st: &AppState, user_id: i64) -> AppResult<bool> {
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
@@ -252,6 +260,14 @@ pub async fn turn_off_in(conn: &mut sqlx::SqliteConnection, user_id: i64) -> App
         sqlx::query("UPDATE users SET totp_secret = NULL, totp_last_step = 0 WHERE id = ? AND totp_secret IS NOT NULL").bind(user_id).execute(&mut *conn).await?;
     sqlx::query("DELETE FROM recovery_codes WHERE user_id = ?").bind(user_id).execute(&mut *conn).await?;
     Ok(res.rows_affected() > 0)
+}
+
+/// Takes every second factor of an account away (also `thirtyfile reset-two-factor`): the app, the recovery codes and the
+/// passkeys. Whether there was one.
+pub async fn reset_in(conn: &mut sqlx::SqliteConnection, user_id: i64) -> AppResult<bool> {
+    let app = turn_off_in(&mut *conn, user_id).await?;
+    let passkeys = crate::passkeys::store::delete_all(&mut *conn, user_id).await?;
+    Ok(app || passkeys > 0)
 }
 
 fn too_many() -> AppError {
@@ -292,10 +308,12 @@ pub type Logins = Mutex<HashMap<String, Pending>>;
 /// instead of a session
 pub async fn after_password(st: &AppState, user_id: i64) -> AppResult<Option<Value>> {
     let (secret,): (Option<String>,) = sqlx::query_as("SELECT totp_secret FROM users WHERE id = ?").bind(user_id).fetch_one(&st.db).await?;
-    let step = match secret {
-        Some(_) => Step::Code,
-        None if st.system.read().require_two_factor => Step::Setup(None),
-        None => return Ok(None),
+    let passkeys = crate::passkeys::store::count(&mut *st.db.acquire().await?, user_id).await? > 0;
+    // A passkey is a second factor too: with one, the account has what the requirement asks for
+    let step = match (&secret, passkeys) {
+        (Some(_), _) | (None, true) => Step::Code,
+        (None, false) if st.system.read().require_two_factor => Step::Setup(None),
+        (None, false) => return Ok(None),
     };
     let kind = if matches!(step, Step::Code) { "code" } else { "setup" };
     let Some(credential) = credential(st, user_id).await? else { return Err(expired()) };
@@ -309,7 +327,7 @@ pub async fn after_password(st: &AppState, user_id: i64) -> AppResult<Option<Val
         }
         map.insert(sha256_hex(ticket.as_bytes()), Pending { user_id, step, credential, created: Instant::now(), tries: 0 });
     }
-    Ok(Some(json!({ "two_factor": kind, "ticket": ticket })))
+    Ok(Some(json!({ "two_factor": kind, "ticket": ticket, "totp": secret.is_some(), "passkey": passkeys })))
 }
 
 fn expired() -> AppError {
@@ -318,7 +336,7 @@ fn expired() -> AppError {
 
 /// The account, step and credential of a ticket that is still valid: not too old, and given for the account's current
 /// password (a password changed or reset since, e.g. to lock someone out, ends the sign-ins it started)
-async fn ticket(st: &AppState, hash: &str) -> AppResult<(i64, Step, String)> {
+pub(crate) async fn ticket(st: &AppState, hash: &str) -> AppResult<(i64, Step, String)> {
     let found = {
         let mut map = st.part::<Memory>().logins.lock();
         match map.get(hash) {
@@ -347,6 +365,35 @@ async fn still_valid(st: &AppState, user_id: i64, cred: &str) -> AppResult<bool>
 #[derive(Deserialize)]
 pub struct TicketReq {
     ticket: String,
+}
+
+/// A wrong second factor on a ticket: whether the ticket is used up (it takes a few, then the password is needed again)
+pub(crate) fn count_wrong(st: &AppState, hash: &str) -> bool {
+    let mut map = st.part::<Memory>().logins.lock();
+    let used_up = map.get_mut(hash).is_none_or(|p| {
+        p.tries += 1;
+        p.tries >= TICKET_TRIES
+    });
+    if used_up {
+        map.remove(hash);
+    }
+    used_up
+}
+
+/// The second factor was right: the ticket signs in once, and only for the password it was given for
+pub(crate) async fn use_ticket(st: &AppState, hash: &str, user_id: i64, cred: &str) -> AppResult<()> {
+    if st.part::<Memory>().logins.lock().remove(hash).is_none() {
+        return Err(expired());
+    }
+    // The password may have changed while the second factor was checked
+    if !still_valid(st, user_id, cred).await? {
+        return Err(expired());
+    }
+    Ok(())
+}
+
+pub(crate) fn wrong_codes_message() -> AppError {
+    AppError::new(StatusCode::UNAUTHORIZED, "Too many wrong codes. Enter your password again.").with_code("two_factor_expired")
 }
 
 /// Sign-in of an account that must set up two-factor sign-in: the secret to add to the authenticator app
@@ -407,36 +454,15 @@ pub async fn login_code(
         }
     };
     let Some(accepted) = accepted else {
-        let ticket_used_up = {
-            let mut map = st.part::<Memory>().logins.lock();
-            let used_up = map.get_mut(&hash).is_none_or(|p| {
-                p.tries += 1;
-                p.tries >= TICKET_TRIES
-            });
-            if used_up {
-                map.remove(&hash);
-            }
-            used_up
-        };
+        let ticket_used_up = count_wrong(&st, &hash);
         logs::record_login(&st, Some(user_id), &username, "2fa_failed", &ip, &headers);
         if auth::attempts_exhausted(&st, &key, ACCOUNT_LIMIT) {
             logs::record_login(&st, Some(user_id), &username, "locked", &ip, &headers);
         }
-        return Err(if ticket_used_up {
-            AppError::new(StatusCode::UNAUTHORIZED, "Too many wrong codes. Enter your password again.").with_code("two_factor_expired")
-        } else {
-            AppError::new(StatusCode::UNAUTHORIZED, "Wrong code")
-        });
+        return Err(if ticket_used_up { wrong_codes_message() } else { AppError::new(StatusCode::UNAUTHORIZED, "Wrong code") });
     };
     auth::attempt_succeeded(&st, &key);
-    // A ticket signs in once
-    if st.part::<Memory>().logins.lock().remove(&hash).is_none() {
-        return Err(expired());
-    }
-    // The password may have changed while the code was checked
-    if !still_valid(&st, user_id, &cred).await? {
-        return Err(expired());
-    }
+    use_ticket(&st, &hash, user_id, &cred).await?;
     let codes = match setup {
         Some((secret, step)) => {
             let codes = turn_on(&st, user_id, &secret, step).await?;
@@ -601,7 +627,7 @@ pub async fn admin_reset(
     let Some((username,)) = row else { return Err(AppError::not_found("User not found")) };
     // It lets someone into the account with the password alone, so it asks who the administrator is first
     crate::tokens::confirm_identity(&st, &me, req.password, req.code.as_deref(), crate::admin::SIGN_IN_AGAIN).await?;
-    if turn_off(&st, user_id).await? {
+    if reset(&st, user_id).await? {
         {
             let _w = st.write_lock.lock().await;
             let mut conn = st.db.acquire().await?;

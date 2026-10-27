@@ -18,6 +18,7 @@ import { replicasApi } from "@/api/replicas";
 import { tagsApi } from "@/api/tags";
 import { smartFoldersApi } from "@/api/smartFolders";
 import { sftpApi } from "@/api/sftp";
+import { passkeysApi } from "@/api/passkeys";
 
 export * from "@/api/types";
 export { SORT_KEYS } from "@/api/files";
@@ -44,4 +45,5 @@ export const api = {
   ...tagsApi,
   ...smartFoldersApi,
   ...sftpApi,
+  ...passkeysApi,
 };

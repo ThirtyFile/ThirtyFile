@@ -45,6 +45,7 @@ mod metrics;
 mod moves;
 mod nodes;
 mod notify;
+mod passkeys;
 mod paths;
 mod personal;
 #[cfg(unix)]

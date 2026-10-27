@@ -192,8 +192,21 @@ pub async fn login(
 /// Signs a user in after every step of password sign-in passed: opens the session and answers with the user (and the
 /// recovery codes when two-factor sign-in was just set up)
 pub async fn finish_login(st: &AppState, id: i64, username: &str, ip: &str, headers: &HeaderMap, recovery_codes: Option<Vec<String>>) -> AppResult<Response> {
-    let cookie = open_session(st, id, "password", ip, headers).await?;
-    logs::record_login(st, Some(id), username, "login", ip, headers);
+    finish_login_by(st, id, username, "password", ip, headers, recovery_codes).await
+}
+
+/// `finish_login` for a sign-in by another `method` (a passkey)
+pub async fn finish_login_by(
+    st: &AppState,
+    id: i64,
+    username: &str,
+    method: &str,
+    ip: &str,
+    headers: &HeaderMap,
+    recovery_codes: Option<Vec<String>>,
+) -> AppResult<Response> {
+    let cookie = open_session(st, id, method, ip, headers).await?;
+    logs::record_login_via(st, Some(id), username, "login", method, ip, headers);
     let sql = format!("SELECT {USER_COLS} FROM users u WHERE u.id = ?");
     let mut user: User = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(id).fetch_one(&st.db).await?;
     user.shared_root = st.shared_root();

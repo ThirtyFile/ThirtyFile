@@ -82,6 +82,7 @@
           <ol>
             <li><a href="#password">Password</a></li>
             <li><a href="#two-factor">Two-factor sign-in</a></li>
+            <li><a href="#passkeys">Passkeys</a></li>
             <li><a href="#devices">Signed-in devices</a></li>
             <li><a href="#app-passwords">App passwords</a></li>
             <li><a href="#language">Language</a></li>
@@ -111,6 +112,15 @@
           <li>If an administrator requires two-factor sign-in, you're asked to set it up right after your password the next time you sign in, and you can't turn it off.</li>
         </ul>
         <div class="note">Lost your phone and your recovery codes? Ask an administrator to reset your two-factor sign-in. You can then sign in with your password and set it up again.</div>
+
+        <h2 id="passkeys">Passkeys</h2>
+        <p>A passkey lets you sign in with your fingerprint, face, screen lock or a security key instead of typing a password. Its private key never leaves your device, so there is nothing to type, guess or be tricked into giving away. Open <strong>Passkeys</strong> in the account menu, give the passkey a name (for example <em>Work laptop</em>), enter your current password (and with two-factor sign-in a code; accounts without a password must have signed in within the last 10 minutes) and choose <strong>Add a passkey</strong>. Your browser or device then asks you to confirm.</p>
+        <ul>
+          <li><strong>Signing in.</strong> On the sign-in page choose the fingerprint button, <strong>Sign in with a passkey</strong>: no user name or password is typed. The passkey has to check that it is you (a PIN, a fingerprint or a face), so it counts as a password and a second factor in one, and no code is asked for.</li>
+          <li><strong>After a password.</strong> When your account has passkeys, the second step of a password sign-in accepts one instead of a code. A touch is enough there, because the password was the first factor. A passkey also meets an administrator's requirement of <a href="#two-factor">two-factor sign-in</a>.</li>
+          <li><strong>Several devices.</strong> Add a passkey on each device you use, or use one kept in a phone's keychain or a password manager, which the list marks <strong>Synced</strong>. You can rename or remove each one; removing asks for your password again. An account can have 20.</li>
+        </ul>
+        <div class="note">Passkeys work on a site address that is <code>https</code> and has a host name, not a number such as 192.0.2.10; <code>localhost</code> works for trying them out. An administrator sets the address under <strong>Control panel › General › Site URL</strong>, and passkeys made for one address don't work on another. They follow <a href="sign-in.html#passwords-off">Password sign-in</a>: where passwords are turned off, so are passkeys. When an administrator resets someone's two-factor sign-in, their passkeys are removed too. The sign-in history records passkeys added, removed and refused.</div>
 
         <h2 id="devices">Signed-in devices</h2>
         <p><strong>Devices</strong> lists every browser signed in to your account: the browser and system, the address it last used, when it signed in and when it was last used. The one you're using is marked <strong>This device</strong>.</p>

@@ -11,6 +11,7 @@ export const keys = {
   // The signed-in person
   me: () => ["me"],
   twoFactor: () => ["two-factor"],
+  passkeys: () => ["passkeys"],
   appPasswords: () => ["app-passwords"],
   identities: () => ["identities"],
   /** Someone's signed-in devices: the person's own ("me"), or an account's (administrators) */
@@ -131,6 +132,7 @@ export const queries = {
   /** The signed-in person: a 401 means signing in again, not trying again */
   me: queryOptions({ queryKey: keys.me(), queryFn: api.me, retry: false, staleTime: 30_000 }),
   twoFactor: queryOptions({ queryKey: keys.twoFactor(), queryFn: api.twoFactor }),
+  passkeys: queryOptions({ queryKey: keys.passkeys(), queryFn: api.passkeys }),
   sharedWithMe: queryOptions({ queryKey: keys.sharedWithMe(), queryFn: api.sharedWithMe }),
   /** Read by every row that shows tag dots: changed only by the person, so kept until a change says otherwise */
   tags: queryOptions({ queryKey: keys.tags(), queryFn: api.tags, staleTime: 5 * 60_000 }),

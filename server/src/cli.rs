@@ -177,7 +177,7 @@ pub async fn run(cfg: &Config, db: &sqlx::SqlitePool, storage: &Path, key_source
     if let Some(Command::ResetTwoFactor { username }) = &cfg.command {
         let id = user_id(db, username).await?;
         let mut tx = db::begin_write(db).await?;
-        twofactor::turn_off_in(&mut tx, id).await.map_err(|e| e.message)?;
+        twofactor::reset_in(&mut tx, id).await.map_err(|e| e.message)?;
         tx.commit().await?;
         println!("Two-factor sign-in is turned off for this account");
         return Ok(true);

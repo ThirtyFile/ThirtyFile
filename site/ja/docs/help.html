@@ -104,6 +104,7 @@
         <h2 id="two-factor">管理者がスマートフォンと回復コードをなくした</h2>
         <p>ほかの管理者が <strong>コントロールパネル › ユーザー</strong> でリセットできます。ほかに管理者がいない場合は、サーバーで無効にします。</p>
         <pre><code>docker exec thirtyfile thirtyfile reset-two-factor admin</code></pre>
+        <p>どちらの方法でも、そのアカウントの回復コードとパスキーも削除されます。</p>
         <h2 id="passwords-off">パスワードでのサインインをオフにして誰もサインインできない</h2>
         <p>シングルサインオンが動かなくなったら、サーバーでパスワードでのサインインを元に戻します（再起動は不要です）。</p>
         <pre><code>docker exec thirtyfile thirtyfile password-sign-in everyone</code></pre>
