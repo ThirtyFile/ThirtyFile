@@ -266,6 +266,7 @@ fn admin_api() -> Router<AppState> {
         .route("/admin/settings", get(admin::get_settings).patch(admin::update_settings))
         .route("/admin/sso", get(sso::get_settings).put(sso::update_settings))
         .route("/admin/monitoring", get(crate::metrics::get_settings).put(crate::metrics::update_settings))
+        .route("/admin/dashboard", get(crate::metrics::get_dashboard))
         .route("/admin/usage", get(usage::api::overview))
         .route("/admin/usage/history", get(usage::api::history))
         .route("/admin/usage/thresholds", put(usage::api::set_thresholds))

@@ -15,6 +15,7 @@ import {
   PieChartIcon,
   ShieldCheckIcon,
   TruckIcon,
+  LayoutDashboardIcon,
   SlidersHorizontalIcon,
   UsersIcon,
   UsersRoundIcon,
@@ -40,6 +41,7 @@ export type ControlPanelKey =
   | "branding"
   | "sso"
   | "email"
+  | "dashboard"
   | "alerts"
   | "monitoring"
   | "activity"
@@ -189,6 +191,16 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
     tone: "bg-rose-500/12 text-rose-600 dark:text-rose-300",
     category: "storage",
     keywords: "統計 容量 垃圾桶 分享連結 usage statistics capacity trash share link", // i18n-ignore: bilingual search keywords
+  },
+  {
+    key: "dashboard",
+    to: adminPath("dashboard"),
+    title: t("Dashboard"),
+    desc: t("How the server is doing: what is wrong now, who is using it, and the last day or week"),
+    icon: LayoutDashboardIcon,
+    tone: "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300",
+    category: "system",
+    keywords: "儀表板 總覽 狀態 健康 監看 圖表 錯誤 警示 dashboard overview status health charts errors alerts monitor", // i18n-ignore: bilingual search keywords
   },
   {
     key: "general",

@@ -83,6 +83,7 @@
             <li><a href="#prometheus">In Prometheus</a></li>
             <li><a href="#series">What the figures are</a></li>
             <li><a href="#grafana">Grafana</a></li>
+            <li><a href="#dashboard">The dashboard</a></li>
             <li><a href="#privacy">What is not in them</a></li>
           </ol>
         </details>
@@ -160,6 +161,8 @@
         </div>
         <h2 id="grafana">Grafana</h2>
         <p>Import <a href="../assets/thirtyfile-grafana.json">thirtyfile-grafana.json</a> (<strong>Dashboards › New › Import</strong>) and choose your Prometheus. It shows requests and how long they take, sign-ins, storage operations, disks, tasks, backups and what is firing.</p>
+        <h2 id="dashboard">The dashboard</h2>
+        <p><strong>Control panel › Dashboard</strong> needs no Prometheus. It says whether the server is well (the same check as <code>/api/health</code>, with the reasons), what administrator alerts are firing, how many people are signed in and active, tasks, uploads and free disk space, and charts of the last 24 hours or 7 days: requests and server errors, how long answers take, people and work, storage operations, failed sign-ins and free disk space. It also lists the latest server errors and failed sign-ins, with a link to the <strong>Activity log</strong>. The charts are made of a figure for each five minutes that the server keeps for eight days, whether or not <code>/metrics</code> is turned on; a stretch with no figures is the server having been off.</p>
         <h2 id="privacy">What is not in them</h2>
         <p>No name of a person or a file, no address of a visitor and no path: labels are fixed words (a method, a kind of task, a kind of event), and the names of the storage locations and backup policies that administrators chose. A name of a location or a policy that holds a quote or a line break is written as the format asks.</p>
         <p>The counters start again at zero when the server restarts, as Prometheus expects (<code>rate()</code> and <code>increase()</code> deal with it). The figures that have to be looked up (sessions, accounts, disks, the database, backups) are looked at every 15 seconds while monitoring is on, and are kept in memory: a request for the metrics takes no lock and reads no disk, so asking often costs nothing. The memory, open files and threads are shown on Linux only.</p>

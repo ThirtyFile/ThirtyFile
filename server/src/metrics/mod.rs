@@ -9,12 +9,14 @@
 //!   seconds. It takes no write lock and reads no disk.
 
 mod collect;
+mod dashboard;
 mod expose;
 mod instruments;
 mod render;
 mod settings;
 
 pub use collect::spawn as spawn_collector;
+pub use dashboard::{get as get_dashboard, spawn as spawn_dashboard};
 pub use instruments::{Memory, beat, email_failed, email_sent, sign_in_event, task_finished, track};
 pub use render::scrape;
 pub use settings::{Settings, get_settings, load, update_settings};

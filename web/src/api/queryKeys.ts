@@ -117,6 +117,7 @@ export const keys = {
   emailSettings: () => ["email-settings"],
   ssoSettings: () => ["sso-settings"],
   monitoring: () => ["admin-monitoring"],
+  dashboard: (span: number) => ["admin-dashboard", span],
   logStatus: () => ["log-status"],
   activity: (filter?: ActivityFilter) => (filter === undefined ? ["activity"] : ["activity", filter]),
   loginLog: (filter?: LoginFilter) => (filter === undefined ? ["login-log"] : ["login-log", filter]),
