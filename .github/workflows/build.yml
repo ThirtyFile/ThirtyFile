@@ -100,7 +100,7 @@ jobs:
       # rustup installs the version, clippy and rustfmt named in server/rust-toolchain.toml on first use
       - run: rustup toolchain install
         working-directory: server
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: server
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -108,7 +108,7 @@ jobs:
       # The backend's formatting (rustfmt, server/rustfmt.toml), then its tests (cargo test), clippy, and the end-to-end
       # test in a real browser (sign in, upload, preview, download) run against one build instrumented for coverage (cargo llvm-cov show-env): the dependencies are
       # compiled once for both, and the coverage in the job summary counts what the browser test reaches too.
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: cargo-llvm-cov
       # The browser the end-to-end test uses (about 150 MB), kept between runs while the lock file (and with it the
@@ -153,7 +153,7 @@ jobs:
 
       # Known security problems in dependencies, their licences and where they come from (server/deny.toml), with the
       # toolchain installed above (the cargo-deny action's container looked for it and logged an error each run)
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: cargo-deny
       - name: Rust dependencies
@@ -293,7 +293,7 @@ jobs:
       # same images), pushed by digest only (release.yml adds the tags), with an SBOM and the full build provenance;
       # release.yml also signs the provenance
       - if: inputs.release_version
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
