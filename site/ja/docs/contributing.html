@@ -125,6 +125,7 @@
         <pre><code>cd server &amp;&amp; cargo fmt
 cd web &amp;&amp; pnpm format</code></pre>
         <p>サーバーは rustfmt（<code>server/rustfmt.toml</code>）、画面は <a href="https://viteplus.dev/">Vite+</a>（<code>vp</code>：Vite、Vitest、oxlint、oxfmt。設定は <code>web/vite.config.ts</code>。<code>pnpm dev</code>、<code>pnpm build</code>、<code>pnpm test</code>、<code>pnpm lint</code>、<code>pnpm format</code> が実行します。oxfmt の対象は <code>web/src</code>、<code>web/tests</code>、<code>web/scripts</code>）を使います。エディターの拡張でも同じ設定で保存時に整形できます。手で 1 行に複数項目を並べた表は、前の <code>// oxfmt-ignore</code> で保持できます。<code>web/src/lib/i18n/</code> の辞書は整形せず、1 行 1 項目です。</p>
+        <p>画面には、リポジトリ直下の <code>.node-version</code> に書かれたバージョンの Node が必要です。ワークフローはこのファイルを読み、<a href="https://viteplus.dev/guide/env">vp env</a> を設定してあれば <code>vp env install</code> がそのバージョンを取得し、リポジトリ内のシェルで使われます。Docker イメージの Node は同じメジャー・マイナーバージョンです（パッチバージョンは Dependabot が更新します）。<code>scripts/check-toolchain.mjs</code>（<code>scripts/check.sh web</code> の一部）は、両者が異なるとき、または <code>web/pnpm-workspace.yaml</code> の <code>vite-plus</code> とそのコアの別名 <code>vite</code> が同じバージョンでないときに失敗します。Vite+ は手動で、2 つ一緒に、専用の pull request で上げます。</p>
         <p>整形だけのコミットは <code>.git-blame-ignore-revs</code> に列挙します。GitHub の blame は無視します。ローカルの <code>git blame</code> でも無視するには <code>git config blame.ignoreRevsFile .git-blame-ignore-revs</code> を一度実行してください。</p>
         <ul>
           <li>コード、コメント、ガイドの原文は英語です。</li>
