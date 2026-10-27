@@ -187,7 +187,7 @@ fn process() -> Process {
     #[cfg(target_os = "linux")]
     {
         let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
-        let field = |name: &str| status.lines().find_map(|l| l.strip_prefix(name)?.trim().split_whitespace().next()?.parse::<i64>().ok());
+        let field = |name: &str| status.lines().find_map(|l| l.strip_prefix(name)?.split_whitespace().next()?.parse::<i64>().ok());
         Process {
             memory: field("VmRSS:").map(|kb| kb.saturating_mul(1024)),
             files: std::fs::read_dir("/proc/self/fd").ok().map(|d| i64::try_from(d.count()).unwrap_or(i64::MAX)),
