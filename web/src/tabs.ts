@@ -188,7 +188,7 @@ export function useTabActions() {
   const go = useCallback(
     (path: string) => {
       pending = path;
-      navigate(path, { replace: true });
+      void navigate(path, { replace: true });
     },
     [navigate],
   );
@@ -228,7 +228,7 @@ export function useTabActions() {
         set({ ...store.get(), active: existing.id });
         go(path);
       } else {
-        navigate(path);
+        void navigate(path);
       }
     },
     [go, navigate],

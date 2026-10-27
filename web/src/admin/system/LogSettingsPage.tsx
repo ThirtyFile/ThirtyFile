@@ -278,7 +278,7 @@ export function LogSettingsPage() {
           onConfirm={async () => {
             await api.deleteLogArchive(deleting.id);
             setDeleting(null);
-            q.refetch();
+            void q.refetch();
           }}
         />
       )}

@@ -79,7 +79,7 @@ export function TwoFactorDialog({ onClose }: { onClose(): void }) {
     setSetup(null);
     setCode("");
     setCodes(null);
-    qc.invalidateQueries({ queryKey: keys.twoFactor() });
+    void qc.invalidateQueries({ queryKey: keys.twoFactor() });
   };
 
   const confirm = useMutation({

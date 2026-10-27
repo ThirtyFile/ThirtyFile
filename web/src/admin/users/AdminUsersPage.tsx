@@ -255,7 +255,7 @@ export function AdminUsersPage() {
                     try {
                       await api.updateUser(selected.id, { disabled: !selected.disabled });
                       toast.success(selected.disabled ? t("Account enabled") : t("Account disabled"));
-                      qc.invalidateQueries({ queryKey: keys.adminUsers() });
+                      void qc.invalidateQueries({ queryKey: keys.adminUsers() });
                     } catch (e) {
                       toast.error(errorMessage(e, t("Operation failed")));
                     }
@@ -304,7 +304,7 @@ export function AdminUsersPage() {
           onClose={() => setResetting(null)}
           onDone={() => {
             setResetting(null);
-            qc.invalidateQueries({ queryKey: keys.adminUsers() });
+            void qc.invalidateQueries({ queryKey: keys.adminUsers() });
           }}
         />
       )}

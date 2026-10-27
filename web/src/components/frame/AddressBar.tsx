@@ -107,7 +107,7 @@ export function SearchInput({
     const next = new URLSearchParams(params);
     next.delete("q");
     sent.current = "";
-    navigate(`/search${next.size ? `?${next}` : ""}`, { replace: true });
+    void navigate(`/search${next.size ? `?${next}` : ""}`, { replace: true });
   };
   const search = (v: string) => {
     // The page filters itself (e.g. control panel): don't jump to file search
@@ -119,11 +119,11 @@ export function SearchInput({
       const next = new URLSearchParams(params);
       next.set("q", text);
       sent.current = text;
-      if (next.toString() !== params.toString()) navigate(`/search?${next}`, { replace: true });
+      if (next.toString() !== params.toString()) void navigate(`/search?${next}`, { replace: true });
       return;
     }
     handOver(true);
-    navigate(`/search?q=${encodeURIComponent(text)}${scope ? `&in=${encodeURIComponent(scope)}` : ""}`);
+    void navigate(`/search?q=${encodeURIComponent(text)}${scope ? `&in=${encodeURIComponent(scope)}` : ""}`);
   };
   const latest = useRef({ search, filters: !!onSearch });
   latest.current = { search, filters: !!onSearch };

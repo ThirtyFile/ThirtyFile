@@ -262,7 +262,7 @@ export function SearchPage() {
         onClick={async () => {
           const query = queryFromSearch({ term, within, type, date, size, tag, content });
           const saved = await editSmartFolder(undefined, { name: term.trim() || (tags.find((x) => String(x.id) === tag)?.name ?? ""), query });
-          if (saved) navigate(smartPath(saved));
+          if (saved) void navigate(smartPath(saved));
         }}
       >
         <FolderSearchIcon /> {t("Save as smart folder")}

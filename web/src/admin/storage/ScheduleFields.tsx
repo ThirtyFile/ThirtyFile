@@ -93,7 +93,7 @@ export function ScheduleFields({ s, idPrefix, every = [15, 30, 60, 120, 240, 360
               type="button"
               aria-pressed={s.days.includes(d)}
               className={cn("rounded-md border px-2 py-1 text-xs", s.days.includes(d) ? "border-brand bg-brand/10 text-brand" : "text-muted-foreground")}
-              onClick={() => s.setDays((cur) => (cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d].sort()))}
+              onClick={() => s.setDays((cur) => (cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d].sort((a, b) => a - b)))}
             >
               {dayName(d)}
             </button>

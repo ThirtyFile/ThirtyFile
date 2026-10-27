@@ -231,7 +231,7 @@ export function DeleteUserDialog({ user, onClose, onDeleted }: { user: UserRow; 
     mutationFn: () => api.updateUser(user.id, { disabled: true }),
     onSuccess: () => {
       toast.success(t("Account disabled"));
-      qc.invalidateQueries({ queryKey: keys.adminUsers() });
+      void qc.invalidateQueries({ queryKey: keys.adminUsers() });
       onClose();
     },
   });

@@ -114,7 +114,7 @@ export function FileViewPage() {
     const target = e.key === "ArrowLeft" ? prev : e.key === "ArrowRight" ? next : undefined;
     if (!target) return;
     e.preventDefault();
-    goTo(target);
+    void goTo(target);
   });
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => onArrowKey(e);

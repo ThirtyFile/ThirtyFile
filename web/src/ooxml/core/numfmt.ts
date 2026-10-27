@@ -355,6 +355,7 @@ function formatNumber(n: number, body: string): string {
 export function formatCell(v: unknown, pattern?: string): Formatted {
   if (v === null || v === undefined) return { text: "" };
   if (typeof v === "boolean") return { text: v ? "TRUE" : "FALSE" };
+  // oxlint-disable-next-line typescript/no-base-to-string -- any other object (a Date) shows as its own string form
   if (typeof v === "object") return { text: String(v) };
   const secs = pattern && pattern !== "General" ? sections(pattern) : null;
   if (typeof v === "string") {

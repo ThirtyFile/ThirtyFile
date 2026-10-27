@@ -23,7 +23,7 @@ export function DevicesDialog({ user, onClose }: { user?: { id: number; username
   /** An administrator looking at someone else's devices signs out all of them */
   const everywhere = !devices.some((d) => d.current);
   const done = (message: string) => {
-    qc.invalidateQueries({ queryKey: key });
+    void qc.invalidateQueries({ queryKey: key });
     toast.success(message);
   };
   const signOut = useMutation({

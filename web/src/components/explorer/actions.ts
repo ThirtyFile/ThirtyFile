@@ -190,7 +190,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
   const open = (n: Item, byKey = false) => {
     if (n.kind === "folder") {
       s.enteredByKey.current = byKey ? n.id : null;
-      navigate(`/files/${n.id}`);
+      void navigate(`/files/${n.id}`);
     } else tabs.openFile(`/view/${n.id}`);
   };
 
@@ -384,7 +384,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
       else if (pressed(e, k.copy) && !window.getSelection()?.toString()) copy();
       else if (pressed(e, k.paste) && canPaste) {
         e.preventDefault();
-        paste();
+        void paste();
       } else if (pressed(e, k.moveHere) && canPaste) {
         e.preventDefault();
         void moveHere();

@@ -270,6 +270,6 @@ export const controlPanelItem = (key: ControlPanelKey) => CONTROL_PANEL_ITEMS.fi
 export function useSettingsSearch() {
   const navigate = useNavigate();
   return (q: string) => {
-    if (q.trim()) navigate(`/admin?q=${encodeURIComponent(q)}`);
+    if (q.trim()) void navigate(`/admin?q=${encodeURIComponent(q)}`);
   };
 }
