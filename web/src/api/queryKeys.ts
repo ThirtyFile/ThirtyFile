@@ -118,6 +118,7 @@ export const keys = {
   emailSettings: () => ["email-settings"],
   ssoSettings: () => ["sso-settings"],
   monitoring: () => ["admin-monitoring"],
+  directorySignIn: () => ["admin-directory-sign-in"],
   holds: (state: string, q: string) => ["holds", state, q],
   holdItems: (id: string) => ["hold-items", id],
   nodeRetention: (id: string | null | undefined) => ["node-retention", id],

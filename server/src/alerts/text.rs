@@ -22,6 +22,7 @@ pub fn what(kind: &str, params: &Value, lang: Lang) -> String {
         "data_disk" => tr(lang, Text::AlertWhatDataDisk, &[("percent", &percent)]),
         "usage_errors" => tr(lang, Text::AlertWhatErrors, &[("location", location), ("percent", &percent)]),
         "offline" => tr(lang, Text::AlertWhatOffline, &[("location", location)]),
+        "directory" => tr(lang, Text::AlertWhatDirectory, &[]),
         "sign_ins_ip" => {
             tr(lang, Text::AlertWhatSignInsIp, &[("count", &number(params, "count")), ("ip", text(params, "ip")), ("minutes", &number(params, "minutes"))])
         }

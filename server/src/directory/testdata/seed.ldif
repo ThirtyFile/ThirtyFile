@@ -1,0 +1,36 @@
+# The people and groups the test against a real OpenLDAP signs in (tests/real.rs): loaded by the container the Build
+# workflow starts, under dc=example,dc=org
+dn: ou=people,dc=example,dc=org
+objectClass: organizationalUnit
+ou: people
+
+dn: ou=groups,dc=example,dc=org
+objectClass: organizationalUnit
+ou: groups
+
+dn: uid=amy,ou=people,dc=example,dc=org
+objectClass: inetOrgPerson
+cn: Amy Wong
+sn: Wong
+uid: amy
+mail: amy@example.org
+userPassword: amy-pw
+
+dn: uid=ben,ou=people,dc=example,dc=org
+objectClass: inetOrgPerson
+cn: Ben Li
+sn: Li
+uid: ben
+mail: ben@example.org
+userPassword: ben-pw
+
+dn: cn=staff,ou=groups,dc=example,dc=org
+objectClass: groupOfNames
+cn: staff
+member: uid=amy,ou=people,dc=example,dc=org
+member: uid=ben,ou=people,dc=example,dc=org
+
+dn: cn=admins,ou=groups,dc=example,dc=org
+objectClass: groupOfNames
+cn: admins
+member: uid=amy,ou=people,dc=example,dc=org

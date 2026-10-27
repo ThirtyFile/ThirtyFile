@@ -144,21 +144,40 @@ pub async fn login(
             format!("Too many failed sign-in attempts for this account. Try again in {wait} seconds."),
         ));
     }
-    let row: Option<(i64, String, bool, crate::auth::UserRole)> =
-        sqlx::query_as("SELECT id, password_hash, disabled, role FROM users WHERE username = ?").bind(username).fetch_optional(&st.db).await?;
+    let row: Option<(i64, String, bool, crate::auth::UserRole, String)> =
+        sqlx::query_as("SELECT id, password_hash, disabled, role, source FROM users WHERE username = ?").bind(username).fetch_optional(&st.db).await?;
+    // The directory (Control panel › Directory sign-in) is asked for a name that has no account made here
+    let attempt = Attempt { username, password: &req.password, keys: [&key, &account_key], ip_key: &ip_key, ip: &ip, headers: &headers };
+    let (by_directory, directory_event, directory_user) = match ask_directory(&st, row.as_ref().map(|r| r.4.as_str()), &attempt).await? {
+        Asked::Not => (None, None, None),
+        Asked::Signed(signed) => (Some(signed), None, None),
+        Asked::Wrong { event, user } => (None, Some(event), user),
+    };
     // Hash once even when the username doesn't exist, so response timing doesn't reveal whether it exists
-    let (id, hash, disabled, role) = row.unwrap_or((0, DUMMY_HASH.into(), false, crate::auth::UserRole::User));
+    let (id, hash, disabled, role) = match (&by_directory, directory_event) {
+        (Some(signed), _) => (signed.user_id, DUMMY_HASH.into(), false, crate::auth::UserRole::User),
+        (None, Some(_)) => (directory_user.unwrap_or(0), DUMMY_HASH.into(), false, crate::auth::UserRole::User),
+        _ => row.map_or((0, DUMMY_HASH.into(), false, crate::auth::UserRole::User), |(id, hash, disabled, role, _)| (id, hash, disabled, role)),
+    };
     // An account that may not sign in with a password (Control panel › Single sign-on) is checked against a hash no
     // password matches: the answer and the time it takes are those of a wrong password
-    let refused = id != 0 && !crate::sso::mode(&st.db).await?.allows(role);
-    let password_ok = verify_password(req.password, if refused { DUMMY_HASH.into() } else { hash }).await? && !refused;
+    let refused = by_directory.is_none() && directory_event.is_none() && id != 0 && !crate::sso::mode(&st.db).await?.allows(role);
+    let password_ok = if by_directory.is_some() {
+        true
+    } else if directory_event.is_some() {
+        false
+    } else {
+        verify_password(req.password, if refused { DUMMY_HASH.into() } else { hash }).await? && !refused
+    };
     if !password_ok || id == 0 || disabled {
         // The attempt was already counted; the lockout begins when this failure was the last one allowed
         let locked = {
             let map = st.part::<crate::auth::Memory>().login_failures.lock();
             map.get(&key).is_some_and(|l| l.len() == FAIL_LIMIT) || map.get(&ip_key).is_some_and(|l| l.len() == IP_FAIL_LIMIT)
         };
-        let event = if id == 0 {
+        let event = if let Some(event) = directory_event {
+            event
+        } else if id == 0 {
             "unknown_user"
         } else if refused {
             "password_off"
@@ -168,9 +187,10 @@ pub async fn login(
             "disabled"
         };
         let user_id = (id > 0).then_some(id);
-        logs::record_login(&st, user_id, username, event, &ip, &headers);
+        let method = if directory_event.is_some() { crate::directory::PROVIDER } else { "password" };
+        logs::record_login_via(&st, user_id, username, event, method, &ip, &headers);
         if locked {
-            logs::record_login(&st, user_id, username, "locked", &ip, &headers);
+            logs::record_login_via(&st, user_id, username, "locked", method, &ip, &headers);
         }
         // The response doesn't distinguish the reason, to avoid revealing whether the username exists
         return Err(AppError::new(axum::http::StatusCode::UNAUTHORIZED, "Incorrect username or password"));
@@ -186,7 +206,75 @@ pub async fn login(
     if let Some(pending) = crate::twofactor::after_password(&st, id).await? {
         return Ok(Json(pending).into_response());
     }
-    finish_login(&st, id, username, &ip, &headers, None).await
+    match by_directory {
+        Some(signed) => finish_login_by(&st, id, &signed.username, crate::directory::PROVIDER, &ip, &headers, None).await,
+        None => finish_login(&st, id, username, &ip, &headers, None).await,
+    }
+}
+
+/// A sign-in being checked: what was typed and where it came from, and the limits it is counted against
+struct Attempt<'a> {
+    username: &'a str,
+    password: &'a str,
+    /// The keys of the limits by name (the name from the address, and the account): taken back when it wasn't the person's fault
+    keys: [&'a str; 2],
+    ip_key: &'a str,
+    ip: &'a str,
+    headers: &'a HeaderMap,
+}
+
+/// Wrong passwords for one name at the directory, within the failure window, from any address
+const DIRECTORY_NAME_LIMIT: usize = 5;
+
+/// What the directory said of a sign-in
+enum Asked {
+    /// It isn't for the directory: the name has an account made here, or the directory is off
+    Not,
+    Signed(crate::directory::Signed),
+    /// The person typed something that isn't right (`event`: what the sign-in log says)
+    Wrong {
+        event: &'static str,
+        user: Option<i64>,
+    },
+}
+
+/// Asks the directory about a sign-in when it is for it. A directory that can't be used is told to the person as such
+/// and isn't counted against them like a wrong password.
+async fn ask_directory(st: &AppState, source: Option<&str>, a: &Attempt<'_>) -> AppResult<Asked> {
+    let Some(settings) = crate::directory::applies(st, source).await else { return Ok(Asked::Not) };
+    // Every guess here is a bind at the directory, which locks an account after a few wrong ones, for everyone and
+    // everywhere: a name is paused after five within 15 minutes, from any address, before the directory's own limit
+    let name_key = format!("dir:{}", a.username.to_ascii_lowercase());
+    if !begin_attempt(st, &name_key, DIRECTORY_NAME_LIMIT) {
+        for key in a.keys {
+            attempt_succeeded(st, key);
+        }
+        attempt_succeeded(st, a.ip_key);
+        return Err(AppError::new(axum::http::StatusCode::TOO_MANY_REQUESTS, "Too many failed sign-in attempts. Try again in 15 minutes."));
+    }
+    let asked = crate::directory::authenticate(st, &settings, a.username, a.password).await;
+    if !matches!(asked, Err(crate::directory::Failure::Wrong { .. })) {
+        attempt_succeeded(st, &name_key);
+    }
+    match asked {
+        Ok(signed) => Ok(Asked::Signed(signed)),
+        Err(crate::directory::Failure::Wrong { event, user }) => Ok(Asked::Wrong { event, user }),
+        Err(crate::directory::Failure::Unavailable(why)) => {
+            let mut map = st.part::<crate::auth::Memory>().login_failures.lock();
+            for key in a.keys {
+                map.remove(key);
+            }
+            drop(map);
+            attempt_succeeded(st, a.ip_key);
+            tracing::warn!("Directory sign-in: {why}");
+            logs::record_login_via(st, None, a.username, "directory_unavailable", crate::directory::PROVIDER, a.ip, a.headers);
+            Err(AppError::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, "The directory can't be reached. Try again later, or ask your administrator."))
+        }
+        Err(crate::directory::Failure::Error(e)) => {
+            attempt_succeeded(st, a.ip_key);
+            Err(e)
+        }
+    }
 }
 
 /// Signs a user in after every step of password sign-in passed: opens the session and answers with the user (and the

@@ -12,6 +12,7 @@ export const ADMIN_PAGES: Record<ControlPanelKey, () => Promise<ComponentType>> 
   shares: () => import("@/admin/users/AdminSharesPage").then((m) => m.AdminSharesPage),
   access: () => import("@/admin/users/AccessReviewPage").then((m) => m.AccessReviewPage),
   sso: () => import("@/admin/users/SsoPage").then((m) => m.SsoPage),
+  directory: () => import("@/admin/users/DirectoryPage").then((m) => m.DirectoryPage),
   drives: () => import("@/admin/storage/AdminDrivesPage").then((m) => m.AdminDrivesPage),
   storage: () => import("@/admin/storage/StorageSettingsPage").then((m) => m.StorageSettingsPage),
   moves: () => import("@/admin/storage/MovesPage").then((m) => m.MovesPage),

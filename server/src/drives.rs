@@ -829,6 +829,8 @@ pub struct GroupInfo {
     name: String,
     description: String,
     created_at: i64,
+    /// `ldap`: its members who come from the directory follow it, and can't be changed here
+    source: String,
     members: Vec<GroupMember>,
 }
 
@@ -837,22 +839,32 @@ pub struct GroupMember {
     id: i64,
     username: String,
     guest: bool,
+    /// Signs in through the directory: while the group is the directory's, the directory decides
+    directory: bool,
 }
 
 pub async fn list_groups(State(st): State<AppState>, _: Admin) -> AppResult<Json<Vec<GroupInfo>>> {
-    let groups: Vec<(i64, String, String, i64)> = sqlx::query_as("SELECT id, name, description, created_at FROM groups ORDER BY name").fetch_all(&st.db).await?;
+    let groups: Vec<(i64, String, String, i64, String)> =
+        sqlx::query_as("SELECT id, name, description, created_at, source FROM groups ORDER BY name").fetch_all(&st.db).await?;
     // Every group's members in one query
-    let members: Vec<(i64, i64, String, bool)> =
-        sqlx::query_as("SELECT m.group_id, u.id, u.username, u.guest FROM group_members m JOIN users u ON u.id = m.user_id ORDER BY u.username")
+    let members: Vec<(i64, i64, String, bool, bool)> =
+        sqlx::query_as("SELECT m.group_id, u.id, u.username, u.guest, u.source = 'ldap' FROM group_members m JOIN users u ON u.id = m.user_id ORDER BY u.username")
             .fetch_all(&st.db)
             .await?;
     let mut by_group: HashMap<i64, Vec<GroupMember>> = HashMap::new();
-    for (group_id, id, username, guest) in members {
-        by_group.entry(group_id).or_default().push(GroupMember { id, username, guest });
+    for (group_id, id, username, guest, directory) in members {
+        by_group.entry(group_id).or_default().push(GroupMember { id, username, guest, directory });
     }
     let out = groups
         .into_iter()
-        .map(|(id, name, description, created_at)| GroupInfo { id, name, description, created_at, members: by_group.remove(&id).unwrap_or_default() })
+        .map(|(id, name, description, created_at, source)| GroupInfo {
+            id,
+            name,
+            description,
+            created_at,
+            source,
+            members: by_group.remove(&id).unwrap_or_default(),
+        })
         .collect();
     Ok(Json(out))
 }
@@ -865,6 +877,21 @@ pub struct GroupReq {
 }
 
 async fn set_members(conn: &mut SqliteConnection, group_id: i64, members: &[i64]) -> AppResult<()> {
+    // A group that follows the directory: the people who sign in through it are the directory's to put in and take out
+    let (source,): (String,) = sqlx::query_as("SELECT source FROM groups WHERE id = ?").bind(group_id).fetch_one(&mut *conn).await?;
+    let members: Vec<i64> = if source == crate::directory::PROVIDER {
+        sqlx::query_scalar(
+            "SELECT value FROM json_each(?1) WHERE value NOT IN (SELECT id FROM users WHERE source = 'ldap')
+             UNION SELECT user_id FROM group_members WHERE group_id = ?2 AND user_id IN (SELECT id FROM users WHERE source = 'ldap')",
+        )
+        .bind(serde_json::to_string(members).unwrap())
+        .bind(group_id)
+        .fetch_all(&mut *conn)
+        .await?
+    } else {
+        members.to_vec()
+    };
+    let members = members.as_slice();
     for uid in members {
         crate::guests::validate_group_join(conn, *uid, group_id).await?;
     }

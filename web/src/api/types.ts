@@ -1017,7 +1017,55 @@ export interface Group {
   name: string;
   description: string;
   created_at: number;
-  members: { id: number; username: string; guest: boolean }[];
+  /** ldap: it follows a group of the directory, and its members who sign in through the directory can't be changed here */
+  source: string;
+  members: { id: number; username: string; guest: boolean; directory: boolean }[];
+}
+
+/** How a person's groups are found in the directory */
+export type DirectoryGroupMode = "none" | "member_of" | "search";
+
+export interface DirectorySettings {
+  enabled: boolean;
+  url: string;
+  starttls: boolean;
+  ca_pem: string;
+  bind_dn: string;
+  /** Never sent back: blank keeps the one saved */
+  bind_password: string;
+  user_base: string;
+  user_filter: string;
+  attr_id: string;
+  attr_username: string;
+  attr_name: string;
+  attr_email: string;
+  require_group: string;
+  group_mode: DirectoryGroupMode;
+  group_base: string;
+  group_filter: string;
+  mappings: { dn: string; group_id: number }[];
+  create_accounts: boolean;
+}
+
+export interface DirectoryReport {
+  at: number;
+  checked: number;
+  turned_off: number;
+  turned_on: number;
+  groups_changed: number;
+  error: string | null;
+}
+
+export interface DirectoryInfo {
+  settings: DirectorySettings;
+  has_bind_password: boolean;
+  last_sync: DirectoryReport | null;
+}
+
+export interface DirectoryStep {
+  step: string;
+  ok: boolean;
+  detail: string;
 }
 
 export interface Activity {
@@ -1449,7 +1497,7 @@ export interface LoginRecord {
   event: string;
   ip: string;
   user_agent: string;
-  /** password, microsoft, google, github, passkey */
+  /** password, microsoft, google, github, passkey, ldap */
   method: string;
 }
 

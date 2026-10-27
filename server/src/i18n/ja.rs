@@ -60,6 +60,7 @@ pub(super) const TEXTS: &[(Text, &str)] = &[
     (AlertWhatSignInsIp, "直近 {minutes} 分間に {ip} からのサインイン失敗が {count} 回ありました"),
     (AlertWhatSignInsUser, "直近 {minutes} 分間にアカウント「{username}」のサインイン失敗が {count} 回ありました"),
     (AlertWhatCertificate, "FTP の証明書は {days} 日後に期限が切れます"),
+    (AlertWhatDirectory, "サインインに使うディレクトリに接続できません"),
     (AlertWhatBackup, "バックアップ「{name}」の確認が必要です"),
     (AlertWhatReplica, "ミラー「{name}」の確認が必要です"),
     // Replicas

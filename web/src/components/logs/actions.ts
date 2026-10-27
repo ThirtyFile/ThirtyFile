@@ -23,6 +23,7 @@ const ACTION_LABEL: Record<string, string> = {
   drive_create: t("Create space"),
   scan: t("Checked the folder"),
   drive_update: t("Update space"),
+  directory_update: t("Directory sign-in changed"),
   hold_place: t("Legal hold placed"),
   hold_release: t("Legal hold released"),
   hold_export: t("Held files exported"),
@@ -78,7 +79,7 @@ export const ACTION_GROUPS: { label: string; actions: string[] }[] = [
   { label: t("Sharing and permissions"), actions: ["share_create", "share_update", "share_delete", "grant", "revoke", "restriction"] },
   { label: t("Retention and holds"), actions: ["hold_place", "hold_release", "hold_export"] },
   { label: t("Spaces"), actions: ["drive_create", "drive_update", "drive_delete", "scan", "move_start", "move_done", "move_failed", "move_cancel"] },
-  { label: t("Users and groups"), actions: ["user_create", "user_update", "user_delete", "group_create", "group_update", "group_delete", "access_review"] },
+  { label: t("Users and groups"), actions: ["user_create", "user_update", "user_delete", "group_create", "group_update", "group_delete", "access_review", "directory_update"] },
   {
     label: t("System"),
     actions: ["settings", "storage_create", "storage_update", "storage_delete", "storage_default", "storage_cleanup", "log_archive", "log_archive_delete"],

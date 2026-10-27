@@ -23,6 +23,36 @@ pub fn client_tls(insecure: bool) -> io::Result<Arc<ClientConfig>> {
     })
 }
 
+/// The verifying TLS set-up that also trusts the authorities whose certificates (DER) are given: for a directory with an
+/// authority of its own (ldap/). Kept for the next connection, as `client_tls` is.
+pub fn client_tls_with_roots(roots: &[Vec<u8>]) -> io::Result<Arc<ClientConfig>> {
+    type Made = std::collections::HashMap<Vec<Vec<u8>>, Arc<ClientConfig>>;
+    if roots.is_empty() {
+        return client_tls(false);
+    }
+    static CACHE: std::sync::OnceLock<crate::sync::Mutex<Made>> = std::sync::OnceLock::new();
+    let mut cache = CACHE.get_or_init(Default::default).lock();
+    if let Some(c) = cache.get(roots) {
+        return Ok(c.clone());
+    }
+    let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+    let extra = roots.iter().map(|der| CertificateDer::from(der.clone()));
+    let verifier = Arc::new(rustls_platform_verifier::Verifier::new_with_extra_roots(extra, provider.clone()).map_err(io::Error::other)?);
+    let config = Arc::new(
+        ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .map_err(io::Error::other)?
+            .dangerous()
+            .with_custom_certificate_verifier(verifier)
+            .with_no_client_auth(),
+    );
+    if cache.len() >= 8 {
+        cache.clear();
+    }
+    cache.insert(roots.to_vec(), config.clone());
+    Ok(config)
+}
+
 fn tls_config(insecure: bool) -> io::Result<Arc<ClientConfig>> {
     let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
     let verifier: Arc<dyn ServerCertVerifier> = if insecure {

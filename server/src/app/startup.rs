@@ -211,6 +211,7 @@ pub async fn start(cfg: Settings, storage: PathBuf, db: sqlx::SqlitePool) -> Res
     backups::spawn_runner(state.clone());
     crate::access_review::spawn_reminder(state.clone());
     crate::alerts::spawn(state.clone());
+    crate::directory::spawn(state.clone());
     crate::contentsearch::spawn(state.clone());
     replicas::spawn_runner(state.clone());
     personal::spawn_retry(state.clone());
@@ -247,6 +248,7 @@ pub fn parts(l: Loaded) -> Parts {
         .with(crate::metrics::Memory::new(l.metrics))
         .with(twofactor::Memory::default())
         .with(crate::passkeys::state::Memory::default())
+        .with(crate::directory::Memory::default())
         .with(moves::Memory::default())
         .with(backups::Memory::default())
         .with(backups::database::Memory::default())

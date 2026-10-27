@@ -1,10 +1,14 @@
 import { KeyRoundIcon } from "lucide-react";
+import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 /** oidc: any OpenID Connect provider (Keycloak, Authentik…), named by the administrator */
 export type SsoProviderId = "microsoft" | "google" | "github" | "oidc";
 
 export const SSO_LABEL: Record<SsoProviderId, string> = { microsoft: "Microsoft", google: "Google", github: "GitHub", oidc: "OpenID Connect" };
+
+/** What an account was created or linked by (`ldap`: the directory) */
+export const providerLabel = (id: string) => SSO_LABEL[id as SsoProviderId] ?? (id === "ldap" ? t("the directory") : id);
 
 /** Logo of a third-party login provider (for login buttons and the account list) */
 export function ProviderIcon({ provider, className }: { provider: string; className?: string }) {
