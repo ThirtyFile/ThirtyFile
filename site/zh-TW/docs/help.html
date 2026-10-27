@@ -106,6 +106,7 @@
         <h2 id="two-factor">管理員遺失了手機和復原碼</h2>
         <p>其他管理員可在<strong>控制台 › 使用者</strong>中重設。如果沒有其他管理員，請在伺服器上關閉：</p>
         <pre><code>docker exec thirtyfile thirtyfile reset-two-factor admin</code></pre>
+        <p>無論哪種方式，也會一併移除該帳號的復原碼和密碼金鑰。</p>
         <h2 id="passwords-off">關閉密碼登入後沒有人能登入</h2>
         <p>如果單一登入無法運作，請在伺服器上重新開啟密碼登入（不需要重新啟動）：</p>
         <pre><code>docker exec thirtyfile thirtyfile password-sign-in everyone</code></pre>

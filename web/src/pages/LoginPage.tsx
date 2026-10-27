@@ -1,7 +1,7 @@
 import { useEffect, useEffectEvent, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRightIcon, KeyRoundIcon, Loader2Icon } from "lucide-react";
+import { ArrowRightIcon, FingerprintIcon, KeyRoundIcon, Loader2Icon } from "lucide-react";
 import { api, ApiError, type Me, type PasswordSignIn, type TwoFactorSetup } from "@/api";
 import { keys } from "@/api/queryKeys";
 import { logoUrl, useBranding } from "@/lib/branding";
@@ -10,6 +10,7 @@ import { ProviderIcon } from "@/components/ProviderIcon";
 import { LanguageSwitch } from "@/components/LanguageSwitch";
 import { RecoveryCodes, SetupCode } from "@/components/TwoFactor";
 import { cn, errorMessage } from "@/lib/utils";
+import { getPasskey, PasskeyCancelled, passkeysSupported } from "@/lib/passkeys";
 import { t, tServer } from "@/lib/i18n";
 import { safeNext, takeSsoError } from "@/lib/signInReturn";
 import { LAST_USER } from "@/lib/signOut";
@@ -56,6 +57,9 @@ function useNow() {
 
 const isDark = () => document.documentElement.classList.contains("dark");
 
+const PASSKEY_BUTTON =
+  "flex h-10 items-center justify-center gap-2 rounded-md bg-white/15 px-3 text-sm ring-1 ring-white/30 backdrop-blur-md hover:bg-white/25 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none disabled:opacity-60";
+
 const FIELD =
   "h-10 w-full rounded-md border border-white/25 bg-black/30 px-3 text-sm text-white outline-none backdrop-blur-md transition placeholder:text-white/65 focus:border-white/50 focus:bg-black/45 focus:shadow-[inset_0_-2px_0_var(--brand)] disabled:opacity-60";
 
@@ -96,6 +100,8 @@ export function LoginPage({ administrator = false }: { administrator?: boolean }
   // away; when that can't be read the form stays (the server refuses a password where it isn't allowed)
   const mode: PasswordSignIn | undefined = options.data?.password_sign_in ?? (options.isError ? "everyone" : undefined);
   const showForm = mode === "everyone" || (mode === "administrators" && administrator);
+  // A passkey can be used when the site's address allows it and this browser has them
+  const passkeyReady = !!options.data?.passkeys && passkeysSupported();
   const soleProvider = mode && !showForm && providers.data?.length === 1 ? providers.data[0] : null;
   // Not the title of the page signed out of
   useEffect(() => {
@@ -133,6 +139,8 @@ export function LoginPage({ administrator = false }: { administrator?: boolean }
   /** Two-factor sign-in: the ticket from the correct password, the app to set up, the code typed, the new recovery codes */
   const [ticket, setTicket] = useState("");
   const [setup, setSetup] = useState<TwoFactorSetup | null>(null);
+  /** What can answer the second step: a code, a passkey, or both */
+  const [methods, setMethods] = useState({ totp: true, passkey: false });
   const [code, setCode] = useState("");
   const [recovery, setRecovery] = useState<{ me: Me; codes: string[] } | null>(null);
   const userRef = useRef<HTMLInputElement>(null);
@@ -261,6 +269,7 @@ export function LoginPage({ administrator = false }: { administrator?: boolean }
         setTicket(r.ticket);
         setPassword("");
         setCode("");
+        setMethods({ totp: r.totp, passkey: r.passkey && passkeysSupported() });
         if (r.two_factor === "setup") {
           setSetup(await api.loginSetup(r.ticket));
           setStage("setup");
@@ -297,6 +306,37 @@ export function LoginPage({ administrator = false }: { administrator?: boolean }
       if (err instanceof ApiError && err.code === "two_factor_expired") backToPassword();
       setError(errorMessage(err, t("Sign-in failed")));
       setBusy(false);
+    }
+  };
+
+  /** Signing in with a passkey, without a user name or a password */
+  const signInWithPasskey = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await enter(await api.passkeyLogin(await getPasskey(await api.passkeyOptions())));
+    } catch (err) {
+      setBusy(false);
+      // Closing the browser's prompt is not a failure to report
+      if (!(err instanceof PasskeyCancelled)) setError(errorMessage(err, t("Sign-in failed")));
+    }
+  };
+
+  /** The second step after a password, with a passkey */
+  const secondWithPasskey = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const me = await api.passkeySecond(ticket, await getPasskey(await api.passkeySecondOptions(ticket)));
+      setTicket("");
+      await enter(me);
+    } catch (err) {
+      setBusy(false);
+      if (err instanceof PasskeyCancelled) return;
+      if (err instanceof ApiError && err.code === "two_factor_expired") backToPassword();
+      setError(errorMessage(err, t("Sign-in failed")));
     }
   };
 
@@ -388,33 +428,43 @@ export function LoginPage({ administrator = false }: { administrator?: boolean }
                   </p>
                   <SetupCode setup={setup} className="my-1" />
                 </>
-              ) : (
+              ) : methods.totp ? (
                 <p className="text-sm text-white/85">{t("Enter the 6-digit code from your authenticator app, or one of your recovery codes.")}</p>
+              ) : (
+                <p className="text-sm text-white/85">{t("Use your passkey to finish signing in.")}</p>
               )}
-              <div className="relative">
-                <input
-                  ref={codeRef}
-                  className={cn(FIELD, "pr-11 text-center tracking-widest")}
-                  placeholder={t("Code")}
-                  aria-label={t("Code")}
-                  autoComplete="one-time-code"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                  maxLength={16}
-                  value={code}
-                  disabled={busy}
-                  onChange={(e) => setCode(e.target.value)}
-                />
-                <button
-                  type="submit"
-                  aria-label={t("Sign in")}
-                  title={t("Sign in")}
-                  disabled={busy || !code.trim()}
-                  className="absolute top-1 right-1 grid size-8 place-items-center rounded bg-brand text-brand-foreground hover:bg-brand/85 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none disabled:bg-white/15 disabled:text-white/60"
-                >
-                  {busy ? <Loader2Icon className="size-4 animate-spin" /> : <ArrowRightIcon className="size-4" />}
+              {stage === "code" && methods.passkey && (
+                <button type="button" disabled={busy} onClick={secondWithPasskey} className={cn(PASSKEY_BUTTON, !methods.totp && "bg-brand text-brand-foreground ring-0 hover:bg-brand/85")}>
+                  {busy ? <Loader2Icon className="size-5 animate-spin" /> : <FingerprintIcon className="size-5" />}
+                  <span className="truncate">{t("Use a passkey")}</span>
                 </button>
-              </div>
+              )}
+              {(stage === "setup" || methods.totp) && (
+                <div className="relative">
+                  <input
+                    ref={codeRef}
+                    className={cn(FIELD, "pr-11 text-center tracking-widest")}
+                    placeholder={t("Code")}
+                    aria-label={t("Code")}
+                    autoComplete="one-time-code"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    maxLength={16}
+                    value={code}
+                    disabled={busy}
+                    onChange={(e) => setCode(e.target.value)}
+                  />
+                  <button
+                    type="submit"
+                    aria-label={t("Sign in")}
+                    title={t("Sign in")}
+                    disabled={busy || !code.trim()}
+                    className="absolute top-1 right-1 grid size-8 place-items-center rounded bg-brand text-brand-foreground hover:bg-brand/85 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none disabled:bg-white/15 disabled:text-white/60"
+                  >
+                    {busy ? <Loader2Icon className="size-4 animate-spin" /> : <ArrowRightIcon className="size-4" />}
+                  </button>
+                </div>
+              )}
               <button type="button" disabled={busy} onClick={backToPassword} className="text-sm text-white/85 underline-offset-4 hover:underline">
                 {t("Back")}
               </button>
@@ -496,14 +546,26 @@ export function LoginPage({ administrator = false }: { administrator?: boolean }
             </div>
           )}
 
-          {stage === "signin" && showForm && !!providers.data?.length && (
+          {stage === "signin" && showForm && (!!providers.data?.length || passkeyReady) && (
             <div className="mt-7 grid justify-items-center gap-2">
               <span className="text-xs text-white/75">{t("Sign-in options")}</span>
               <div className="flex flex-wrap justify-center gap-2">
                 <span className="grid size-10 place-items-center rounded-md bg-white/20 ring-1 ring-white/40" title={t("Password")} aria-hidden="true">
                   <KeyRoundIcon className="size-5" />
                 </span>
-                {providers.data.map((p) => (
+                {passkeyReady && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={signInWithPasskey}
+                    title={t("Sign in with a passkey")}
+                    aria-label={t("Sign in with a passkey")}
+                    className="grid size-10 place-items-center rounded-md bg-white/10 ring-1 ring-white/15 backdrop-blur-md hover:bg-white/20 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none disabled:opacity-60"
+                  >
+                    <FingerprintIcon className="size-5" />
+                  </button>
+                )}
+                {providers.data?.map((p) => (
                   <a
                     key={p.id}
                     href={api.ssoStartUrl(p.id, nextPath)}

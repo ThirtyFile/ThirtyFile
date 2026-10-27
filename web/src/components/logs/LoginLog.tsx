@@ -44,6 +44,9 @@ export const LOGIN_EVENTS: Record<string, { label: string; tone?: string }> = {
   "2fa_reset": { label: t("Two-factor sign-in reset by an administrator"), tone: "text-amber-600 dark:text-amber-400" },
   recovery_code_used: { label: t("Recovery code used"), tone: "text-amber-600 dark:text-amber-400" },
   recovery_codes_new: { label: t("New recovery codes") },
+  passkey_failed: { label: t("Passkey not accepted"), tone: "text-destructive" },
+  passkey_added: { label: t("Passkey added"), tone: "text-brand" },
+  passkey_removed: { label: t("Passkey removed") },
 };
 
 const METHOD_LABEL: Record<string, string> = {
@@ -53,6 +56,7 @@ const METHOD_LABEL: Record<string, string> = {
   github: "GitHub",
   app_password: t("App password"),
   ftp: "FTP",
+  passkey: t("Passkey"),
 };
 
 /** The columns of an exported sign-in log, with the names the list shows */
@@ -75,7 +79,7 @@ const EVENT_GROUPS = [
   },
   {
     label: t("Failed"),
-    options: ["bad_password", "password_off", "unknown_user", "disabled", "locked", "sso_denied", "app_password_failed", "ftp_failed", "2fa_failed"].map((v) => ({
+    options: ["bad_password", "password_off", "unknown_user", "disabled", "locked", "sso_denied", "app_password_failed", "ftp_failed", "2fa_failed", "passkey_failed"].map((v) => ({
       value: v,
       label: LOGIN_EVENTS[v].label,
     })),
@@ -85,6 +89,7 @@ const EVENT_GROUPS = [
     label: t("Two-factor sign-in"),
     options: ["2fa_enabled", "2fa_disabled", "2fa_reset", "recovery_code_used", "recovery_codes_new"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })),
   },
+  { label: t("Passkeys"), options: ["passkey_added", "passkey_removed"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
   { label: t("App passwords"), options: ["app_password_created", "app_password_revoked"].map((v) => ({ value: v, label: LOGIN_EVENTS[v].label })) },
 ];
 

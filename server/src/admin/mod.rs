@@ -66,7 +66,7 @@ impl UserRow {
 const USER_ROW_SQL: &str =
     "SELECT u.id, u.username, u.display_name, u.role, u.guest, u.can_write, u.can_delete, u.can_share, u.quota_bytes, u.disabled, u.created_at, u.last_login_at, u.source,
        (SELECT COALESCE(GROUP_CONCAT(provider), '') FROM user_identities WHERE user_id = u.id) AS sso,
-       u.totp_secret IS NOT NULL AS two_factor,
+       (u.totp_secret IS NOT NULL OR EXISTS (SELECT 1 FROM passkeys WHERE user_id = u.id)) AS two_factor,
        (SELECT COALESCE(email, '') FROM user_identities WHERE user_id = u.id ORDER BY last_login_at DESC LIMIT 1) AS sso_email,
        (SELECT COALESCE(SUM(used_bytes), 0) FROM drives WHERE kind = 'personal' AND owner_id = u.id) AS used_bytes,
        u.root_id IS NOT NULL AS personal_space,

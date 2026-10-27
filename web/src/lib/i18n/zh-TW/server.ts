@@ -1182,4 +1182,13 @@ export default {
   "Sign in through a provider once with your own account first, to be sure it works": "請先用你自己的帳號透過供應商登入一次，確認可以運作",
   "Single sign-on would be the only way to sign in, and no enabled administrator is linked to a sign-in provider that is on": "單一登入會是唯一的登入方式，但沒有任何已啟用的管理員連結到已開啟的登入供應商",
   "You don't have permission to see what takes the room of this space": "你沒有權限查看這個空間佔用空間的項目",
+  "Passkeys need the site address (Control panel › General) to be an https address with a host name, not a number": "密碼金鑰需要網站位址（控制台 › 一般）是含主機名稱的 https 位址，不能是數字位址",
+  "That is not what a passkey sends": "這不是密碼金鑰會送出的內容",
+  "The passkey was not accepted": "密碼金鑰未被接受",
+  "This account has no passkeys": "這個帳號沒有密碼金鑰",
+  "An account can have {n} passkeys at most": "一個帳號最多可以有 {n} 個密碼金鑰",
+  "The passkey could not be added. Try again.": "無法新增密碼金鑰，請再試一次。",
+  "This passkey is already added": "這個密碼金鑰已經新增過了",
+  "Give the passkey a name of up to {n} characters": "請為密碼金鑰取一個最多 {n} 個字元的名稱",
+  "Passkey not found": "找不到密碼金鑰",
 } satisfies Record<string, string>;

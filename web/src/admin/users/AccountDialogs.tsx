@@ -293,7 +293,7 @@ export function ResetTwoFactorDialog({ user, onClose, onDone }: { user: UserRow;
     <ConfirmDialog
       title={t('Reset two-factor sign-in for "{name}"?', { name: user.username })}
       description={t(
-        "For someone who lost their phone and recovery codes. Their authenticator app and recovery codes stop working, and they sign in with just their password until they set it up again (right away, if two-factor sign-in is required).",
+        "For someone who lost their phone and recovery codes. Their authenticator app, recovery codes and passkeys stop working, and they sign in with just their password until they set it up again (right away, if two-factor sign-in is required).",
       )}
       confirmText={t("Reset")}
       destructive

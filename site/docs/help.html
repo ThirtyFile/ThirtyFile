@@ -106,6 +106,7 @@
         <h2 id="two-factor">An administrator lost their phone and recovery codes</h2>
         <p>Another administrator can reset it under <strong>Control panel › Users</strong>. If there is none, turn it off on the server:</p>
         <pre><code>docker exec thirtyfile thirtyfile reset-two-factor admin</code></pre>
+        <p>Either way, this also removes the account's recovery codes and passkeys.</p>
 
         <h2 id="passwords-off">Nobody can sign in since passwords were turned off</h2>
         <p>If single sign-on no longer works, turn passwords back on from the server (no restart needed):</p>

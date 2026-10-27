@@ -1182,4 +1182,13 @@ export default {
   "Sign in through a provider once with your own account first, to be sure it works": "先に自分のアカウントでプロバイダー経由のサインインを一度行い、動作を確認してください",
   "Single sign-on would be the only way to sign in, and no enabled administrator is linked to a sign-in provider that is on": "シングルサインオンが唯一のサインイン方法になりますが、有効な管理者で、有効なサインインプロバイダーにリンクされている人がいません",
   "You don't have permission to see what takes the room of this space": "このスペースの容量を使っているものを見る権限がありません",
+  "Passkeys need the site address (Control panel › General) to be an https address with a host name, not a number": "パスキーを使うには、サイトのアドレス（コントロールパネル › 全般）がホスト名付きの https アドレスである必要があります（数字のアドレスは不可）",
+  "That is not what a passkey sends": "パスキーが送る内容ではありません",
+  "The passkey was not accepted": "パスキーが受け付けられませんでした",
+  "This account has no passkeys": "このアカウントにはパスキーがありません",
+  "An account can have {n} passkeys at most": "1 つのアカウントに登録できるパスキーは最大 {n} 個です",
+  "The passkey could not be added. Try again.": "パスキーを追加できませんでした。もう一度お試しください。",
+  "This passkey is already added": "このパスキーはすでに追加されています",
+  "Give the passkey a name of up to {n} characters": "パスキーに最大 {n} 文字の名前を付けてください",
+  "Passkey not found": "パスキーが見つかりません",
 } satisfies Record<string, string>;

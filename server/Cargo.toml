@@ -38,6 +38,8 @@ hmac = "0.13"
 # Encryption of the secrets saved in the database (secrets.rs); already used by russh
 aes-gcm = "0.11"
 subtle = "2"
+# The signatures of passkeys (passkeys/cose.rs); the same library rustls uses for TLS
+aws-lc-rs = "1"
 hyper = { version = "1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1", features = ["server", "server-auto", "server-graceful", "tokio"] }
 tower = { version = "0.5", features = ["util"] }

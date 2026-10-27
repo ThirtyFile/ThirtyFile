@@ -1182,4 +1182,13 @@ export default {
   "Sign in through a provider once with your own account first, to be sure it works": "请先用你自己的账号通过提供商登录一次，确认可以正常工作",
   "Single sign-on would be the only way to sign in, and no enabled administrator is linked to a sign-in provider that is on": "单点登录将是唯一的登录方式，但没有任何已启用的管理员关联到已开启的登录提供商",
   "You don't have permission to see what takes the room of this space": "你没有权限查看这个空间占用空间的项目",
+  "Passkeys need the site address (Control panel › General) to be an https address with a host name, not a number": "通行密钥需要网站地址（控制台 › 常规）是带主机名的 https 地址，不能是数字地址",
+  "That is not what a passkey sends": "这不是通行密钥会发送的内容",
+  "The passkey was not accepted": "通行密钥未被接受",
+  "This account has no passkeys": "这个账号没有通行密钥",
+  "An account can have {n} passkeys at most": "一个账号最多可以有 {n} 个通行密钥",
+  "The passkey could not be added. Try again.": "无法添加通行密钥，请重试。",
+  "This passkey is already added": "这个通行密钥已经添加过了",
+  "Give the passkey a name of up to {n} characters": "请为通行密钥取一个最多 {n} 个字符的名称",
+  "Passkey not found": "找不到通行密钥",
 } satisfies Record<string, string>;
