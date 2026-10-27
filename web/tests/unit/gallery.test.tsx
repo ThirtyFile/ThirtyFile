@@ -48,6 +48,8 @@ function scrollingBox() {
   el.style.overflowX = "auto";
   Object.defineProperty(el, "offsetWidth", { value: 1000 });
   Object.defineProperty(el, "offsetHeight", { value: 90 });
+  Object.defineProperty(el, "clientWidth", { value: 1000 });
+  Object.defineProperty(el, "clientHeight", { value: 90 });
   document.body.append(el);
   return el;
 }
