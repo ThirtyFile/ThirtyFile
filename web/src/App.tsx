@@ -20,6 +20,7 @@ import { ADMIN_PAGES, adminPath } from "@/admin/pages";
 // administration pages load only when an administrator opens them
 const page = <M, K extends keyof M, P = object>(load: () => Promise<M>, name: K) => lazy(() => load().then((m) => ({ default: m[name] as React.ComponentType<P> })));
 const LoginPage = page<typeof import("@/pages/LoginPage"), "LoginPage", { administrator?: boolean }>(() => import("@/pages/LoginPage"), "LoginPage");
+const AnalyticsPage = page(() => import("@/pages/AnalyticsPage"), "AnalyticsPage");
 const NotFoundPage = page(() => import("@/pages/NotFoundPage"), "NotFoundPage");
 const ResetPasswordPage = page(() => import("@/pages/ResetPasswordPage"), "ResetPasswordPage");
 const PublicSharePage = page(() => import("@/pages/PublicSharePage"), "PublicSharePage");
@@ -171,6 +172,7 @@ export function App() {
             <Route path="/view/:id" element={<FileViewPage />} />
             <Route path="/all" element={<Navigate to="/files/shared" replace />} />
             <Route path="/drives" element={<ThisPcPage />} />
+            <Route path="/analytics/:drive" element={<AnalyticsPage />} />
             <Route path="/shared-with-me" element={<SharedWithMePage />} />
             <Route path="/recent" element={<RecentPage />} />
             <Route path="/favorites" element={<FavoritesPage />} />

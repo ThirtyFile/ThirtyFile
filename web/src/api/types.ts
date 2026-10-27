@@ -42,7 +42,7 @@ export interface Tag {
 export interface Job {
   /** Empty for a change that was done at once */
   id: string;
-  kind: "compress" | "extract" | "move" | "copy" | "delete" | "restore" | "empty_trash" | "scan" | "delete_user" | "remove_personal" | "webdav";
+  kind: "compress" | "extract" | "move" | "copy" | "delete" | "restore" | "empty_trash" | "scan" | "analytics" | "delete_user" | "remove_personal" | "webdav";
   state: "running" | "done" | "failed";
   /** Work done so far, of `total` (bytes, or items) */
   done: number;
@@ -1214,6 +1214,55 @@ export interface SsoSettingsReq {
   allowed_domains: string[];
   domain_rules: SsoDomainRule[];
   password_sign_in: PasswordSignIn;
+}
+
+/** Storage analytics: what takes the room of a space, as the person asking may see it */
+export interface AnalyticsFile {
+  id: string;
+  name: string;
+  folder_id: string | null;
+  /** Where it is, from the space's root */
+  folder: string;
+  owner: string;
+  size: number;
+  updated_at: number;
+}
+
+export interface AnalyticsTreeNode {
+  /** The folder; none for "other" and "files here" */
+  id: string | null;
+  name: string;
+  bytes: number;
+  files: number;
+  children: AnalyticsTreeNode[];
+  kind: "folder" | "other" | "files";
+}
+
+export interface AnalyticsSnapshot {
+  drive_id: string;
+  name: string;
+  taken_at: number;
+  /** A folder space: its files have no hashes, so copies are found by reading the files that share a size */
+  folder_space: boolean;
+  files: number;
+  folders: number;
+  live_bytes: number;
+  kinds: { kind: "pictures" | "video" | "audio" | "documents" | "archives" | "other"; files: number; bytes: number }[];
+  trash_bytes: number;
+  trash_files: number;
+  version_bytes: number;
+  old_version_bytes: number;
+  stale_bytes: number;
+  stale_files: number;
+  largest: AnalyticsFile[];
+  duplicates: { groups: { size: number; copies: number; wasted: number; files: AnalyticsFile[] }[]; wasted_bytes: number; partial: boolean };
+  folders_by_size: { id: string; path: string; bytes: number; files: number; newest: number }[];
+  tree: AnalyticsTreeNode;
+}
+
+export interface AnalyticsInfo {
+  drive: { id: string; name: string; kind: DriveKind; folder_space: boolean };
+  snapshot: AnalyticsSnapshot | null;
 }
 
 /** The series of the dashboard, one figure for each period */

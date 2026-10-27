@@ -88,6 +88,7 @@
             <li><a href="#folder-spaces">Folder spaces: a folder on the server as a space</a></li>
             <li><a href="#check">Checking what a location holds</a></li>
             <li><a href="#usage">Storage usage and performance</a></li>
+            <li><a href="#analytics">What takes the room of a space</a></li>
             <li><a href="#offline">When a location is offline</a></li>
           </ol>
         </details>
@@ -370,6 +371,16 @@
         <p><strong>Time to full</strong> draws a straight line through the disk's use over the last 30 days. It is only shown for a disk whose size is known, with at least 3 days of measurements, while the disk is filling up at a steady pace. Otherwise the page says why it isn't shown.</p>
         <h3 id="usage-alerts">Alerts</h3>
         <p>Under <strong>Alert thresholds</strong>, choose when the page raises an alert: when a disk is fuller than a percentage (90% at first), or when more than a percentage of a location's operations failed or timed out in the last hour (5% at first). The failure alert needs at least 20 operations in that hour. Enter 0 to turn one off. Offline locations and measurements that are out of date raise an alert too. Alerts are shown at the top of the page; to have them sent by email or to a webhook too, see <a href="users.html#alerts">Administrator alerts</a>.</p>
+
+        <h2 id="analytics">What takes the room of a space</h2>
+        <p>Open <strong>Storage analytics</strong> from the menu of a space (under <strong>All spaces</strong>, or <strong>Control panel › Spaces</strong>). A space's owners and managers can look at it, administrators at team and company spaces, and each person at their own <strong>My files</strong>, never at anyone else's. It works out the space as a task and keeps the result, so the page opens at once and says <strong>As of</strong> when it was made; <strong>Refresh</strong> reads the space again. A large space takes a while, and the page can be left meanwhile. What you may not see, such as a <a href="users.html">restricted folder</a>, is left out of every figure, and each person's snapshot is their own.</p>
+        <ul>
+          <li><strong>Overview.</strong> What the files take, by kind (pictures, video, audio, documents, archives, other), the trash and earlier versions, and what could be cleaned up, each with its size: the trash, earlier versions replaced more than a year ago, files not changed for a year, and copies of the same file.</li>
+          <li><strong>Largest files.</strong> The 100 largest, with where they are, whose they are and when they changed, <strong>Open location</strong> and <strong>Move to the trash</strong>.</li>
+          <li><strong>Duplicates.</strong> Files with the same content, in groups with the room the copies take and where each is. Select the copies to move to the trash: nothing is ever chosen or removed for you, and one copy of a group always stays. The content store keeps identical content once, so there a copy takes quota but not disk space; in a <a href="#folder-spaces">folder space</a> every copy is a file on the disk, and files with the same size are read to compare them (up to a limit, which the page says when it is reached).</li>
+          <li><strong>Old folders.</strong> The largest folders where nothing changed for 1, 2 or 5 years, with their size and last change. A change is a change of a file in ThirtyFile or on the disk: ThirtyFile doesn't know when a file was last opened.</li>
+          <li><strong>Treemap.</strong> The folders as nested blocks by size (or by number of files); click a folder to go into it, the breadcrumb goes back, and the same data is listed beside it.</li>
+        </ul>
 
         <h2 id="offline">When a location is offline</h2>
         <p>Browsing, searching and organising folders keep working. Opening, downloading and uploading are paused, and resume by themselves when the location is back. Files with a checked <a href="#replica-read">replica</a> can still be opened and downloaded. The space is marked as offline in the meantime. In a folder space, whose folders are on the disk, organising folders is paused too.</p>
