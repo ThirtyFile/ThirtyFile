@@ -1,6 +1,6 @@
 import { request, get, post, enc } from "@/api/client";
 import { localizeDrive } from "@/api/names";
-import type { Job, Drive, LinkMakers } from "@/api/types";
+import type { AnalyticsInfo, Job, Drive, LinkMakers } from "@/api/types";
 
 /** Spaces */
 export const drivesApi = {
@@ -14,5 +14,9 @@ export const drivesApi = {
   /** The share links that work now and would stop with each choice of who makes them (the space's managers) */
   linksStopping: (id: string) => get<Record<Exclude<LinkMakers, "editors">, number>>(enc`/drives/${id}/links-stopping`),
   deleteDrive: (id: string) => request("DELETE", enc`/drives/${id}`),
+  /** What takes the room of a space, as last worked out for the person asking (null before the first time) */
+  analytics: (id: string, signal?: AbortSignal) => get<AnalyticsInfo>(enc`/drives/${id}/analytics`, signal),
+  /** Starts working it out again: a task, which `waitForJob` follows */
+  refreshAnalytics: (id: string) => post<Job>(enc`/drives/${id}/analytics`),
   adminDrives: () => get<Drive[]>("/admin/drives").then((l) => l.map(localizeDrive)),
 };

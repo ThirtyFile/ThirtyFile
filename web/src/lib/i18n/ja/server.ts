@@ -1181,4 +1181,5 @@ export default {
   "Link your own account to one of the sign-in providers first (My account › Sign-in methods): you have to be able to sign in that way": "先に自分のアカウントをいずれかのサインインプロバイダーにリンクしてください（アカウントメニュー › サインイン方法）。その方法でサインインできる必要があります",
   "Sign in through a provider once with your own account first, to be sure it works": "先に自分のアカウントでプロバイダー経由のサインインを一度行い、動作を確認してください",
   "Single sign-on would be the only way to sign in, and no enabled administrator is linked to a sign-in provider that is on": "シングルサインオンが唯一のサインイン方法になりますが、有効な管理者で、有効なサインインプロバイダーにリンクされている人がいません",
+  "You don't have permission to see what takes the room of this space": "このスペースの容量を使っているものを見る権限がありません",
 } satisfies Record<string, string>;

@@ -204,6 +204,7 @@ fn sharing_api() -> Router<AppState> {
         // Listing the spaces works with an app password too
         .route("/drives", get(drives::list).layer(middleware::from_fn(auth::app_passwords::allow)).post(drives::create))
         .route("/drives/{id}", patch(drives::update).delete(drives::delete))
+        .route("/drives/{id}/analytics", get(crate::analytics::get).post(crate::analytics::refresh))
         .route("/drives/{id}/links-stopping", get(drives::links_stopping))
         .route("/nodes/{id}/access", get(drives::access).post(drives::grant))
         .route("/nodes/{id}/restriction", get(crate::restrictions::preview).post(crate::restrictions::change))

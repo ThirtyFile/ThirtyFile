@@ -1181,4 +1181,5 @@ export default {
   "Link your own account to one of the sign-in providers first (My account › Sign-in methods): you have to be able to sign in that way": "請先把你自己的帳號連結到其中一個登入供應商（帳號選單 › 登入方式）：你必須能用這種方式登入",
   "Sign in through a provider once with your own account first, to be sure it works": "請先用你自己的帳號透過供應商登入一次，確認可以運作",
   "Single sign-on would be the only way to sign in, and no enabled administrator is linked to a sign-in provider that is on": "單一登入會是唯一的登入方式，但沒有任何已啟用的管理員連結到已開啟的登入供應商",
+  "You don't have permission to see what takes the room of this space": "你沒有權限查看這個空間佔用空間的項目",
 } satisfies Record<string, string>;
