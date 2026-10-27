@@ -24,8 +24,6 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 web_static() {
   cd "$ROOT/web"
   pnpm install --frozen-lockfile
-  # Formatting (oxfmt through Vite+, the `fmt` section of web/vite.config.ts): `pnpm format` fixes it
-  pnpm format:check
   node scripts/check-i18n.mjs
   node scripts/check-boundaries.mjs
   # vite-plus and the vite alias of its core in pnpm-workspace.yaml are the same release
@@ -33,7 +31,9 @@ web_static() {
   # The end-to-end tests run in parallel: no fixed waits, no names without a unique part (scripts/check-e2e.mjs)
   node scripts/check-e2e.mjs
   pnpm typecheck
-  pnpm lint
+  # Formatting (oxfmt, the `fmt` section of web/vite.config.ts) and lint (oxlint, the `lint` section) in one pass, any
+  # warning failing: `pnpm format` fixes the formatting
+  pnpm check
 }
 
 web() {
