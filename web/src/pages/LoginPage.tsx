@@ -185,11 +185,12 @@ export function LoginPage({ administrator = false }: { administrator?: boolean }
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  // When entering the sign-in screen or switching accounts, put the cursor in the field to fill
+  // When entering the sign-in screen or switching accounts, put the cursor in the field to fill. The form can show a
+  // moment after the screen does (it waits for the server to say who may use a password): the cursor goes in then.
   const focusFirst = useEffectEvent(() => focusField());
   useEffect(() => {
-    if (stage === "signin" && !error) focusFirst();
-  }, [stage, who, error]);
+    if (stage === "signin" && !error && showForm) focusFirst();
+  }, [stage, who, error, showForm]);
 
   // The code field of two-factor sign-in
   useEffect(() => {
