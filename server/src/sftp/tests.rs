@@ -547,7 +547,22 @@ async fn unknown_ssh_keys_use_none_of_the_sign_in_limit_and_an_address_cant_hold
     .await
     .expect("a further connection from the same address is closed");
     idle.clear();
-    // Once they're gone, the address connects again
+    // Once they're gone, the address connects again (the listener lets go of their places a moment after they close)
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let mut probe = tokio::net::TcpStream::connect(&address).await.unwrap();
+            let mut byte = [0u8; 1];
+            // A connection that is kept is greeted by the server; a refused one is closed at once
+            if tokio::time::timeout(std::time::Duration::from_millis(500), tokio::io::AsyncReadExt::read(&mut probe, &mut byte))
+                .await
+                .is_ok_and(|r| matches!(r, Ok(n) if n > 0))
+            {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("the address connects again once its idle connections are gone");
     let (_ssh, _sftp) = client(&env, &amy, &token(&env, &amy, "write").await).await;
 }
 
