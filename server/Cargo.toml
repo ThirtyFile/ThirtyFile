@@ -57,7 +57,7 @@ thirtys3-client = "0.1.1"
 # The S3 service: the protocol is ThirtyS3's, the buckets are ours (src/s3/)
 thirtys3-core = "0.1.1"
 thirtys3-server = "0.1.1"
-russh = "0.64"
+russh = "0.65"
 russh-sftp = "3"
 suppaftp = { version = "12", features = ["tokio-rustls-aws-lc-rs"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }

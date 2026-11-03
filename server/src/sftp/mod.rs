@@ -20,8 +20,8 @@ use axum::{
 };
 use russh::{
     Channel, ChannelId,
-    keys::{PrivateKey, PublicKey, ssh_key::HashAlg},
-    server::{Auth, ChannelOpenHandle, Msg, Session},
+    keys::{PrivateKey, ssh_key::HashAlg},
+    server::{Auth, ChannelOpenHandle, Msg, PublicKeyOffer, Session, VerifiedPublicKey},
 };
 use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 
@@ -330,7 +330,7 @@ impl russh::server::Handler for Connection {
     }
     /// A key offered without a signature yet (an SSH agent offers each of its keys in turn): accepted only if it is one
     /// of the account's, without counting the others as failed sign-ins
-    async fn auth_publickey_offered(&mut self, username: &str, public: &PublicKey) -> Result<Auth, Self::Error> {
+    async fn auth_publickey_offered(&mut self, username: &str, public: PublicKeyOffer<'_>) -> Result<Auth, Self::Error> {
         let ip = self.peer.ip().to_string();
         let rejected = Auth::Reject { proceed_with_methods: None, partial_success: false };
         if auth::attempts_exhausted(&self.st, &format!("ip:{}", auth::limit_key_ip(&ip)), auth::IP_FAIL_LIMIT) {
@@ -340,13 +340,13 @@ impl russh::server::Handler for Connection {
             "SELECT EXISTS(SELECT 1 FROM sftp_keys k JOIN users u ON u.id = k.user_id WHERE u.username = ? COLLATE NOCASE AND k.fingerprint = ? AND u.disabled = 0)",
         )
         .bind(username)
-        .bind(public.fingerprint(HashAlg::Sha256).to_string())
+        .bind(public.public_key.fingerprint(HashAlg::Sha256).to_string())
         .fetch_one(&self.st.db)
         .await
         .unwrap_or((false,));
         Ok(if known { Auth::Accept } else { rejected })
     }
-    async fn auth_publickey(&mut self, username: &str, public: &PublicKey) -> Result<Auth, Self::Error> {
+    async fn auth_publickey(&mut self, username: &str, public: VerifiedPublicKey<'_>) -> Result<Auth, Self::Error> {
         let ip = self.peer.ip().to_string();
         let key = format!("ip:{}", auth::limit_key_ip(&ip));
         if auth::attempts_exhausted(&self.st, &key, auth::IP_FAIL_LIMIT) {
@@ -356,7 +356,7 @@ impl russh::server::Handler for Connection {
             "SELECT k.id FROM sftp_keys k JOIN users u ON u.id = k.user_id WHERE u.username = ? COLLATE NOCASE AND k.fingerprint = ? AND u.disabled = 0",
         )
         .bind(username)
-        .bind(public.fingerprint(HashAlg::Sha256).to_string())
+        .bind(public.public_key.fingerprint(HashAlg::Sha256).to_string())
         .fetch_optional(&self.st.db)
         .await
         .unwrap_or(None);
