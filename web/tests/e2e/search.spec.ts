@@ -62,6 +62,8 @@ test("editing the words keeps the filters; Back, clearing, Escape and deleting t
   await page.setViewportSize({ width: 1280, height: 720 });
   const { dir, word } = await folderWithFiles(page, "windows");
   const folderUrl = new RegExp(`/files/${dir}$`);
+  // The address changes before the old page unmounts: wait for this heading before typing into the returned folder.
+  const folderTitle = await page.locator("main h1").innerText();
   await box(page).fill(word);
   await expect(page).toHaveURL(/\/search\?/);
   await page.getByRole("group", { name: "Search filters" }).getByLabel("Date modified").selectOption({ index: 1 });
@@ -76,12 +78,14 @@ test("editing the words keeps the filters; Back, clearing, Escape and deleting t
   // Back: the folder, in one step however many letters were searched
   await page.getByRole("button", { name: "Back", exact: true }).click();
   await expect(page).toHaveURL(folderUrl);
+  await expect(page.locator("main h1")).toHaveText(folderTitle);
 
   // The clear button: back to the folder, the box empty and still focused for a new search
   await box(page).fill(word);
   await expect(page).toHaveURL(/\/search\?/);
   await page.getByRole("button", { name: "Clear search", exact: true }).click();
   await expect(page).toHaveURL(folderUrl);
+  await expect(page.locator("main h1")).toHaveText(folderTitle);
   await expect.poll(() => focus(page)).toEqual({ value: "", caret: 0, end: 0 });
 
   // Escape, and deleting the last letter
@@ -89,11 +93,13 @@ test("editing the words keeps the filters; Back, clearing, Escape and deleting t
   await expect(page).toHaveURL(/\/search\?/);
   await page.keyboard.press("Escape");
   await expect(page).toHaveURL(folderUrl);
+  await expect(page.locator("main h1")).toHaveText(folderTitle);
   await expect.poll(() => focus(page)).toEqual({ value: "", caret: 0, end: 0 });
   await page.keyboard.type("a");
   await expect(page).toHaveURL(/\/search\?q=a&/);
   await page.keyboard.press("Backspace");
   await expect(page).toHaveURL(folderUrl);
+  await expect(page.locator("main h1")).toHaveText(folderTitle);
   await expect(box(page)).toHaveValue("");
 });
 
