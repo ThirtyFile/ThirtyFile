@@ -52,7 +52,7 @@ jobs:
           tool: cargo-deny
       - run: bash scripts/check.sh quick
       - name: Rust dependencies
-        run: cargo deny --manifest-path server/Cargo.toml check
+        run: bash scripts/check-rust-dependencies.sh
       # The server's tests, when the pull request changes the server (or the API shapes its tests compare)
       - name: Server tests
         run: |

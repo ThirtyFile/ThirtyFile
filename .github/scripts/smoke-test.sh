@@ -86,6 +86,14 @@ sign_in() { # cookie file
     -d "{\"username\":\"admin\",\"password\":\"$PASSWORD\"}" "$BASE/api/auth/login" >/dev/null || fail "signing in failed"
 }
 
+# The startup check reads the linked library before opening a database, rather than trusting dependency metadata.
+check_sqlite_runtime() {
+  local version
+  version=$(docker logs "$NAME" 2>&1 | sed -n 's/.*sqlite_version_number=\([0-9][0-9]*\).*/\1/p' | tail -n 1)
+  [ -n "$version" ] && [ "$version" -ge 3054000 ] || fail "the image did not report a patched SQLite runtime (got: $version)"
+  echo "Verified linked SQLite version number: $version"
+}
+
 b64() { printf '%s' "$1" | base64 -w0; }
 
 # Creates a file in My files of admin with the given content; its id is left in FILE_ID
@@ -120,6 +128,7 @@ compose "$PREVIOUS" down --timeout 30
 echo "== The new image ($IMAGE) on that data"
 compose "$IMAGE" up -d
 wait_healthy "The new image"
+check_sqlite_runtime
 curl -fsS "$BASE/" | grep -q '<div id="root"' || fail "the web pages aren't served"
 sign_in "$DIR/new.cookies"
 expect_file "$DIR/new.cookies" "$kept" 'written by the latest release'
@@ -140,6 +149,7 @@ bash "$(dirname "$0")/smoke-protocols.sh" "$BASE" "$PASSWORD" "$SFTP_PORT" "$FTP
 echo "== The new image, restarted"
 compose "$IMAGE" restart --timeout 30
 wait_healthy "The restarted image"
+check_sqlite_runtime
 sign_in "$DIR/again.cookies"
 expect_file "$DIR/again.cookies" "$kept" 'written by the latest release'
 expect_file "$DIR/again.cookies" "$added" 'a plain file'
