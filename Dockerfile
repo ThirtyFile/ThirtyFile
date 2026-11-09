@@ -125,6 +125,7 @@ RUN --mount=from=cargo-about,target=/tmp/cargo-about \
 WORKDIR /src/server
 # Only what decides the dependencies: code changes don't redo this
 COPY server/Cargo.toml server/Cargo.lock server/about.toml server/about.hbs ./
+COPY server/vendor/ ./vendor/
 COPY --from=web /src/notices-web.txt /tmp/
 # cargo metadata reads every crate of the lock file, including those for other systems, hence the full fetch;
 # after it, cargo about only reads the downloaded crates (--offline), so the result depends on nothing else

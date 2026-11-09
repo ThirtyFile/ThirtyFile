@@ -163,7 +163,7 @@ jobs:
         with:
           tool: cargo-deny
       - name: Rust dependencies
-        run: cargo deny --manifest-path server/Cargo.toml check
+        run: bash scripts/check-rust-dependencies.sh
       # And of the npm packages; their licences are checked against the list in web/scripts/third-party-notices.mjs,
       # which also writes their notices into the image
       # High and critical advisories stop a release; lower ones show in the weekly scan (scan.yml), which reports every

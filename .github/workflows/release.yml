@@ -190,7 +190,9 @@ jobs:
         with:
           persist-credentials: false
       # A reused image may predate this helper: keep the workflow's copy before checking out its source below.
-      - run: cp .github/scripts/publish-dockerhub.mjs "$RUNNER_TEMP/publish-dockerhub.mjs"
+      - run: |
+          cp .github/scripts/publish-dockerhub.mjs "$RUNNER_TEMP/publish-dockerhub.mjs"
+          cp scripts/check-rust-dependencies.sh "$RUNNER_TEMP/check-rust-dependencies.sh"
       - name: Log in to Docker Hub
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
@@ -230,6 +232,27 @@ jobs:
         with:
           ref: ${{ steps.image.outputs.commit }}
           persist-credentials: false
+
+      # Image builds take time: a new advisory can arrive after Build's checks. Refresh against the exact image
+      # source before creating any version tag or release, using the same input-logging gate as the weekly scan.
+      - run: rustup toolchain install
+        working-directory: server
+      - uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+        with:
+          tool: cargo-deny
+      - name: Refresh Rust advisories before publication
+        env:
+          THIRTYFILE_CHECK_ROOT: ${{ github.workspace }}
+        run: bash "$RUNNER_TEMP/check-rust-dependencies.sh" advisories
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - name: Refresh frontend advisories before publication
+        working-directory: web
+        run: pnpm audit --prod --audit-level=high
 
       # 1. The server is one static program: the same file as in the image, for running without Docker, with the
       # licence notices of what it contains. compose.yaml follows the release line instead of latest, so that

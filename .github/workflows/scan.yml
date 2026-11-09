@@ -32,15 +32,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      # Preserve the current gate before checking out a released tag, which may predate this helper.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: cp scripts/check-rust-dependencies.sh "$RUNNER_TEMP/check-rust-dependencies.sh"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.release.outputs.tag }}
           persist-credentials: false
-      # Known security problems of the crates (server/deny.toml says which are accepted and why)
-      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+      # Use the same native tool and fresh, revision-logged advisory database as the release gate.
+      - run: rustup toolchain install
+        working-directory: server
+      - uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
         with:
-          manifest-path: server/Cargo.toml
-          command: check advisories
+          tool: cargo-deny
+      - run: bash "$RUNNER_TEMP/check-rust-dependencies.sh" advisories
+        env:
+          THIRTYFILE_CHECK_ROOT: ${{ github.workspace }}
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           package_json_file: web/package.json

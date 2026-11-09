@@ -192,6 +192,7 @@ cd web &amp;&amp; pnpm format</code></pre>
         </div>
 
         <h2 id="releases">Releases</h2>
+        <p>Before publishing, the workflow refreshes Rust advisories and audits production npm dependencies again against the source commit recorded in the tested image. The Rust check logs Cargo Deny's version and the advisory database revision. A failure stops publication even if the earlier build checks passed.</p>
         <p>Release images are published to both <code>ghcr.io/thirtyfile/thirtyfile</code> and <code>docker.io/thirtyfile/thirtyfile</code>. Before the first publication to Docker Hub, add an Actions variable <code>DOCKERHUB_USERNAME</code> and an Actions secret <code>DOCKERHUB_TOKEN</code> under <strong>Settings › Secrets and variables › Actions</strong>. Use a Docker Hub access token with read/write access to that repository. The release checks the credentials before scanning and building; it copies the tested image by digest and verifies every Docker Hub tag before publishing the GitHub release.</p>
         <p>Merged changes collect on <code>main</code> until a maintainer decides to release them. A release is started by hand: on GitHub, open <strong>Actions › Release › Run workflow</strong>, keep <code>main</code> selected and enter the new version number, such as <code>1.2.3</code>, or <code>1.2.3-rc.1</code> for a pre-release. Or from the command line:</p>
         <pre><code>gh workflow run release.yml -f version=1.2.3</code></pre>

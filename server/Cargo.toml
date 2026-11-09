@@ -25,7 +25,7 @@ futures-util = "0.3"
 bytes = "1"
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "migrate"] }
 # The SQL function unicode_lower() (db.rs); the same version sqlx uses
-libsqlite3-sys = "0.37"
+libsqlite3-sys = "0.39.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 clap = { version = "4", features = ["derive", "env"] }
@@ -86,6 +86,12 @@ http-body-util = "0.1"
 [target.'cfg(unix)'.dependencies]
 # Switching to an unprivileged user in the Docker image (privileges.rs)
 libc = "0.2"
+
+[patch.crates-io]
+# SQLx 0.9.0 excludes patched SQLite. Backport only the upper-bound change from upstream commit 10462fa4414c6c7f1ed1d39bb31678e3b726878c.
+# The published driver's source is unchanged; upstream.json records its checksum and the bounded patch.
+# Remove this override when a published SQLx driver permits libsqlite3-sys 0.39.
+sqlx-sqlite = { path = "vendor/sqlx-sqlite" }
 
 # The Docker image is a static musl build and keeps musl's own memory allocator. Measured against mimalloc
 # (same build, 4 cores, 160 concurrent 4 MB saves, 24 thumbnails of 1600×1200 pictures, 8 concurrent ZIPs of

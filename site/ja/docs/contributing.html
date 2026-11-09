@@ -165,6 +165,7 @@ cd web &amp;&amp; pnpm format</code></pre>
           <tr><td><code>maintenance</code></td><td>保守</td></tr>
         </tbody></table></div>
         <h2 id="releases">リリース</h2>
+        <p>公開前に、テスト済みイメージに記録されたソースのコミットを対象として、Rust のアドバイザリーデータベースを更新し、本番用 npm 依存関係を再監査します。Rust のチェックでは Cargo Deny のバージョンとデータベースの revision を記録します。先のビルドチェックが通っていても、このチェックが失敗すると公開を停止します。</p>
         <p><code>ghcr.io/thirtyfile/thirtyfile</code> と <code>docker.io/thirtyfile/thirtyfile</code> の両方へ公開します。Docker Hub 初回前に <strong>Settings › Secrets and variables › Actions</strong> で変数 <code>DOCKERHUB_USERNAME</code> と secret <code>DOCKERHUB_TOKEN</code> を追加します。対象倉庫への読み書き権限の token を使ってください。認証をスキャン、ビルド前に確認し、検証済みイメージを digest でコピーして全 Hub タグを確認してから GitHub リリースを公開します。</p>
         <p>マージした変更はメンテナーが公開を決めるまで <code>main</code> に集まります。<strong>Actions › Release › Run workflow</strong> で <code>main</code> を選び、<code>1.2.3</code>、プレリリースなら <code>1.2.3-rc.1</code> を入力して手動開始します。コマンドでもできます。</p>
         <pre><code>gh workflow run release.yml -f version=1.2.3</code></pre>

@@ -10,6 +10,21 @@ use crate::{
     util::{new_id, now},
 };
 
+// RUSTSEC-2026-0459: older engines can expose memory while opening an untrusted database/WAL pair.
+// Check the linked library before any database is opened, including the read-only migration preflight.
+const MIN_SQLITE_VERSION: i32 = 3_054_000;
+
+fn checked_sqlite_version() -> Result<i32, String> {
+    // SAFETY: SQLite returns a process-wide version constant; this does not open or inspect a database.
+    let version = unsafe { libsqlite3_sys::sqlite3_libversion_number() };
+    if version < MIN_SQLITE_VERSION {
+        return Err(format!(
+            "SQLite 3.54.0 or newer is required for safe database/WAL handling (linked version number: {version}). Rebuild with the patched bundled SQLite."
+        ));
+    }
+    Ok(version)
+}
+
 /// Opens the database; `cache_mb` is the page cache of each connection (`THIRTYFILE_DB_CACHE_MB`)
 pub async fn connect(path: &Path, cache_mb: u32) -> Result<SqlitePool, Box<dyn std::error::Error>> {
     open(path, cache_mb, &sqlx::migrate!("./migrations")).await
@@ -17,6 +32,8 @@ pub async fn connect(path: &Path, cache_mb: u32) -> Result<SqlitePool, Box<dyn s
 
 /// `connect` with the given migrations: the tests add one to see an upgrade through
 async fn open(path: &Path, cache_mb: u32, migrator: &sqlx::migrate::Migrator) -> Result<SqlitePool, Box<dyn std::error::Error>> {
+    let sqlite_version_number = checked_sqlite_version()?;
+    tracing::info!(sqlite_version_number, "SQLite runtime verified");
     let opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", path.display()))?.create_if_missing(true);
     // A new database keeps track of the pages it no longer uses, so that `shrink` can give them back to the disk. It is
     // set once, by the connection that creates the file (on a connection to a database that has it, the setting is a
@@ -125,6 +142,7 @@ fn unusable(applied: &[(i64, Vec<u8>)], migrator: &sqlx::migrate::Migrator) -> O
 /// `path` is one this version can't use (from 0.3 or older, from a newer version, or from another build). A database
 /// that isn't there, or can't be read here, is left to `connect`.
 pub async fn check_existing(path: &Path) -> Result<(), String> {
+    checked_sqlite_version()?;
     if !path.is_file() {
         return Ok(());
     }
@@ -522,6 +540,19 @@ pub async fn next_id(conn: &mut SqliteConnection, table: Counted) -> Result<i64,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn sqlx_and_custom_functions_use_the_same_patched_sqlite_runtime() {
+        let ffi_version = checked_sqlite_version().unwrap();
+        let db = crate::testutil::env().await;
+        let (version,): (String,) = sqlx::query_as("SELECT sqlite_version()").fetch_one(&db.st.db).await.unwrap();
+        let parts = version.split('.').map(|part| part.parse::<i32>().unwrap()).collect::<Vec<_>>();
+        assert_eq!(parts.len(), 3, "SQLite runtime: {version}");
+        assert_eq!(parts[0] * 1_000_000 + parts[1] * 1_000 + parts[2], ffi_version, "SQLx and the custom-function FFI must link one SQLite library");
+        assert!(ffi_version >= MIN_SQLITE_VERSION, "SQLite runtime: {version}");
+        let (folded,): (String,) = sqlx::query_as("SELECT unicode_lower('ABC')").fetch_one(&db.st.db).await.unwrap();
+        assert_eq!(folded, "abc");
+    }
 
     /// A temporary folder of a test, removed when the test ends, also when an assertion fails
     struct Scratch(std::path::PathBuf);

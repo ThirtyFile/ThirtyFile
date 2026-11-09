@@ -179,6 +179,7 @@ cd web &amp;&amp; pnpm format</code></pre>
           </tbody>
         </table></div>
         <h2 id="releases">发布版本</h2>
+        <p>正式发布前，流程会针对已测试镜像记录的源提交，再次更新 Rust 安全公告数据库并审计生产环境的 npm 依赖。Rust 检查会记录 Cargo Deny 版本与公告数据库的 revision。即使之前的构建检查通过，只要此次检查失败就会停止发布。</p>
         <p>正式镜像同时发布到 <code>ghcr.io/thirtyfile/thirtyfile</code> 和 <code>docker.io/thirtyfile/thirtyfile</code>。首次向 Docker Hub 发布前，在 <strong>Settings › Secrets and variables › Actions</strong> 中添加 Actions variable <code>DOCKERHUB_USERNAME</code> 和 secret <code>DOCKERHUB_TOKEN</code>。使用可读写该仓库的 Docker Hub access token。发布流程会在扫描与构建前检查凭据，按 digest 复制已验证的镜像，并在发布 GitHub release 前验证每个 Docker Hub 标签。</p>
         <p>合并后的更改累积在 <code>main</code>，由维护者决定何时发布。发布须手动启动：在 GitHub 打开 <strong>Actions › Release › Run workflow</strong>，保留 <code>main</code>，输入新版本号，例如 <code>1.2.3</code>；预发布使用 <code>1.2.3-rc.1</code>。也可运行：</p>
         <pre><code>gh workflow run release.yml -f version=1.2.3</code></pre>
