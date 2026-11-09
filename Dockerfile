@@ -23,7 +23,7 @@
 # The output is platform-independent, so multi-platform builds only build it once on the build machine's platform.
 # Dependabot updates the tag and digest; the version is the same major and minor release as .node-version, which the
 # workflows and `vp env` read (scripts/check-toolchain.mjs fails when they differ)
-FROM --platform=$BUILDPLATFORM node:26.13.0-alpine3.24@sha256:c6ad9e9c1d80f6eb607c26b4b0a132ff7a2344fad1c78ea3baa2a7d4c8de6d94 AS web
+FROM --platform=$BUILDPLATFORM node:26.13.0-alpine3.24@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216 AS web
 ARG BUILDKIT_SBOM_SCAN_STAGE=true
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 # Node no longer includes corepack (since version 25), which installs the pnpm version named in package.json and checks
