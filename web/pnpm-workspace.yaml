@@ -7,8 +7,8 @@ catalog:
   # by hand, as Dependabot would raise one of the two.
   vite: npm:@voidzero-dev/vite-plus-core@1.4.0
   vite-plus: 1.4.0
-  vitest: 5.0.5
-  "@vitest/coverage-v8": 5.0.5
+  vitest: 5.1.0
+  "@vitest/coverage-v8": 5.1.0
 peerDependencyRules:
   # The plugins ask for vite ^8 and see the alias's own version number (Vite+ 1.x), which is not a Vite release
   allowAny:
