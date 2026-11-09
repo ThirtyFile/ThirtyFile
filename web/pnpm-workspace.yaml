@@ -4,11 +4,12 @@ overrides:
 catalog:
   # Vite+ and the packages it is built from, which have to be one release each. `vite` is the alias of Vite+'s core that
   # the plugins and the tests import; `vite-plus` and `vite` move together (scripts/check-toolchain.mjs) and are raised
-  # by hand, as Dependabot would raise one of the two.
+  # by hand, as Dependabot would raise one of the two. Vitest and its coverage provider must match the Vitest release
+  # bundled by Vite+, so they are raised with it too.
   vite: npm:@voidzero-dev/vite-plus-core@1.4.0
   vite-plus: 1.4.0
-  vitest: 5.1.0
-  "@vitest/coverage-v8": 5.1.0
+  vitest: 5.0.5
+  "@vitest/coverage-v8": 5.0.5
 peerDependencyRules:
   # The plugins ask for vite ^8 and see the alias's own version number (Vite+ 1.x), which is not a Vite release
   allowAny:
