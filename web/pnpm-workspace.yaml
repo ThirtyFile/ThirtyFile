@@ -4,7 +4,8 @@ overrides:
 catalog:
   # Vite+ and the packages it is built from, which have to be one release each. `vite` is the alias of Vite+'s core that
   # the plugins and the tests import; `vite-plus` and `vite` move together (scripts/check-toolchain.mjs) and are raised
-  # by hand, as Dependabot would raise one of the two.
+  # by hand, as Dependabot would raise one of the two. Vitest and its coverage provider must match the Vitest release
+  # bundled by Vite+, so they are raised with it too.
   vite: npm:@voidzero-dev/vite-plus-core@1.4.0
   vite-plus: 1.4.0
   vitest: 5.0.5
