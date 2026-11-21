@@ -53,8 +53,12 @@ export function LocationsNav({ open, activeFolder, onNavigate }: { open: boolean
         <NavItem to="/favorites" icon={StarIcon} label={t("Favorites")} />
         <div className="my-2 border-t" />
         <FolderTree activeId={activeFolder} />
-        <NavItem to="/shared-with-me" icon={UsersRoundIcon} label={t("Shared with me")} />
-        <NavItem to="/shares" icon={Link2Icon} label={t("My share links")} />
+        {!me.single_user && (
+          <>
+            <NavItem to="/shared-with-me" icon={UsersRoundIcon} label={t("Shared with me")} />
+            <NavItem to="/shares" icon={Link2Icon} label={t("My share links")} />
+          </>
+        )}
         <div className="mt-3 grid gap-0 border-t pt-2">
           <NavItem to="/trash" icon={Trash2Icon} label={t("Trash")} />
         </div>

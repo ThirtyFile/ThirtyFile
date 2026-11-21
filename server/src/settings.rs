@@ -175,7 +175,8 @@ pub async fn create_company_space(db: &SqlitePool, folders: Option<&Path>) -> Ap
     if exists {
         return Ok(());
     }
-    let (admin_id,): (i64,) = sqlx::query_as("SELECT MIN(id) FROM users WHERE role = 'admin'").fetch_one(db).await?;
+    // Single-user mode has no administrator: its one user owns the space (and it is switched off there, single_user.rs)
+    let (admin_id,): (i64,) = sqlx::query_as("SELECT COALESCE(MIN(CASE WHEN role = 'admin' THEN id END), MIN(id)) FROM users").fetch_one(db).await?;
     let mut tx = begin_write(db).await?;
     let location = crate::locations::default_location(&mut tx).await?;
     let (drive_id, root_id) = create_drive(&mut tx, "All files", "company", admin_id, 0, &location).await?;

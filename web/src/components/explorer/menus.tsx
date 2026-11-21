@@ -112,7 +112,7 @@ export function toolbarCommands(p: ExplorerProps, s: ExplorerState, a: ExplorerA
       </DropdownMenuItem>
     ),
     /** Who has access to the folder shown (the space's members at its top); not in lists of several places */
-    access: p.folderId && (
+    access: p.folderId && !s.me.single_user && (
       <DropdownMenuItem key="access-folder" onClick={() => setDialog({ t: "access", nodeId: p.folderId! })}>
         <UsersRoundIcon /> {p.folder?.parent_id ? t("Access to this folder") : t("Space members")}
       </DropdownMenuItem>
@@ -181,7 +181,7 @@ export function explorerMenus(p: ExplorerProps, s: ExplorerState, a: ExplorerAct
       <PackageOpenIcon /> {t("Extract all")}
     </DropdownMenuItem>
   );
-  const shareWith = single && (
+  const shareWith = single && !s.me.single_user && (
     <DropdownMenuItem key="access" onClick={() => setDialog({ t: "access", nodeId: single.id })}>
       <UsersRoundIcon /> {t("Share with…")}
     </DropdownMenuItem>

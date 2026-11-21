@@ -74,16 +74,21 @@ impl Drop for TestEnv {
 /// A server whose spaces keep their files in the content store, as most tests of files, shares and permissions want
 /// (they work the same in folder spaces, which have tests of their own)
 pub async fn env() -> TestEnv {
-    make_env(false).await
+    make_env(false, None).await
+}
+
+/// A server in single-user mode showing the folder `files` (single_user.rs)
+pub async fn single_user_env(files: &std::path::Path) -> TestEnv {
+    make_env(true, Some(files)).await
 }
 
 /// A server as installed today: every space of the built-in storage is a folder space, in `blobs/company`,
 /// `blobs/teams/<name>` and `blobs/users/<name>`
 pub async fn folders_env() -> TestEnv {
-    make_env(true).await
+    make_env(true, None).await
 }
 
-async fn make_env(space_folders: bool) -> TestEnv {
+async fn make_env(space_folders: bool, single_user: Option<&std::path::Path>) -> TestEnv {
     let dir = std::env::temp_dir().join(format!("thirtyfile-test-{}", new_id()));
     for d in ["tmp", "thumbs", "blobs"] {
         std::fs::create_dir_all(dir.join(d)).unwrap();
@@ -91,8 +96,17 @@ async fn make_env(space_folders: bool) -> TestEnv {
     crate::storage::prepare_builtin(&dir.join("blobs"), false).unwrap();
     let space_folders = space_folders.then(|| dir.join("blobs"));
     let db = db::connect(&dir.join("drive.db"), 16).await.unwrap();
-    crate::settings::bootstrap_admin(&db, Some(password()), space_folders.as_deref()).await.unwrap();
+    let single_user = match single_user {
+        Some(files) => Some(crate::single_user::prepare(&db, &dir, &dir.join("blobs"), &files.to_string_lossy()).await.unwrap()),
+        None => {
+            crate::settings::bootstrap_admin(&db, Some(password()), space_folders.as_deref()).await.unwrap();
+            None
+        }
+    };
     crate::settings::create_company_space(&db, space_folders.as_deref()).await.unwrap();
+    if single_user.is_some() {
+        crate::single_user::switch_off_shared_space(&db).await.unwrap();
+    }
     let system = crate::settings::load_system_settings(&db).await.unwrap();
     let mut storages: HashMap<String, Arc<dyn Storage>> = HashMap::new();
     storages.insert("local".into(), Arc::new(LocalStorage::new(dir.join("blobs"), "local")));
@@ -117,6 +131,7 @@ async fn make_env(space_folders: bool) -> TestEnv {
             branding: Default::default(),
             sso: Default::default(),
             metrics: Default::default(),
+            single_user: single_user.map(|id| crate::single_user::Memory::new(id, "")),
         }),
     });
     let _writer = crate::logs::spawn_writer(st.clone(), log_rx);

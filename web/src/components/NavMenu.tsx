@@ -7,6 +7,7 @@ import { AccessDialog } from "@/components/AccessDialog";
 import { copyAndSay } from "@/lib/utils";
 import { t } from "@/lib/i18n";
 import { useTabActions } from "@/tabs";
+import { useMe } from "@/lib/session";
 
 /**
  * Context menu for navigation links (left-hand list, address bar path): open, open in new tab, access, copy link / path.
@@ -23,6 +24,7 @@ export function NavMenu(props: {
 }) {
   const navigate = useNavigate();
   const tabs = useTabActions();
+  const me = useMe();
   const [access, setAccess] = useState(false);
   return (
     <>
@@ -35,7 +37,7 @@ export function NavMenu(props: {
           <DropdownMenuItem onClick={() => tabs.open(props.to, { reuse: true })}>
             <PanelTopIcon /> {t("Open in new tab")}
           </DropdownMenuItem>
-          {props.nodeId && (
+          {props.nodeId && !me.single_user && (
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => setAccess(true)}>

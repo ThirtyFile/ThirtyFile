@@ -246,6 +246,13 @@ impl FromRequestParts<AppState> for User {
 
 /// The person a request is signed in as: by app password on the routes that allow one, else by session cookie
 async fn session_user(parts: &mut Parts, st: &AppState) -> Result<User, AppError> {
+    // Single-user mode: nobody signs in, every request is the local user's (single_user.rs)
+    if let Some(single) = st.try_part::<crate::single_user::Memory>() {
+        let mut conn = st.db.acquire().await?;
+        let mut user = user_by_id(st, &mut conn, single.user_id).await?.ok_or_else(AppError::unauthorized)?;
+        user.session_id = None;
+        return Ok(user);
+    }
     // App passwords only count on the routes that allow them (file operations); elsewhere the header is ignored
     if parts.extensions.get::<app_passwords::AllowAppPasswords>().is_some()
         && let Some(credential) = app_passwords::credential(&parts.headers)

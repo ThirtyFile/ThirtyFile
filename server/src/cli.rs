@@ -88,7 +88,8 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         // The health check only needs the address: a mistyped setting (which stops the server with a clear message)
         // mustn't also make Docker report the check itself as broken
         Err(e) if std::env::args().nth(1).as_deref() == Some("health") && e.kind() != clap::error::ErrorKind::DisplayHelp => {
-            let addr = std::env::var("THIRTYFILE_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".into());
+            let single = std::env::var("THIRTYFILE_SINGLE_USER").is_ok_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "true" | "1" | "yes" | "on"));
+            let addr = startup::listen_addr(std::env::var("THIRTYFILE_ADDR").ok().as_deref(), single);
             std::process::exit(if runtime()?.block_on(health_probe(&addr)) { 0 } else { 1 });
         }
         Err(e) => e.exit(),
@@ -96,7 +97,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // The health check only connects to the running service and doesn't touch the data directory
     if let Some(Command::Health) = &cfg.command {
-        std::process::exit(if runtime()?.block_on(health_probe(&cfg.server.addr)) { 0 } else { 1 });
+        std::process::exit(if runtime()?.block_on(health_probe(&cfg.server.listen_addr())) { 0 } else { 1 });
     }
 
     // The built-in storage location's folder

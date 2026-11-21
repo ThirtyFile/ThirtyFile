@@ -88,20 +88,24 @@ export function windowsToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerAc
         disabled={!single || !caps.write}
         onClick={() => single && setDialog({ t: "rename", node: single })}
       />
-      <ToolButton
-        icon={UsersRoundIcon}
-        label={t("Share with…")}
-        className={cn(icon, phoneHidden)}
-        disabled={!single}
-        onClick={() => single && setDialog({ t: "access", nodeId: single.id })}
-      />
-      <ToolButton
-        icon={Share2Icon}
-        label={t("Create share link")}
-        className={cn(icon, phoneHidden)}
-        disabled={!single || !caps.share}
-        onClick={() => single && setDialog({ t: "share", node: single })}
-      />
+      {!s.me.single_user && (
+        <>
+          <ToolButton
+            icon={UsersRoundIcon}
+            label={t("Share with…")}
+            className={cn(icon, phoneHidden)}
+            disabled={!single}
+            onClick={() => single && setDialog({ t: "access", nodeId: single.id })}
+          />
+          <ToolButton
+            icon={Share2Icon}
+            label={t("Create share link")}
+            className={cn(icon, phoneHidden)}
+            disabled={!single || !caps.share}
+            onClick={() => single && setDialog({ t: "share", node: single })}
+          />
+        </>
+      )}
       <ToolButton
         icon={Trash2Icon}
         label={t("Delete")}

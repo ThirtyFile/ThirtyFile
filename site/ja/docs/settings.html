@@ -67,6 +67,7 @@
           <p>運用</p>
           <a href="settings.html" aria-current="page">設定</a>
           <a href="internet.html">インターネットに公開</a>
+          <a href="single-user.html">シングルユーザーモード</a>
           <a href="backup.html">アップグレードとバックアップ</a>
           <a href="help.html">トラブルシューティング</a>
           <p>プロジェクト</p>
@@ -103,6 +104,7 @@
           <tr><td><code>THIRTYFILE_SECRET_KEY</code></td><td><code>/data</code> の <code>secret.key</code></td><td>保存場所、シングルサインオン、メールのパスワード、2 段階認証、S3 の Secret Key、署名シークレットなど、データベースのパスワードとキーを暗号化する 64 桁の 16 進数キー。<code>openssl rand -hex 32</code> で作成できます。未設定なら初回起動で <code>/data/secret.key</code> を作ります。<a href="backup.html#key">アップグレードとバックアップ</a> を参照</td></tr>
           <tr><td><code>THIRTYFILE_SECRET_KEY_FILE</code></td><td></td><td>代わりにそのキーを保存したファイル。Docker secret など</td></tr>
           <tr><td><code>THIRTYFILE_ADDR</code></td><td><code>0.0.0.0:8080</code></td><td>コンテナー内の待ち受けアドレスとポート。ホストのポートを変えるには公開ポート（<code>-p 9000:8080</code>）を変えます</td></tr>
+          <tr><td><code>THIRTYFILE_SINGLE_USER</code></td><td><code>false</code></td><td><a href="single-user.html">シングルユーザーモード</a>を有効にします。サインインなし、フォルダーは 1 つ（<code>THIRTYFILE_FILES</code>）、アカウントも共有もありません。既定ではオフ</td></tr>
           <tr><td><code>THIRTYFILE_SFTP_ADDR</code></td><td><code>0.0.0.0:2022</code></td><td>コンテナー内の SFTP のアドレスとポート。<strong>コントロールパネル › 全般 › アプリとプロトコル</strong>で<strong>SFTP アクセスを許可</strong>をオンにするまで無効です。ポートも公開します。<a href="protocols.html#sftp">SFTP</a> を参照</td></tr>
           <tr><td><code>THIRTYFILE_FTP_ADDR</code></td><td><code>0.0.0.0:21</code></td><td>コンテナー内の FTP 受信フォルダーのアドレスとポート。例では <code>0.0.0.0:2121</code> を使います。公開ポートと一緒に設定します。<a href="protocols.html#ftp-setup">FTP 受信フォルダー</a> を参照</td></tr>
           <tr><td><code>THIRTYFILE_FTP_PASSIVE</code></td><td><code>30000-30009</code></td><td>機器が FTP の転送で接続するポート。範囲全体を内外同じ番号で公開します</td></tr>

@@ -124,7 +124,7 @@ export function ThisPcPage() {
   const navigate = useNavigate();
   const tabs = useTabActions();
   const drives = useDrives();
-  const shared = useQuery(queries.sharedWithMe);
+  const shared = useQuery({ ...queries.sharedWithMe, enabled: !me.single_user });
   const [view, setView] = usePersisted<"tiles" | "list">("tf-drives-view", "tiles");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [dialog, setDialog] = useState<DialogState>(null);

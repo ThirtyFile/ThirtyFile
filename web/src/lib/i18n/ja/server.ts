@@ -1004,6 +1004,8 @@ export default {
   "Another space already shows this folder": "このフォルダーは既に別のスペースで表示されています",
   "Enter the folder's full path, for example /mnt/nas/shared": "フォルダーの完全なパスを入力してください（例：/mnt/nas/shared）",
   "The folder doesn't exist on the server": "このフォルダーはサーバー上に存在しません",
+  "This data folder belongs to single-user mode (THIRTYFILE_SINGLE_USER). Set it again, or use another data folder for a normal server.": "このデータフォルダーはシングルユーザーモード（THIRTYFILE_SINGLE_USER）のものです。もう一度設定するか、通常のサーバーには別のデータフォルダーを使ってください。",
+  "This data folder already has accounts. Single-user mode needs a new data folder (THIRTYFILE_DATA); use another one for it.": "このデータフォルダーにはすでにアカウントがあります。シングルユーザーモードには新しいデータフォルダー（THIRTYFILE_DATA）が必要です。別のものを使ってください。",
   "Choose a folder outside ThirtyFile's own data and storage folders": "ThirtyFile 自身のデータフォルダーと保存用フォルダー以外のフォルダーを選択してください",
   "This folder contains, or is inside, a folder that another space or storage location uses": "このフォルダーは、別のスペースまたは保存場所が使用しているフォルダーを含んでいるか、その中にあります",
   "Choose a folder outside ThirtyFile's data folder": "ThirtyFile のデータフォルダー以外のフォルダーを選択してください",

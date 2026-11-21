@@ -67,6 +67,7 @@
           <p>部署与运维</p>
           <a href="settings.html" aria-current="page">设置</a>
           <a href="internet.html">通过互联网访问</a>
+          <a href="single-user.html">单人模式</a>
           <a href="backup.html">升级与备份</a>
           <a href="help.html">故障排除</a>
           <p>项目</p>
@@ -106,6 +107,7 @@
             <tr><td><code>THIRTYFILE_SECRET_KEY</code></td><td><code>/data</code> 中的 <code>secret.key</code></td><td>加密数据库所保存密码和密钥的密钥（存储位置、单点登录、电子邮件密码、两步验证、S3 Secret Key、签名密钥），为 64 个十六进制字符，例如由 <code>openssl rand -hex 32</code> 生成。未设置时，首次启动会创建 <code>/data/secret.key</code>。参阅<a href="backup.html#key">升级与备份</a></td></tr>
             <tr><td><code>THIRTYFILE_SECRET_KEY_FILE</code></td><td></td><td>从文件读取密钥，例如 Docker secret</td></tr>
             <tr><td><code>THIRTYFILE_ADDR</code></td><td><code>0.0.0.0:8080</code></td><td>容器内服务器监听的地址和端口。要更改电脑对外端口，应修改发布端口（<code>-p 9000:8080</code>）</td></tr>
+            <tr><td><code>THIRTYFILE_SINGLE_USER</code></td><td><code>false</code></td><td>开启<a href="single-user.html">单人模式</a>：无需登录、只管理一个文件夹（<code>THIRTYFILE_FILES</code>），没有账号和分享。默认关闭</td></tr>
             <tr><td><code>THIRTYFILE_SFTP_ADDR</code></td><td><code>0.0.0.0:2022</code></td><td>容器内 SFTP 的地址和端口。需在<strong>控制面板 › 常规 › 应用程序与协议</strong>开启<strong>允许 SFTP 访问</strong>后才会启用，并需另外发布端口。参阅 <a href="protocols.html#sftp">SFTP</a></td></tr>
             <tr><td><code>THIRTYFILE_FTP_ADDR</code></td><td><code>0.0.0.0:21</code></td><td>容器内 FTP 接收文件夹的地址和端口。示例使用 <code>0.0.0.0:2121</code>，必须与发布的端口一起设置。参阅 <a href="protocols.html#ftp-setup">FTP 接收文件夹</a></td></tr>
             <tr><td><code>THIRTYFILE_FTP_PASSIVE</code></td><td><code>30000-30009</code></td><td>设备传输 FTP 数据时连接的端口。整个范围都要发布，内外端口号相同</td></tr>

@@ -142,6 +142,13 @@ function RequireAuth() {
   );
 }
 
+/** The sign-in page; single-user mode has none, and goes to the files */
+function SignInRoute({ administrator }: { administrator?: boolean }) {
+  const me = useQuery({ ...queries.me, retry: false });
+  if (me.data?.single_user) return <Navigate to="/files" replace />;
+  return <LoginPage administrator={administrator} />;
+}
+
 function AdminOnly({ children }: { children: React.ReactNode }) {
   const me = useQuery(queries.me);
   return me.data?.role === "admin" ? <Suspense fallback={<Spinner />}>{children}</Suspense> : <Navigate to="/files" replace />;
@@ -155,8 +162,8 @@ export function App() {
       <ConfirmHost />
       <Suspense fallback={<Spinner />}>
         <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/sign-in/administrator" element={<LoginPage administrator />} />
+          <Route path="/login" element={<SignInRoute />} />
+          <Route path="/sign-in/administrator" element={<SignInRoute administrator />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route
             path="/share/:token/:nodeId?"
