@@ -463,7 +463,12 @@ impl Storage for FtpStorage {
                 }
                 Err(e) => return Err(e),
             };
-            let modified = timed(c.ftp.mdtm(path.as_str())).await.ok().map(|t| t.and_utc().timestamp());
+            let modified = timed(c.ftp.mdtm(path.as_str())).await.ok().map(|t| {
+                crate::util::days_from_civil(i64::from(t.year()), i64::from(t.month()), i64::from(t.day())) * 86_400
+                    + i64::from(t.hour()) * 3600
+                    + i64::from(t.minute()) * 60
+                    + i64::from(t.second())
+            });
             self.checkin(c);
             Ok(Some(Entry { name: key.rsplit('/').next().unwrap_or_default().to_string(), kind: EntryKind::File, size, modified }))
         })

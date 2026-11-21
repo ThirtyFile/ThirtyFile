@@ -8,6 +8,10 @@ ignore = [
   # sign in to an SFTP server with an RSA key the administrator configured; Ed25519 keys don't use it at all, and the
   # storage guide recommends them. Remove this once rsa is fixed.
   { id = "RUSTSEC-2023-0071", reason = "No fix available; only used for SFTP sign-in with an RSA key" },
+  # chrono (through russh-sftp, the SFTP client and server): marked unmaintained, not a vulnerability. russh-sftp 3.0.1 is
+  # the latest release and exposes chrono in its public API, so only an upstream release can remove it. The FTP client
+  # no longer uses it (suppaftp 13). Tracked in #704; remove this when russh-sftp stops depending on chrono.
+  { id = "RUSTSEC-2026-0543", reason = "chrono is unmaintained; only russh-sftp still needs it (#704)" },
 ]
 
 [licenses]
@@ -48,6 +52,8 @@ skip = [
   { crate = "sha3@0.11.0", reason = "ml-kem (through russh)" },
   { crate = "hashbrown@0.14.5", reason = "dashmap" },
   { crate = "hashbrown@0.16.1", reason = "hashlink and sqlx-core" },
+  { crate = "jiff@1.0.1", reason = "suppaftp (the FTP client) uses jiff 1; ThirtyFile itself uses 0.2" },
+  { crate = "jiff-core@1.0.1", reason = "suppaftp (the FTP client) uses jiff 1; ThirtyFile itself uses 0.2" },
   { crate = "miniz_oxide@0.8.9", reason = "png" },
   { crate = "spin@0.9.9", reason = "flume (through sqlx)" },
   { crate = "syn@2.0.119", reason = "most derive macros, next to syn 3" },
