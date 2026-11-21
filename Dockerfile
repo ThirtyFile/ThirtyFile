@@ -23,7 +23,7 @@
 # The output is platform-independent, so multi-platform builds only build it once on the build machine's platform.
 # Dependabot updates the tag and digest; the version is the same major and minor release as .node-version, which the
 # workflows and `vp env` read (scripts/check-toolchain.mjs fails when they differ)
-FROM --platform=$BUILDPLATFORM node:26.13.0-alpine3.24@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216 AS web
+FROM --platform=$BUILDPLATFORM node:26.13.1-alpine3.24@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS web
 ARG BUILDKIT_SBOM_SCAN_STAGE=true
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 # Node no longer includes corepack (since version 25), which installs the pnpm version named in package.json and checks
@@ -89,7 +89,7 @@ RUN --mount=type=cache,id=cargo-registry,target=/usr/local/cargo/registry,sharin
 # ───────────── 3) Runtime files ─────────────
 # Everything the runtime image contains besides the server, prepared on the build machine's platform: the runtime
 # stage is empty (scratch) and runs no commands, so building it for another architecture needs no emulation
-FROM --platform=$BUILDPLATFORM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS rootfs
+FROM --platform=$BUILDPLATFORM alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS rootfs
 # ca-certificates: certificate validation for S3, single sign-on and FTPS (without it every https connection fails)
 # tzdata: allows setting the time zone with TZ (log exports, archive file names)
 # passwd/group: names for user 1000 and root (the server switches user by number and doesn't read them itself)
