@@ -101,6 +101,17 @@ pub fn civil_from_days(days: i64) -> (i64, i64, i64) {
     (yoe + era * 400 + i64::from(m <= 2), m, d)
 }
 
+/// (year, month, day) in the Gregorian calendar → days since 1970-01-01 (the inverse of `civil_from_days`)
+pub fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let y = year - i64::from(month <= 2);
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = if month > 2 { month - 3 } else { month + 9 };
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
 /// A name's stem and extension (with the dot); folders have no extension
 pub fn split_name(name: &str, is_folder: bool) -> (&str, &str) {
     match name.rfind('.') {
@@ -442,6 +453,18 @@ pub fn system_folder(real: &std::path::Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::{civil_from_days, days_from_civil};
+
+    #[test]
+    fn civil_days_round_trip() {
+        assert_eq!(days_from_civil(1970, 1, 1), 0);
+        assert_eq!(days_from_civil(2000, 2, 29), 11_016);
+        for days in [-800_000, -1, 0, 1, 59, 60, 11_016, 20_000, 2_932_896] {
+            let (y, m, d) = civil_from_days(days);
+            assert_eq!(days_from_civil(y, m, d), days);
+        }
+    }
+
     use std::time::{Duration, Instant};
 
     #[tokio::test]
