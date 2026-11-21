@@ -142,6 +142,47 @@ pub async fn open(cfg: &Settings) -> Result<(sqlx::SqlitePool, secrets::KeySourc
     Ok((db, key_source))
 }
 
+/// The accounts a server starts with: the administrator (first start), or in single-user mode its one local user
+/// (single_user.rs); and the shared space, which single-user mode switches off. Returns the local user's id.
+async fn accounts(
+    cfg: &Settings,
+    db: &sqlx::SqlitePool,
+    storage: &std::path::Path,
+    space_folders: &std::path::Path,
+    addr: &str,
+) -> Result<Option<i64>, Box<dyn std::error::Error>> {
+    let single_user = if cfg.single_user {
+        let Some(files) = cfg.files.as_deref().map(str::trim).filter(|f| !f.is_empty()) else {
+            return Err("THIRTYFILE_SINGLE_USER needs THIRTYFILE_FILES: the full path of the folder whose files are managed".into());
+        };
+        if !loopback(addr) {
+            tracing::warn!(
+                "Single-user mode has no sign-in and listens on {addr}, which isn't a loopback address: everyone who can reach it can read and change the files. Make sure only you can (in Docker, publish the port as -p 127.0.0.1:8080:8080), or isolate the network"
+            );
+        }
+        Some(crate::single_user::prepare(db, &cfg.data, storage, files).await.map_err(|e| e.message)?)
+    } else {
+        crate::single_user::refuse_single_user_data(db).await.map_err(|e| e.message)?;
+        let password = match (&cfg.admin_password, &cfg.admin_password_file) {
+            (Some(p), _) => Some(p.clone()),
+            (None, Some(file)) => Some(
+                std::fs::read_to_string(file)
+                    .map_err(|e| format!("Can't read THIRTYFILE_ADMIN_PASSWORD_FILE {}: {e}", file.display()))?
+                    .trim_end_matches(['\r', '\n'])
+                    .to_string(),
+            ),
+            (None, None) => None,
+        };
+        crate::settings::bootstrap_admin(db, password.as_deref(), Some(space_folders)).await.map_err(|e| e.message)?;
+        None
+    };
+    crate::settings::create_company_space(db, Some(space_folders)).await.map_err(|e| e.message)?;
+    if single_user.is_some() {
+        crate::single_user::switch_off_shared_space(db).await.map_err(|e| e.message)?;
+    }
+    Ok(single_user)
+}
+
 /// Starts the server on the database `open` opened: locks the data folder, loads the settings and starts the
 /// background tasks
 pub async fn start(cfg: Settings, storage: PathBuf, db: sqlx::SqlitePool) -> Result<Server, Box<dyn std::error::Error>> {
@@ -154,47 +195,9 @@ pub async fn start(cfg: Settings, storage: PathBuf, db: sqlx::SqlitePool) -> Res
             .fetch_one(&db)
             .await?;
     crate::storage::prepare_builtin(&storage, recorded)?;
-    if cfg.single_user {
-        if cfg.files.as_deref().is_none_or(|f| f.trim().is_empty()) {
-            return Err("THIRTYFILE_SINGLE_USER needs THIRTYFILE_FILES: the full path of the folder whose files are managed".into());
-        }
-        if !loopback(&addr) {
-            tracing::warn!(
-                "Single-user mode has no sign-in and listens on {}, which isn't a loopback address: everyone who can reach it can read and change the files.                  Make sure only you can (in Docker, publish the port as -p 127.0.0.1:8080:8080), or isolate the network",
-                addr
-            );
-        }
-    } else {
-        crate::single_user::refuse_single_user_data(&db).await.map_err(|e| e.message)?;
-    }
-    let admin_password = match (&cfg.admin_password, &cfg.admin_password_file) {
-        (Some(p), _) => Some(p.clone()),
-        (None, Some(file)) => Some(
-            std::fs::read_to_string(file)
-                .map_err(|e| format!("Can't read THIRTYFILE_ADMIN_PASSWORD_FILE {}: {e}", file.display()))?
-                .trim_end_matches(['\r', '\n'])
-                .to_string(),
-        ),
-        (None, None) => None,
-    };
     // New spaces of the built-in location get their folders in the storage folder
     let space_folders = std::path::absolute(&storage)?;
-    // Single-user mode has its one user instead of the administrator
-    let single_user = match cfg.single_user {
-        true => {
-            let files = cfg.files.as_deref().unwrap_or_default();
-            let id = crate::single_user::prepare(&db, &cfg.data, &storage, files).await.map_err(|e| e.message)?;
-            Some(id)
-        }
-        false => {
-            crate::settings::bootstrap_admin(&db, admin_password.as_deref(), Some(&space_folders)).await.map_err(|e| e.message)?;
-            None
-        }
-    };
-    crate::settings::create_company_space(&db, Some(&space_folders)).await.map_err(|e| e.message)?;
-    if single_user.is_some() {
-        crate::single_user::switch_off_shared_space(&db).await.map_err(|e| e.message)?;
-    }
+    let single_user = accounts(&cfg, &db, &storage, &space_folders, &addr).await?;
     let secret = crate::settings::load_secret(&db).await?;
     let system = crate::settings::load_system_settings(&db).await?;
     // Settings that are probably wrong together: said once at startup
