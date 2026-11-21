@@ -27,7 +27,7 @@ use crate::{
 };
 
 mod source;
-pub use source::{check_location_folder, check_new_source, check_source, set_up};
+pub use source::{check_location_folder, check_new_source, check_source, check_source_in, set_up};
 
 /// Files changed more recently than this are still being written, maybe: they are indexed by a later scan
 const SETTLE_SECONDS: i64 = 10;

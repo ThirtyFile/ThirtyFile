@@ -17,7 +17,7 @@
   // scripts/check-site.mjs reads both lists (keep each on one line): it fails when a page below is missing in a
   // language, or when the language links of the pages don't match.
   const LANGUAGES = [["en", "English"], ["zh-TW", "繁體中文"], ["zh-CN", "简体中文"], ["ja", "日本語"]];
-  const TRANSLATED = ["index.html", "docs/index.html", "docs/first-steps.html", "docs/files.html", "docs/preview.html", "docs/sharing.html", "docs/account.html", "docs/webdav.html", "docs/protocols.html", "docs/users.html", "docs/sign-in.html", "docs/storage.html", "docs/logs.html", "docs/monitoring.html", "docs/settings.html", "docs/internet.html", "docs/backup.html", "docs/help.html", "docs/contributing.html"];
+  const TRANSLATED = ["index.html", "docs/index.html", "docs/first-steps.html", "docs/files.html", "docs/preview.html", "docs/sharing.html", "docs/account.html", "docs/webdav.html", "docs/protocols.html", "docs/users.html", "docs/sign-in.html", "docs/storage.html", "docs/logs.html", "docs/monitoring.html", "docs/settings.html", "docs/internet.html", "docs/single-user.html", "docs/backup.html", "docs/help.html", "docs/contributing.html"];
 
   const GUIDES = [
     ["Get started", [
@@ -42,6 +42,7 @@
     ["Running it", [
       ["settings", "Settings"],
       ["internet", "Putting it on the internet"],
+      ["single-user", "Single-user mode"],
       ["backup", "Upgrade and backup"],
       ["help", "Troubleshooting"],
     ]],
@@ -84,6 +85,7 @@
       "Running it": "架設與維運",
       "Settings": "設定",
       "Putting it on the internet": "從網際網路存取",
+      "Single-user mode": "單人模式",
       "Upgrade and backup": "升級與備份",
       "Troubleshooting": "疑難排解",
       "The project": "專案",
@@ -130,6 +132,7 @@
       "Running it": "部署与运维",
       "Settings": "设置",
       "Putting it on the internet": "通过互联网访问",
+      "Single-user mode": "单人模式",
       "Upgrade and backup": "升级与备份",
       "Troubleshooting": "故障排除",
       "The project": "项目",
@@ -176,6 +179,7 @@
       "Running it": "運用",
       "Settings": "設定",
       "Putting it on the internet": "インターネットに公開",
+      "Single-user mode": "シングルユーザーモード",
       "Upgrade and backup": "アップグレードとバックアップ",
       "Troubleshooting": "トラブルシューティング",
       "The project": "プロジェクト",

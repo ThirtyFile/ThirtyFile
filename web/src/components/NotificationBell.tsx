@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useMe } from "@/lib/session";
 import { useNavigate } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -56,8 +57,13 @@ function Item({ n, onOpen }: { n: AppNotification; onOpen(n: AppNotification): v
   );
 }
 
-/** The bell next to the tabs: what was shared with you, spaces filling up and access ending soon */
+/** The bell next to the tabs: what was shared with you, spaces filling up and access ending soon. Single-user mode has none. */
 export function NotificationBell() {
+  const me = useMe();
+  return me.single_user ? null : <Bell />;
+}
+
+function Bell() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [settings, setSettings] = useState(false);

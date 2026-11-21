@@ -94,16 +94,17 @@ export function DetailsPane({ selected, folder, onClose, count, whole }: { selec
     queryFn: ({ signal }) => api.contents(folderIds, signal),
     enabled: ready && folderIds.length > 0,
   });
-  const history = useQuery({ queryKey: keys.history(node?.id), queryFn: ({ signal }) => api.history(node!.id, signal), enabled: ready && !!node });
+  const me = useMe();
+  // Single-user mode has no sharing and no activity log of who did what
+  const history = useQuery({ queryKey: keys.history(node?.id), queryFn: ({ signal }) => api.history(node!.id, signal), enabled: ready && !!node && !me.single_user });
   const shares = useQuery({
     queryKey: keys.sharesOf(node?.id),
     queryFn: ({ signal }) => api.shares(node!.id, {}, signal),
-    enabled: ready && !!node && !!node.parent_id,
+    enabled: ready && !!node && !!node.parent_id && !me.single_user,
   });
   // On narrow windows the pane covers the file list: focus moves into it, Esc closes it and focus goes back.
   // The list stays usable beside it, so focus isn't kept inside
   const ref = useRef<HTMLElement>(null);
-  const me = useMe();
   const overlay = useMediaQuery("(max-width: 63.99rem)");
   useOverlayFocus(ref, overlay, { onClose, modal: false });
 
@@ -172,7 +173,9 @@ export function DetailsPane({ selected, folder, onClose, count, whole }: { selec
       ...(isRoot ? [] : ([[t("Favorite"), node.is_favorite ? t("Yes") : t("No")]] as [string, string][])),
       // The person's own tags, by name
       ...(isRoot ? [] : ([[t("Tags"), <TagNames key="tags" ids={node.tags} empty={t("None")} />]] as [string, React.ReactNode][])),
-      ...(isRoot ? [] : ([[t("Share links"), shares.data ? (shares.data.length ? t("{n}", { n: shares.data.length }) : t("None")) : shares.error ? "—" : "…"]] as [string, string][])),
+      ...(isRoot || me.single_user
+        ? []
+        : ([[t("Share links"), shares.data ? (shares.data.length ? t("{n}", { n: shares.data.length }) : t("None")) : shares.error ? "—" : "…"]] as [string, string][])),
     ];
     body = (
       <>
@@ -206,8 +209,10 @@ export function DetailsPane({ selected, folder, onClose, count, whole }: { selec
           {ready && node.kind === "folder" && me.s3_enabled && <S3FolderSection nodeId={node.id} />}
           {ready && node.kind === "folder" && me.ftp_enabled && <FtpFolderSection nodeId={node.id} />}
           {/* What keeps it from being deleted for good: its managers see it, administrators place holds */}
-          {ready && !isRoot && !node.trashed_at && info.data && (me.role === "admin" || atLeast(info.data.role, "manager")) && <RetentionSection nodeId={node.id} name={node.name} ready />}
-          <History node={node} query={history} />
+          {ready && !isRoot && !node.trashed_at && info.data && !me.single_user && (me.role === "admin" || atLeast(info.data.role, "manager")) && (
+            <RetentionSection nodeId={node.id} name={node.name} ready />
+          )}
+          {!me.single_user && <History node={node} query={history} />}
           {error && (
             <ErrorState compact message={error.message} onRetry={() => Promise.all([info.error && info.refetch(), shares.error && shares.refetch(), contents.error && contents.refetch()])} />
           )}

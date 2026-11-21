@@ -15,6 +15,11 @@ use crate::{
 /// Checks the folder a new folder space is to show: an existing folder, given as an absolute path, that isn't
 /// ThirtyFile's own data or storage (or inside them)
 pub fn check_source(st: &AppState, path: &str) -> AppResult<String> {
+    check_source_in(&st.data_dir, &st.storage_dir, path)
+}
+
+/// `check_source` for a server that isn't running yet: ThirtyFile's own folders are given
+pub fn check_source_in(data_dir: &Path, storage_dir: &Path, path: &str) -> AppResult<String> {
     let path = path.trim();
     let p = Path::new(path);
     if !p.is_absolute() {
@@ -24,7 +29,7 @@ pub fn check_source(st: &AppState, path: &str) -> AppResult<String> {
     if !real.is_dir() {
         return Err(AppError::bad_request("The folder doesn't exist on the server"));
     }
-    for own in [&st.data_dir, &st.storage_dir] {
+    for own in [data_dir, storage_dir] {
         if let Ok(own) = std::fs::canonicalize(own)
             && (real.starts_with(&own) || own.starts_with(&real))
         {

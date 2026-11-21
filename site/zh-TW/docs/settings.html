@@ -67,6 +67,7 @@
           <p>架設與維運</p>
           <a href="settings.html" aria-current="page">設定</a>
           <a href="internet.html">從網際網路存取</a>
+          <a href="single-user.html">單人模式</a>
           <a href="backup.html">升級與備份</a>
           <a href="help.html">疑難排解</a>
           <p>專案</p>
@@ -107,6 +108,7 @@
             <tr><td><code>THIRTYFILE_SECRET_KEY</code></td><td><code>/data</code> 中的 <code>secret.key</code></td><td>加密資料庫所儲存密碼和金鑰的金鑰（儲存位置、單一登入、電子郵件密碼、兩步驟驗證、S3 Secret Key、簽名金鑰），為 64 個十六進位字元，例如由 <code>openssl rand -hex 32</code> 產生。未設定時，首次啟動會建立 <code>/data/secret.key</code>。參閱<a href="backup.html#key">升級與備份</a></td></tr>
             <tr><td><code>THIRTYFILE_SECRET_KEY_FILE</code></td><td></td><td>從檔案讀取金鑰，例如 Docker secret</td></tr>
             <tr><td><code>THIRTYFILE_ADDR</code></td><td><code>0.0.0.0:8080</code></td><td>容器內伺服器監聽的位址與連接埠。要更改電腦對外埠，應修改對外開放的連接埠（<code>-p 9000:8080</code>）</td></tr>
+            <tr><td><code>THIRTYFILE_SINGLE_USER</code></td><td><code>false</code></td><td>開啟<a href="single-user.html">單人模式</a>：不用登入、只管理一個資料夾（<code>THIRTYFILE_FILES</code>），沒有帳號與分享。預設關閉</td></tr>
             <tr><td><code>THIRTYFILE_SFTP_ADDR</code></td><td><code>0.0.0.0:2022</code></td><td>容器內 SFTP 的位址與連接埠。需在<strong>控制台 › 一般 › 應用程式與通訊協定</strong>開啟<strong>允許 SFTP 存取</strong>後才會啟用，並需另外開放連接埠。參閱 <a href="protocols.html#sftp">SFTP</a></td></tr>
             <tr><td><code>THIRTYFILE_FTP_ADDR</code></td><td><code>0.0.0.0:21</code></td><td>容器內 FTP 接收資料夾的位址與連接埠。範例使用 <code>0.0.0.0:2121</code>，必須與對外開放的連接埠一起設定。參閱 <a href="protocols.html#ftp-setup">FTP 接收資料夾</a></td></tr>
             <tr><td><code>THIRTYFILE_FTP_PASSIVE</code></td><td><code>30000-30009</code></td><td>裝置傳輸 FTP 資料時連線的連接埠。整段範圍都要開放，內外埠號相同</td></tr>

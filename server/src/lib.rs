@@ -65,6 +65,7 @@ mod settings;
 mod sftp;
 mod shares;
 mod signin;
+mod single_user;
 mod space_folders;
 mod sso;
 mod state;

@@ -364,6 +364,7 @@
       "public_links": false
     },
     "shared_root": "",
+    "single_user": false,
     "style": "",
     "trash_days": 0,
     "ui_lang": null,

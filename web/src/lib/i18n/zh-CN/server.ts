@@ -1004,6 +1004,8 @@ export default {
   "Another space already shows this folder": "已有其他空间显示这个文件夹",
   "Enter the folder's full path, for example /mnt/nas/shared": "请输入文件夹的完整路径，例如 /mnt/nas/shared",
   "The folder doesn't exist on the server": "服务器上不存在这个文件夹",
+  "This data folder belongs to single-user mode (THIRTYFILE_SINGLE_USER). Set it again, or use another data folder for a normal server.": "这个数据文件夹属于单人模式（THIRTYFILE_SINGLE_USER）。请再次设置它，或为普通服务器使用另一个数据文件夹。",
+  "This data folder already has accounts. Single-user mode needs a new data folder (THIRTYFILE_DATA); use another one for it.": "这个数据文件夹已有账号。单人模式需要新的数据文件夹（THIRTYFILE_DATA），请改用另一个。",
   "Choose a folder outside ThirtyFile's own data and storage folders": "请选择 ThirtyFile 自身数据文件夹和存储文件夹以外的文件夹",
   "This folder contains, or is inside, a folder that another space or storage location uses": "这个文件夹包含其他空间或存储位置所用的文件夹，或位于其中",
   "Choose a folder outside ThirtyFile's data folder": "请选择 ThirtyFile 数据文件夹以外的文件夹",

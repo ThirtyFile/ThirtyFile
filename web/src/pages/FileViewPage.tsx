@@ -152,7 +152,9 @@ export function FileViewPage() {
         disabled={!node}
         onClick={() => node && triggerDownload(privateSource.contentUrl(node, true))}
       />
-      <ToolButton icon={Share2Icon} label={t("Create share link")} className="size-9 px-0 [&_svg]:size-[18px]" disabled={!node || !caps.share} onClick={() => setDialog("share")} />
+      {!me.single_user && (
+        <ToolButton icon={Share2Icon} label={t("Create share link")} className="size-9 px-0 [&_svg]:size-[18px]" disabled={!node || !caps.share} onClick={() => setDialog("share")} />
+      )}
       <ToolButton icon={PencilIcon} label={t("Rename")} className="size-9 px-0 [&_svg]:size-[18px]" disabled={!node || !caps.write} onClick={() => setDialog("rename")} />
       {canEditSheet && (
         <>
@@ -260,13 +262,17 @@ export function FileViewPage() {
             <DropdownMenuItem onClick={() => navigate(parentUrl)}>
               <FolderOpenIcon /> {t("Open file location")}
             </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => setDialog("access")}>
-              <UsersRoundIcon /> {t("Share with…")}
-            </DropdownMenuItem>
-            <DropdownMenuItem disabled={!caps.share} onClick={() => setDialog("share")}>
-              <Share2Icon /> {t("Create share link")}
-            </DropdownMenuItem>
+            {!me.single_user && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setDialog("access")}>
+                  <UsersRoundIcon /> {t("Share with…")}
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={!caps.share} onClick={() => setDialog("share")}>
+                  <Share2Icon /> {t("Create share link")}
+                </DropdownMenuItem>
+              </>
+            )}
             <DropdownMenuItem disabled={!caps.write} onClick={() => setDialog("rename")}>
               <PencilIcon /> {t("Rename")}
             </DropdownMenuItem>

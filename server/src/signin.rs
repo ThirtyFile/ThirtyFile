@@ -58,6 +58,8 @@ pub struct Me {
     pub sftp_keys: bool,
     /// Searches can look inside files
     pub content_search: bool,
+    /// Single-user mode: nobody signs in, and accounts, permissions and sharing don't exist (single_user.rs)
+    pub single_user: bool,
 }
 
 async fn me_of(st: &AppState, user: User, headers: &HeaderMap) -> AppResult<Me> {
@@ -94,6 +96,7 @@ async fn me_of(st: &AppState, user: User, headers: &HeaderMap) -> AppResult<Me> 
         ftp_enabled,
         sftp_keys,
         content_search,
+        single_user: st.try_part::<crate::single_user::Memory>().is_some(),
     })
 }
 

@@ -1554,6 +1554,8 @@ export interface Me {
   sftp_keys: boolean;
   /** Searches can look inside files */
   content_search: boolean;
+  /** Single-user mode: nobody signs in, and accounts, permissions and sharing don't exist */
+  single_user: boolean;
   id: number;
   /** An administrator chose the password: the person must choose their own before anything else */
   must_change_password: boolean;

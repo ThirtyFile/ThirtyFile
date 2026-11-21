@@ -42,6 +42,8 @@ pub fn router(state: AppState) -> Router {
         .fallback(web::serve)
         .layer(middleware::from_fn_with_state(state.clone(), crate::s3::dispatch))
         .layer(middleware::from_fn_with_state(state.clone(), same_origin))
+        // Single-user mode: what it doesn't do, and who may ask (single_user.rs)
+        .layer(middleware::from_fn_with_state(state.clone(), crate::single_user::guard))
         .layer(middleware::from_fn_with_state(state.clone(), forwarding))
         // gzip / brotli for JSON, HTML, JS, CSS and SVG (see `Compressible`); file contents and other downloads are never compressed
         // Level 4: brotli's default (11) spends far more CPU per response than it saves on JSON and HTML; gzip 4 is likewise the sweet spot

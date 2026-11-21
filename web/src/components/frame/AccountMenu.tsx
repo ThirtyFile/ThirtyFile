@@ -107,47 +107,51 @@ export function AccountMenu({ usage }: { usage: string | null }) {
           <ChevronsUpDownIcon className="size-3.5 text-muted-foreground" />
         </DropdownMenuTrigger>
         <DropdownMenuContent side="top" className="w-52">
-          <div className="px-1.5 py-1 text-xs text-muted-foreground">
-            {usage === null
-              ? me.role === "admin"
-                ? t("Administrator")
-                : me.guest
-                  ? t("Guest")
-                  : t("Standard user")
-              : me.role === "admin"
-                ? t("Administrator · {size} used", { size: usage })
-                : t("User · {size} used", { size: usage })}
-          </div>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => setChangingPassword(true)}>
-            <KeyRoundIcon /> {t("Change password")}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setShowTwoFactor(true)}>
-            <ShieldCheckIcon /> {t("Two-factor sign-in")}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setShowPasskeys(true)}>
-            <FingerprintIcon /> {t("Passkeys")}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setShowAccounts(true)}>
-            <Link2Icon /> {t("Sign-in methods")}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setShowDevices(true)}>
-            <MonitorSmartphoneIcon /> {t("Devices")}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setShowAppPasswords(true)}>
-            <KeySquareIcon /> {t("App passwords")}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setShowLogins(true)}>
-            <HistoryIcon /> {t("My sign-in history")}
-          </DropdownMenuItem>
-          {me.sftp_keys && (
-            <DropdownMenuItem onClick={() => setShowSftpKeys(true)}>
-              <KeySquareIcon /> {t("SFTP keys")}
-            </DropdownMenuItem>
+          {!me.single_user && (
+            <>
+              <div className="px-1.5 py-1 text-xs text-muted-foreground">
+                {usage === null
+                  ? me.role === "admin"
+                    ? t("Administrator")
+                    : me.guest
+                      ? t("Guest")
+                      : t("Standard user")
+                  : me.role === "admin"
+                    ? t("Administrator · {size} used", { size: usage })
+                    : t("User · {size} used", { size: usage })}
+              </div>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => setChangingPassword(true)}>
+                <KeyRoundIcon /> {t("Change password")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setShowTwoFactor(true)}>
+                <ShieldCheckIcon /> {t("Two-factor sign-in")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setShowPasskeys(true)}>
+                <FingerprintIcon /> {t("Passkeys")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setShowAccounts(true)}>
+                <Link2Icon /> {t("Sign-in methods")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setShowDevices(true)}>
+                <MonitorSmartphoneIcon /> {t("Devices")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setShowAppPasswords(true)}>
+                <KeySquareIcon /> {t("App passwords")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setShowLogins(true)}>
+                <HistoryIcon /> {t("My sign-in history")}
+              </DropdownMenuItem>
+              {me.sftp_keys && (
+                <DropdownMenuItem onClick={() => setShowSftpKeys(true)}>
+                  <KeySquareIcon /> {t("SFTP keys")}
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem onClick={() => setShowNotifications(true)}>
+                <BellIcon /> {t("Notification settings")}
+              </DropdownMenuItem>
+            </>
           )}
-          <DropdownMenuItem onClick={() => setShowNotifications(true)}>
-            <BellIcon /> {t("Notification settings")}
-          </DropdownMenuItem>
           {canToggle && (
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
@@ -192,10 +196,14 @@ export function AccountMenu({ usage }: { usage: string | null }) {
               </DropdownMenuRadioGroup>
             </DropdownMenuSubContent>
           </DropdownMenuSub>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={logout}>
-            <LogOutIcon /> {t("Sign out")}
-          </DropdownMenuItem>
+          {!me.single_user && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={logout}>
+                <LogOutIcon /> {t("Sign out")}
+              </DropdownMenuItem>
+            </>
+          )}
           {/* Which release runs: only people who are signed in are told */}
           <div className="px-1.5 pt-1 pb-0.5 text-[11px] text-muted-foreground/80 select-text">{t("ThirtyFile {version}", { version: me.version })}</div>
         </DropdownMenuContent>

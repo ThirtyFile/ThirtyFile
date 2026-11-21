@@ -207,6 +207,7 @@ function ViewOptions({ p, s }: { p: ExplorerProps; s: ExplorerState }) {
 
 function ShareChoices({ s }: { s: ExplorerState }) {
   const { single, caps, setDialog } = s;
+  if (s.me.single_user) return null;
   return (
     <>
       <DropdownMenuItem disabled={!single} onClick={() => single && setDialog({ t: "access", nodeId: single.id })}>

@@ -159,6 +159,11 @@ impl Inner {
         part.unwrap_or_else(|| panic!("AppState has no {}: add it in app::startup::parts", std::any::type_name::<T>()))
     }
 
+    /// A feature's part when this server has it (parts that exist only in some modes, `single_user::Memory`)
+    pub fn try_part<T: Any>(&self) -> Option<&T> {
+        self.parts.0.get(&TypeId::of::<T>()).and_then(|p| p.downcast_ref())
+    }
+
     /// Returns the root folder id of the shared space when it is enabled
     pub fn shared_root(&self) -> Option<String> {
         let s = self.system.read();

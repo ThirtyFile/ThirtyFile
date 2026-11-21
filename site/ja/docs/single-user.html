@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="ja" data-root="../.." data-page="single-user">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>シングルユーザーモード · ThirtyFile</title>
+    <meta name="description" content="ThirtyFile を、サンドボックス内で一人が使うファイルマネージャーとして使います。サインインもアカウントもなく、管理するのは 1 つのフォルダーだけです。" />
+    <link rel="alternate" hreflang="en" href="https://thirtyfile.github.io/ThirtyFile/docs/single-user.html" />
+    <link rel="alternate" hreflang="zh-TW" href="https://thirtyfile.github.io/ThirtyFile/zh-TW/docs/single-user.html" />
+    <link rel="alternate" hreflang="zh-CN" href="https://thirtyfile.github.io/ThirtyFile/zh-CN/docs/single-user.html" />
+    <link rel="alternate" hreflang="ja" href="https://thirtyfile.github.io/ThirtyFile/ja/docs/single-user.html" />
+    <link rel="alternate" hreflang="x-default" href="https://thirtyfile.github.io/ThirtyFile/docs/single-user.html" />
+    <link rel="icon" href="../../assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" />
+    <script>
+      // The theme the visitor picked, before the page is drawn (assets/site.js has the switch)
+      try {
+        const theme = localStorage.getItem("tf-site-theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="../../assets/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#content">本文へスキップ</a>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="../index.html"><img src="../../assets/logo.svg" alt="" />ThirtyFile</a>
+        <nav class="site-nav" aria-label="サイト">
+          <a href="../index.html#features" class="hide-small">機能</a>
+          <a href="index.html" aria-current="page">ガイド</a>
+          <a href="https://github.com/ThirtyFile/ThirtyFile">GitHub</a>
+          <details class="lang-menu">
+            <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg><span class="visually-hidden">言語 </span><span class="lang-name">日本語</span></summary>
+            <ul>
+              <li><a href="../../docs/single-user.html" hreflang="en" lang="en">English</a></li>
+              <li><a href="../../zh-TW/docs/single-user.html" hreflang="zh-TW" lang="zh-TW">繁體中文</a></li>
+              <li><a href="../../zh-CN/docs/single-user.html" hreflang="zh-CN" lang="zh-CN">简体中文</a></li>
+              <li><a href="single-user.html" hreflang="ja" lang="ja" aria-current="true">日本語</a></li>
+            </ul>
+          </details>
+        </nav>
+      </div>
+    </header>
+    <div class="wrap docs">
+      <nav class="docs-nav" aria-label="ガイド">
+        <details open>
+          <summary>すべてのガイド</summary>
+          <p>はじめに</p>
+          <a href="index.html">インストール</a>
+          <a href="first-steps.html">初期設定</a>
+          <p>日常の操作</p>
+          <a href="files.html">ファイルの操作</a>
+          <a href="preview.html">プレビューと編集</a>
+          <a href="sharing.html">共有</a>
+          <a href="account.html">アカウント</a>
+          <a href="webdav.html">ネットワークドライブとして割り当て</a>
+          <a href="protocols.html">SFTP、S3、FTP</a>
+          <p>管理</p>
+          <a href="users.html">ユーザーとスペース</a>
+          <a href="sign-in.html">シングルサインオン</a>
+          <a href="storage.html">保存場所</a>
+          <a href="logs.html">ログとブランド設定</a>
+          <a href="monitoring.html">監視</a>
+          <p>運用</p>
+          <a href="settings.html">設定</a>
+          <a href="internet.html">インターネットに公開</a>
+          <a href="single-user.html" aria-current="page">シングルユーザーモード</a>
+          <a href="backup.html">アップグレードとバックアップ</a>
+          <a href="help.html">トラブルシューティング</a>
+          <p>プロジェクト</p>
+          <a href="contributing.html">開発への参加</a>
+        </details>
+      </nav>
+      <main id="content" class="article">
+
+        <h1>シングルユーザーモード</h1>
+        <p class="lead">ThirtyFile を、サンドボックス内で一人が使うファイルマネージャーとして使います。サインインもアカウントもなく、管理するのは 1 つのフォルダーだけです。</p>
+        <details class="guide-toc">
+          <summary>このページの内容</summary>
+          <ol>
+            <li><a href="#what">何が変わるか</a></li>
+            <li><a href="#docker">Docker で動かす</a></li>
+            <li><a href="#reach">自分のコンピューターから開く</a></li>
+            <li><a href="#safety">誰がアクセスできるか</a></li>
+            <li><a href="#settings">設定</a></li>
+            <li><a href="#back">通常のサーバーに戻す</a></li>
+          </ol>
+        </details>
+
+        <h2 id="what">何が変わるか</h2>
+        <p>シングルユーザーモードは、自分だけがアクセスできる場所のためのものです。サンドボックス、仮想マシン、自分のコンピューター上のコンテナーなどです。ページを開けば、ファイルがそこにあります。明示的に有効にしない限りオフで、通常のサーバーには影響しません。</p>
+        <ul>
+          <li><strong>サインインなし。</strong>ページにアクセスした人はみな同じ人として扱われます。アカウント、パスワード、2 段階認証コードはありません。</li>
+          <li><strong>フォルダーは 1 つ。</strong>ファイルは、選んだフォルダー（<code>THIRTYFILE_FILES</code>）の中の通常のファイルです。閲覧、アップロード、ダウンロード、作成、編集、名前の変更、移動、削除ができ、プレビュー、検索、タグ、ごみ箱、エディターはいつもどおりです。フォルダーの外から行った変更も表示されます。</li>
+          <li><strong>複数人向けの機能はありません。</strong>ユーザーとグループ、権限、共有リンク、ゲスト、コントロールパネル、通知、WebDAV、S3 バケット、FTP 受信フォルダーは、隠されているだけでなく無効です。サーバーは応答しません。SFTP もオフのままです。</li>
+          <li><strong>そのフォルダーだけ。</strong>サーバーはそのフォルダーの中だけを読み書きします。外を指すリンクは、すべてのフォルダースペースと同じようにスキップされます。</li>
+        </ul>
+
+        <h2 id="docker">Docker で動かす</h2>
+        <pre><code>docker run -d --name thirtyfile --restart unless-stopped \
+  -p 127.0.0.1:8080:8080 \
+  -v /srv/thirtyfile/data:/data \
+  -v /srv/work:/files \
+  -e THIRTYFILE_SINGLE_USER=true \
+  -e THIRTYFILE_FILES=/files \
+  -e THIRTYFILE_RUN_AS=1000:1000 \
+  ghcr.io/thirtyfile/thirtyfile:latest</code></pre>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>部分</th><th>役割</th></tr></thead>
+            <tbody>
+              <tr><td><code>-p 127.0.0.1:8080:8080</code></td><td>このコンピューターだけにページを公開します。<code>127.0.0.1:</code> がないと、Docker はファイアウォールを通り越して、コンピューターがつながるすべてのネットワークにポートを開きます</td></tr>
+              <tr><td><code>-v /srv/work:/files</code></td><td>管理するフォルダー。広い範囲ではなく、サンドボックス内の 1 つのフォルダーをマウントしてください。サーバーが触れられるのはそこだけです</td></tr>
+              <tr><td><code>THIRTYFILE_SINGLE_USER=true</code></td><td>このモードを有効にします</td></tr>
+              <tr><td><code>THIRTYFILE_FILES=/files</code></td><td>コンテナーから見たフォルダーのパス。必須です</td></tr>
+              <tr><td><code>THIRTYFILE_RUN_AS=1000:1000</code></td><td>サーバーを実行するユーザー。<code>/files</code> 内のファイルを変更できる必要があります。そのフォルダーの所有者を指定してください（<code>id -u</code> と <code>id -g</code>）</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p><code>/data</code> フォルダーには、インデックス、サムネイル、設定が保存されます。ファイルのフォルダーの中に置くことはできず、このモード専用です。シングルユーザーモードで作ったデータフォルダーは通常のサーバーでは起動できず、その逆も同じです。後で別のフォルダーを選ぶと、そのフォルダーが表示されます。以前のフォルダーはそのまま残ります。</p>
+
+        <h2 id="reach">自分のコンピューターから開く</h2>
+        <p>コンテナー内ではサーバーはすべてのアドレスで待ち受け、Docker は公開したポートだけを通します。<code>-p 127.0.0.1:8080:8080</code> を使うと、Docker を動かしているコンピューターで <code>http://localhost:8080</code> を開けます。Docker を使わない場合、サーバーは既定で <code>127.0.0.1:8080</code> だけで待ち受けます（<code>THIRTYFILE_ADDR</code> で変更できます）。</p>
+        <p>サンドボックスが別のマシンや仮想マシンのときは、自分のコンピューターからポートを転送すると、ページは <code>localhost</code> として届きます。</p>
+        <pre><code>ssh -L 8080:127.0.0.1:8080 user@sandbox</code></pre>
+        <p>その後、自分のコンピューターで <code>http://localhost:8080</code> を開きます。多くのサンドボックスや開発用コンテナーには、同じことをするポート転送の設定があります。</p>
+        <p>サーバーが応答するのは <code>localhost</code>、<code>127.0.0.1</code>、<code>[::1]</code> だけです。別の名前で届いたページには「unknown host name」と表示されます。転送ツールやプロキシがページに独自の名前を付ける場合は、その名前を指定してください。</p>
+        <pre><code>-e THIRTYFILE_ALLOWED_HOSTS=sandbox.example.com</code></pre>
+
+        <h2 id="safety">誰がアクセスできるか</h2>
+        <p><strong>サインインがないため、ポートにアクセスできる人は誰でもフォルダー内のすべてのファイルを扱えます。</strong>他の人を締め出すのは、ThirtyFile ではなく、サンドボックスとその周りのネットワークです。ポートはループバックアドレスだけ、または自分で用意した転送の背後に置き、ネットワークやインターネットには公開しないでください。待ち受けるアドレスがループバックアドレスでないとき、ThirtyFile は起動時にログへ警告を書きます。Docker 内では当然そうなるので、重要なのは公開したポートです。</p>
+        <p>閲覧している Web サイトは <code>localhost</code> にリクエストを送れるため、ThirtyFile は次のことを引き続き行います。</p>
+        <ul>
+          <li>別の Web サイトから来たとブラウザーが伝えるリクエストは拒否されます。<code>Origin</code> がページ自身のものでない変更も同様です。</li>
+          <li>このコンピューターの名前ではない名前でのリクエストは拒否されます。自分の名前をあなたのコンピューターに向けさせる Web サイト（DNS リバインディング）を防ぎます。</li>
+          <li>ファイルには、選んだフォルダーの下からしかアクセスできません。</li>
+        </ul>
+        <p>同じコンピューター上のプログラムは、引き続きそのポートを使えます。信頼できないものがある場合は、サンドボックスのネットワークをそれらから分けてください。</p>
+
+        <h2 id="settings">設定</h2>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>変数</th><th>既定値</th><th>役割</th></tr></thead>
+            <tbody>
+              <tr><td><code>THIRTYFILE_SINGLE_USER</code></td><td><code>false</code></td><td>シングルユーザーモードを有効にします</td></tr>
+              <tr><td><code>THIRTYFILE_FILES</code></td><td></td><td>管理するフォルダーのフルパス。このモードでは必須で、データフォルダーを含んだり、その中にあったりしてはいけません</td></tr>
+              <tr><td><code>THIRTYFILE_ADDR</code></td><td><code>127.0.0.1:8080</code></td><td>サーバーが待ち受ける場所（通常のサーバーは <code>0.0.0.0:8080</code>。Docker イメージは自分で設定します）</td></tr>
+              <tr><td><code>THIRTYFILE_ALLOWED_HOSTS</code></td><td></td><td><code>localhost</code> のほかに、ページを開ける名前をカンマで区切って指定します</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p><code>THIRTYFILE_TRASH_DAYS</code> や <code>THIRTYFILE_MAX_UPLOAD_MB</code> などその他の設定は、<a href="settings.html">設定</a>のとおりに動作します。バックアップやストレージの場所などはコントロールパネルの機能で、ここでは使えません。フォルダーをコピーするか、サンドボックス自体のスナップショットを使ってください。</p>
+
+        <h2 id="back">通常のサーバーに戻す</h2>
+        <p>新しいデータフォルダーで通常のサーバーを起動し、そのフォルダーをスペースとして追加します。ファイルはデータフォルダーの中にはなかったので、エクスポートは不要です。</p>
+        <nav class="next" aria-label="その他のガイド">
+          <a href="internet.html"><span>前へ</span>インターネットに公開</a>
+          <a class="forward" href="backup.html"><span>次へ</span>アップグレードとバックアップ</a>
+        </nav>
+
+</main>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap">
+        <span>ThirtyFile</span>
+        <a href="index.html">ガイド</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile">ソースコード</a>
+        <a href="https://github.com/ThirtyFile/ThirtyFile/issues">問題を報告</a>
+        <a class="push" href="https://github.com/ThirtyFile/ThirtyFile/pkgs/container/thirtyfile">Docker イメージ</a>
+        <a href="https://hub.docker.com/r/thirtyfile/thirtyfile">Docker Hub</a>
+      </div>
+    </footer>
+    <script src="../../assets/site.js"></script>
+  </body>
+</html>

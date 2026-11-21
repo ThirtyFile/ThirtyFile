@@ -80,12 +80,14 @@ export function windowsMenu(m: MenuEntries): ReactNode {
           <IconItem icon={CopyIcon} label={t("Copy")} keys={k.copy[0]} onClick={a.copy} />
           <IconItem icon={PencilIcon} label={t("Rename")} keys={k.rename[0]} disabled={!single || !caps.write} onClick={m.rename} />
           {/* A share link where the role allows one, else sharing with people */}
-          <IconItem
-            icon={Share2Icon}
-            label={t("Share")}
-            disabled={!single}
-            onClick={() => single && setDialog(caps.share ? { t: "share", node: single } : { t: "access", nodeId: single.id })}
-          />
+          {!s.me.single_user && (
+            <IconItem
+              icon={Share2Icon}
+              label={t("Share")}
+              disabled={!single}
+              onClick={() => single && setDialog(caps.share ? { t: "share", node: single } : { t: "access", nodeId: single.id })}
+            />
+          )}
           <IconItem icon={Trash2Icon} label={t("Delete")} keys={k.trash[0]} destructive disabled={!caps.del} onClick={m.remove} />
         </IconRow>
         {sections(

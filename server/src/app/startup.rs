@@ -17,8 +17,20 @@ use super::{maintenance::spawn_maintenance, routes::router, serve::serve};
 #[derive(clap::Args)]
 pub struct Settings {
     /// Listen address
-    #[arg(long, env = "THIRTYFILE_ADDR", default_value = "0.0.0.0:8080")]
-    pub addr: String,
+    /// (default 0.0.0.0:8080, and 127.0.0.1:8080 in single-user mode)
+    #[arg(long, env = "THIRTYFILE_ADDR")]
+    pub addr: Option<String>,
+    /// Single-user mode: no sign-in, one folder (THIRTYFILE_FILES) as the files, no accounts, permissions or sharing.
+    /// For a sandbox or another place only one trusted person reaches (the guide "Single-user mode")
+    #[arg(long, env = "THIRTYFILE_SINGLE_USER", default_value = "false", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::Set)]
+    pub single_user: bool,
+    /// Single-user mode: the folder whose files are managed, as a full path
+    #[arg(long, env = "THIRTYFILE_FILES")]
+    pub files: Option<String>,
+    /// Single-user mode: names the site answers to besides localhost, separated by commas (a host name given by
+    /// port forwarding or a reverse proxy)
+    #[arg(long, env = "THIRTYFILE_ALLOWED_HOSTS", default_value = "")]
+    pub allowed_hosts: String,
     /// SSH file transfer listen address; access is enabled separately in Control panel
     #[arg(long, env = "THIRTYFILE_SFTP_ADDR", default_value = "0.0.0.0:2022")]
     pub sftp_addr: String,
@@ -77,6 +89,23 @@ pub struct Settings {
     pub thumbnail_jobs: Option<u32>,
 }
 
+impl Settings {
+    /// Where the server listens: the loopback address only in single-user mode, unless the address is set
+    pub fn listen_addr(&self) -> String {
+        listen_addr(self.addr.as_deref(), self.single_user)
+    }
+}
+
+/// The listen address of the settings given (`Settings::listen_addr`)
+pub fn listen_addr(addr: Option<&str>, single_user: bool) -> String {
+    addr.map(str::to_string).unwrap_or_else(|| if single_user { "127.0.0.1:8080" } else { "0.0.0.0:8080" }.to_string())
+}
+
+/// Whether the address only reaches this computer
+fn loopback(addr: &str) -> bool {
+    addr.parse::<std::net::SocketAddr>().is_ok_and(|a| a.ip().is_loopback())
+}
+
 /// Holds `thirtyfile.lock` in the data folder while the server runs, so two never run on the same data at the same
 /// time. Where the file system can't lock files, nothing is held.
 fn lock_data(data: &std::path::Path) -> Result<Option<std::fs::File>, Box<dyn std::error::Error>> {
@@ -113,10 +142,52 @@ pub async fn open(cfg: &Settings) -> Result<(sqlx::SqlitePool, secrets::KeySourc
     Ok((db, key_source))
 }
 
+/// The accounts a server starts with: the administrator (first start), or in single-user mode its one local user
+/// (single_user.rs); and the shared space, which single-user mode switches off. Returns the local user's id.
+async fn accounts(
+    cfg: &Settings,
+    db: &sqlx::SqlitePool,
+    storage: &std::path::Path,
+    space_folders: &std::path::Path,
+    addr: &str,
+) -> Result<Option<i64>, Box<dyn std::error::Error>> {
+    let single_user = if cfg.single_user {
+        let Some(files) = cfg.files.as_deref().map(str::trim).filter(|f| !f.is_empty()) else {
+            return Err("THIRTYFILE_SINGLE_USER needs THIRTYFILE_FILES: the full path of the folder whose files are managed".into());
+        };
+        if !loopback(addr) {
+            tracing::warn!(
+                "Single-user mode has no sign-in and listens on {addr}, which isn't a loopback address: everyone who can reach it can read and change the files. Make sure only you can (in Docker, publish the port as -p 127.0.0.1:8080:8080), or isolate the network"
+            );
+        }
+        Some(crate::single_user::prepare(db, &cfg.data, storage, files).await.map_err(|e| e.message)?)
+    } else {
+        crate::single_user::refuse_single_user_data(db).await.map_err(|e| e.message)?;
+        let password = match (&cfg.admin_password, &cfg.admin_password_file) {
+            (Some(p), _) => Some(p.clone()),
+            (None, Some(file)) => Some(
+                std::fs::read_to_string(file)
+                    .map_err(|e| format!("Can't read THIRTYFILE_ADMIN_PASSWORD_FILE {}: {e}", file.display()))?
+                    .trim_end_matches(['\r', '\n'])
+                    .to_string(),
+            ),
+            (None, None) => None,
+        };
+        crate::settings::bootstrap_admin(db, password.as_deref(), Some(space_folders)).await.map_err(|e| e.message)?;
+        None
+    };
+    crate::settings::create_company_space(db, Some(space_folders)).await.map_err(|e| e.message)?;
+    if single_user.is_some() {
+        crate::single_user::switch_off_shared_space(db).await.map_err(|e| e.message)?;
+    }
+    Ok(single_user)
+}
+
 /// Starts the server on the database `open` opened: locks the data folder, loads the settings and starts the
 /// background tasks
 pub async fn start(cfg: Settings, storage: PathBuf, db: sqlx::SqlitePool) -> Result<Server, Box<dyn std::error::Error>> {
     let lock = lock_data(&cfg.data)?;
+    let addr = cfg.listen_addr();
     // The storage folder: made with its marker on a new install. When the database records files or spaces there, a
     // missing or empty folder (a volume that isn't mounted) or one without the marker stops the start.
     let (recorded,): (bool,) =
@@ -124,20 +195,9 @@ pub async fn start(cfg: Settings, storage: PathBuf, db: sqlx::SqlitePool) -> Res
             .fetch_one(&db)
             .await?;
     crate::storage::prepare_builtin(&storage, recorded)?;
-    let admin_password = match (&cfg.admin_password, &cfg.admin_password_file) {
-        (Some(p), _) => Some(p.clone()),
-        (None, Some(file)) => Some(
-            std::fs::read_to_string(file)
-                .map_err(|e| format!("Can't read THIRTYFILE_ADMIN_PASSWORD_FILE {}: {e}", file.display()))?
-                .trim_end_matches(['\r', '\n'])
-                .to_string(),
-        ),
-        (None, None) => None,
-    };
     // New spaces of the built-in location get their folders in the storage folder
     let space_folders = std::path::absolute(&storage)?;
-    crate::settings::bootstrap_admin(&db, admin_password.as_deref(), Some(&space_folders)).await.map_err(|e| e.message)?;
-    crate::settings::create_company_space(&db, Some(&space_folders)).await.map_err(|e| e.message)?;
+    let single_user = accounts(&cfg, &db, &storage, &space_folders, &addr).await?;
     let secret = crate::settings::load_secret(&db).await?;
     let system = crate::settings::load_system_settings(&db).await?;
     // Settings that are probably wrong together: said once at startup
@@ -186,6 +246,7 @@ pub async fn start(cfg: Settings, storage: PathBuf, db: sqlx::SqlitePool) -> Res
             branding,
             sso: sso_settings,
             metrics: metrics_settings,
+            single_user: single_user.map(|id| crate::single_user::Memory::new(id, &cfg.allowed_hosts)),
         }),
     });
 
@@ -221,7 +282,7 @@ pub async fn start(cfg: Settings, storage: PathBuf, db: sqlx::SqlitePool) -> Res
     watch::spawn_watchers(state.clone());
 
     let ftp = crate::ftp::Settings { address: cfg.ftp_addr, passive: cfg.ftp_passive, host: cfg.ftp_passive_host, cert: cfg.ftp_cert, key: cfg.ftp_key };
-    Ok(Server { state, addr: cfg.addr, log_writer, _lock: lock, sftp_addr: cfg.sftp_addr, ftp })
+    Ok(Server { state, addr, log_writer, _lock: lock, sftp_addr: cfg.sftp_addr, ftp })
 }
 
 /// What the features' parts start with: settings, and what startup loaded from the database
@@ -235,6 +296,8 @@ pub struct Loaded {
     pub branding: branding::Branding,
     pub sso: sso::SsoSettings,
     pub metrics: crate::metrics::Settings,
+    /// Single-user mode only
+    pub single_user: Option<crate::single_user::Memory>,
 }
 
 /// What each feature keeps in memory: the parts of `AppState` (`state::Parts`)
@@ -271,7 +334,10 @@ pub fn parts(l: Loaded) -> Parts {
         .with(shares::Memory::default());
     #[cfg(target_os = "linux")]
     let parts = parts.with(watch::Memory::default());
-    parts
+    match l.single_user {
+        Some(m) => parts.with(m),
+        None => parts,
+    }
 }
 
 impl Server {
@@ -289,6 +355,7 @@ impl Server {
         let app = self.router();
 
         let listener = tokio::net::TcpListener::bind(&self.addr).await?;
+        // They stay off in single-user mode: switching them on is part of the Control panel, which isn't there
         let sftp = crate::sftp::supervise(self.state.clone(), &self.sftp_addr);
         let ftp = crate::ftp::supervise(self.state.clone(), self.ftp.clone());
         tracing::info!("ThirtyFile started: http://{}", self.addr);

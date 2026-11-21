@@ -50,12 +50,14 @@ export function SelectionBar({ s, a, menuItems }: { s: ExplorerState; a: Explore
       <span className="min-w-0 flex-1 truncate text-xs">{t("{n} selected", { n: s.count })}</span>
       <BarButton icon={DownloadIcon} label={t("Download")} onClick={() => a.download(s.picked)} />
       {/* A share link where the role allows one, else sharing with people */}
-      <BarButton
-        icon={Share2Icon}
-        label={t("Share")}
-        disabled={!single}
-        onClick={() => single && setDialog(caps.share ? { t: "share", node: single } : { t: "access", nodeId: single.id })}
-      />
+      {!s.me.single_user && (
+        <BarButton
+          icon={Share2Icon}
+          label={t("Share")}
+          disabled={!single}
+          onClick={() => single && setDialog(caps.share ? { t: "share", node: single } : { t: "access", nodeId: single.id })}
+        />
+      )}
       <BarButton icon={FolderInputIcon} label={t("Move")} disabled={!caps.write} onClick={() => setDialog({ t: "move", picked: s.picked })} />
       <BarButton icon={Trash2Icon} label={t("Delete")} disabled={!caps.del} onClick={() => setDialog({ t: "trash", picked: s.picked })} />
       <DropdownMenu>
