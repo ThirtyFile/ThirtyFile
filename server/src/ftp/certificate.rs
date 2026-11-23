@@ -61,7 +61,7 @@ fn time(e: &Element) -> Option<i64> {
         _ => return None,
     };
     let date = jiff::civil::DateTime::new(year, pair(at)?, pair(at + 2)?, pair(at + 4)?, pair(at + 6)?, pair(at + 8)?, 0).ok()?;
-    Some(date.to_zoned(jiff::tz::TimeZone::UTC).ok()?.timestamp().as_second())
+    Some(date.to_zoned_datetime(jiff::tz::TimeZone::UTC).ok()?.timestamp().as_second())
 }
 
 /// When the certificate in `der` ends (Unix seconds)
