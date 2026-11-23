@@ -32,6 +32,9 @@ const ALLOWED = new Set([
 const BUNDLED = new Set(["tailwindcss"]);
 // Files copied from other projects into src/vendor/, each folder with its licence file
 const VENDORED = [{ name: "shadcn", versions: ["4.21.1"], license: "MIT", homepage: "https://ui.shadcn.com", paths: [fileURLToPath(new URL("../src/vendor/shadcn", import.meta.url))] }];
+// Licence files in a package's subfolders, for parts of it the interface serves (web/src/lib/pdfjs.ts): pdf.js's
+// character maps and its JBIG2, JPEG 2000 and colour decoders
+const SUBFOLDER_NOTICES = { "pdfjs-dist": ["cmaps/LICENSE", "wasm/LICENSE_JBIG2", "wasm/LICENSE_OPENJPEG", "wasm/LICENSE_QCMS"] };
 // Packages whose metadata names no licence, with the one their own documentation gives
 const DECLARED = { "combine-errors": "MIT" };
 
@@ -76,6 +79,7 @@ for (const p of packages) {
       .sort()) {
       texts.add(readFileSync(join(dir, name), "utf8").trim());
     }
+    for (const file of SUBFOLDER_NOTICES[p.name] ?? []) texts.add(readFileSync(join(dir, file), "utf8").trim());
   }
   out.push(texts.size ? [...texts].join(`\n${"-".repeat(80)}\n`) : `The package includes no licence file; its licence is ${p.license}.`);
 }

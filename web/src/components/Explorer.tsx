@@ -62,6 +62,8 @@ export interface ExplorerProps {
   showOwner?: boolean;
   /** One more text column after the size (list view), e.g. where a search found each item */
   extraColumn?: FileListProps["extraColumn"];
+  /** Where a file opens (`/view/<id>` when left out): search results add the words found inside it */
+  fileLink?(n: Item): string;
   emptyHint?: string;
   sort?: { key: SortKey; order: SortOrder };
   /** Column header clicked: toggle sorting */
@@ -133,7 +135,7 @@ export function Explorer(p: ExplorerProps) {
     },
     onSelectAll: s.selectAll,
     onOpen: open,
-    onOpenInNewTab: (n) => tabs.open(n.kind === "folder" ? `/files/${n.id}` : `/view/${n.id}`, { reuse: n.kind === "file" }),
+    onOpenInNewTab: (n) => tabs.open(n.kind === "folder" ? `/files/${n.id}` : (p.fileLink?.(n) ?? `/view/${n.id}`), { reuse: n.kind === "file" }),
     sort: p.sort,
     onSort: p.onSort,
     groupBy: s.groupBy,

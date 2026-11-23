@@ -86,6 +86,7 @@
             <li><a href="#word">编辑 Word 文档</a></li>
             <li><a href="#text">编辑文本文件</a></li>
             <li><a href="#markdown">Markdown</a></li>
+            <li><a href="#pdf">PDF</a></li>
             <li><a href="#thumbnails">缩略图</a></li>
             <li><a href="#together">两人编辑同一文件时</a></li>
           </ol>
@@ -97,7 +98,7 @@
             <tr><td>图片（.jpg、.png、.gif、.webp、.avif、.svg、.bmp、.ico）</td><td>支持</td><td></td></tr>
             <tr><td>视频（.mp4、.webm、.mov）</td><td>支持</td><td></td></tr>
             <tr><td>音频（.mp3、.wav、.ogg、.flac、.aac、.m4a）</td><td>支持</td><td></td></tr>
-            <tr><td>PDF</td><td>支持</td><td></td></tr>
+            <tr><td>PDF</td><td>支持，含页面缩略图、缩放和查找（见 <a href="#pdf">PDF</a>）</td><td></td></tr>
             <tr><td>Word（.docx）</td><td>支持</td><td>支持</td></tr>
             <tr><td>PowerPoint（.pptx）</td><td>支持</td><td></td></tr>
             <tr><td>Excel（.xlsx）</td><td>支持</td><td>支持</td></tr>
@@ -158,6 +159,17 @@
         <h2 id="markdown">Markdown</h2>
         <p>Markdown 文件以排版页面显示，包括标题、列表、表格、任务列表和代码。点击页面上方<strong>编辑</strong>修改文本（只有查看权限时显示<strong>源代码</strong>），再切回<strong>预览</strong>查看结果，未保存的修改也会显示。</p>
         <p>页面采用安全显示方式：文件内的 HTML 不会执行，也不能伪装成 ThirtyFile 界面；链接在新标签页打开，只显示嵌入文件本身的图片。外部网站图片不会载入，因此打开文件不会向这些网站透露访问情况。</p>
+        <h2 id="pdf">PDF</h2>
+        <p>PDF 在 ThirtyFile 自带的阅读器中打开，在各种浏览器和手机上的效果都一样。页面在滚动到时才绘制，因此大文件无需先下载就能打开。页面上方有：</p>
+        <ul>
+          <li><strong>页面缩略图</strong>（最左边的按钮）显示每一页的小图，点击即可跳到该页。在手机上选好页面后面板会自动关闭。</li>
+          <li>箭头按钮跳到上一页和下一页，也可以输入页码后按 <kbd>Enter</kbd>。<kbd>Home</kbd> 和 <kbd>End</kbd> 跳到第一页和最后一页。</li>
+          <li><strong>缩放</strong>：<strong>自动</strong>、<strong>适合宽度</strong>、<strong>适合页面</strong>，或 25% 到 400% 的比例；也可以用旁边的按钮、<kbd>Ctrl</kbd> + <kbd>+</kbd> 和 <kbd>Ctrl</kbd> + <kbd>-</kbd>、按住 <kbd>Ctrl</kbd> 滚动鼠标滚轮，或在触摸屏和触控板上用两指缩放。</li>
+          <li><strong>在文档中查找</strong>（阅读器有焦点时按 <kbd>Ctrl</kbd> + <kbd>F</kbd>）会标出所有匹配项并显示数量；<kbd>Enter</kbd> 跳到下一个，<kbd>Shift</kbd> + <kbd>Enter</kbd> 跳到上一个。只能找到 PDF 中的文字，没有文字层的扫描页面中的字找不到。</li>
+          <li>可以下载文件时显示<strong>打印</strong>（<kbd>Ctrl</kbd> + <kbd>P</kbd>）和<strong>下载</strong>。不允许下载的共享链接两者都不显示。</li>
+        </ul>
+        <p>文字可以选取和复制，PDF 中的链接也能使用：指向其他页面的链接会跳到该页，指向网站的链接在新标签页打开。表单字段显示填写后的内容，但不能输入。受密码保护的 PDF 会要求输入密码；密码只在你的浏览器中使用。</p>
+        <p>搜索时也查找文件内容的话（见<a href="files.html#search-inside">搜索</a>），从搜索结果打开的 PDF 会跳到第一个找到关键字的位置，并标出这些关键字。</p>
         <h2 id="thumbnails">缩略图</h2>
         <p>在图标视图（<strong>大图标</strong>、<strong>中等图标</strong>和<strong>平铺</strong>）中，图片、PDF 和视频会显示缩略图。图片缩略图由服务器生成。PDF（第一页）和视频（靠近开头的一帧）的缩略图由第一位具有修改权限的用户浏览器生成并保存到服务器，之后同空间内可打开文件的人都能看到。在此之前，只能查看的人会在自己的浏览器中生成缩略图。浏览器不能播放的视频，以及超过 200 MB 的 PDF，保留原图标。缩略图保存在 <code>data/thumbs</code>：内容存储区的文件内容被永久删除后，其缩略图一并删除；30 天内未向任何人展示的缩略图也会删除（再次查看文件时重新生成）。</p>
         <h2 id="together">两人编辑同一文件时</h2>

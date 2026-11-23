@@ -13,6 +13,7 @@ import { MAX_OFFICE_PREVIEW_BYTES } from "@/lib/officeLimits";
 const TextEditor = lazy(() => import("@/components/TextEditor"));
 const OfficeViewer = lazy(() => import("@/components/OfficeViewer"));
 const MarkdownPreview = lazy(() => import("@/components/MarkdownPreview"));
+const PdfViewer = lazy(() => import("@/components/pdf/PdfViewer"));
 
 /** Office files that can be previewed (.docx / .xlsx / .pptx; legacy formats need downloading) */
 export function isOfficePreviewable(n: Node) {
@@ -33,6 +34,8 @@ export function FileViewer(props: {
   embedded?: boolean;
   /** Video and audio start playing when shown (the default); the Gallery view, which shows each item passed, says no */
   autoPlay?: boolean;
+  /** Words a search inside files found in this file: a PDF opens at the first of them, marked */
+  find?: string;
   onSaved?(n: Node): void;
   onDirtyChange?(dirty: boolean): void;
 }) {
@@ -42,7 +45,12 @@ export function FileViewer(props: {
 
   // key: a new element (and a fresh error state) for each file
   if (isBrowserMedia(node)) return <Media key={node.id} node={node} url={url} source={props.source} allowDownload={props.allowDownload} autoPlay={props.autoPlay !== false} />;
-  if (cat === "pdf") return <iframe key={node.id} src={props.source.viewUrl(node)} title={node.name} className={cn("size-full bg-white", !embedded && "max-w-5xl rounded-lg")} />;
+  if (cat === "pdf")
+    return (
+      <Suspense fallback={<Loader2Icon className={cn("size-6 animate-spin", embedded ? "text-muted-foreground" : "text-white/70")} />}>
+        <PdfViewer key={node.id} node={node} source={props.source} allowDownload={props.allowDownload} embedded={embedded} find={props.find} />
+      </Suspense>
+    );
   if (isOfficePreviewable(node))
     return (
       <div className={cn("size-full overflow-hidden", !embedded && "max-w-6xl rounded-lg")}>

@@ -6,8 +6,6 @@ import type { Node } from "@/api/types";
 /** Source of file content URLs; signed-in files and public shares use the same components */
 export interface FileSource {
   contentUrl(n: Node, download?: boolean): string;
-  /** The content at an address ending in the file's name, for viewers that title a document by its address (PDFs) */
-  viewUrl(n: Node): string;
   thumbUrl(n: Node): string;
   /** Keeps a thumbnail made in the browser (PDFs, videos) on the server; missing where that isn't possible (share links) */
   saveThumb?(n: Node, image: Blob): Promise<void>;
@@ -27,7 +25,6 @@ function downloadLink(base: string, ids: string[], signal?: AbortSignal): Promis
 
 export const privateSource: FileSource = {
   contentUrl: (n, download) => enc`/api/files/${n.id}/content` + (download ? "?download=1" : ""),
-  viewUrl: (n) => enc`/api/files/${n.id}/content/${n.name}`,
   thumbUrl: (n) => enc`/api/files/${n.id}/thumbnail?v=${n.updated_at}`,
   saveThumb: async (n, image) => void (await fetchOk(enc`/api/files/${n.id}/thumbnail`, { method: "PUT", body: image, headers: { "Content-Type": image.type } })),
   downloadLink: (ids, signal) => downloadLink("/download", ids, signal),
@@ -40,7 +37,6 @@ export function shareSource(token: string): FileSource {
   const base = enc`/api/public/shares/${token}`;
   return {
     contentUrl: (n, download) => base + enc`/nodes/${n.id}/content` + (download ? "?download=1" : ""),
-    viewUrl: (n) => base + enc`/nodes/${n.id}/content/${n.name}`,
     thumbUrl: (n) => base + enc`/nodes/${n.id}/thumbnail?v=${n.updated_at}`,
     downloadLink: (ids, signal) => downloadLink(enc`/public/shares/${token}/download`, ids, signal),
   };

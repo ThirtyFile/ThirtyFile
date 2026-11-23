@@ -442,3 +442,26 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* A PDF printed from the viewer (components/pdf/print.ts): only its pages go to the printer, one picture a sheet */
+.pdf-print {
+  display: none;
+}
+@media print {
+  @page {
+    margin: 0;
+  }
+  body:has(> .pdf-print) > :not(.pdf-print) {
+    display: none !important;
+  }
+  .pdf-print {
+    display: block;
+  }
+  .pdf-print > img {
+    display: block;
+    width: 100%;
+    height: auto;
+    break-after: page;
+    break-inside: avoid;
+  }
+}

@@ -70,6 +70,15 @@ trailer
     // Not the picture, which holds the word but is not read
     await expect(page.getByRole("row", { name: /picture\.jpg/ })).toHaveCount(0);
 
+    // The PDF opens at the words found, marked
+    await page.getByRole("row", { name: /tender\.pdf/ }).dblclick();
+    await expect(page).toHaveURL(new RegExp(`/view/[^?]+\\?find=${word}`));
+    const tools = page.getByRole("toolbar", { name: "PDF tools" });
+    await expect(tools.getByRole("searchbox", { name: "Find in document" })).toHaveValue(word);
+    await expect(tools.getByRole("status")).toHaveText("Match 1 of 1");
+    await expect(page.locator(".textLayer .highlight.selected")).toBeVisible();
+    await page.goBack();
+
     // Someone with nothing shared finds nothing, by name or by what is inside
     const context = await browser.newContext({ baseURL: info.project.use.baseURL });
     try {

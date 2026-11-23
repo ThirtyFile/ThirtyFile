@@ -85,6 +85,7 @@
             <li><a href="#word">Editing Word documents</a></li>
             <li><a href="#text">Editing text files</a></li>
             <li><a href="#markdown">Markdown</a></li>
+            <li><a href="#pdf">PDFs</a></li>
             <li><a href="#thumbnails">Thumbnails</a></li>
             <li><a href="#together">When two people edit the same file</a></li>
           </ol>
@@ -97,7 +98,7 @@
               <tr><td>Pictures (.jpg, .png, .gif, .webp, .avif, .svg, .bmp, .ico)</td><td>Yes</td><td></td></tr>
               <tr><td>Video (.mp4, .webm, .mov)</td><td>Yes</td><td></td></tr>
               <tr><td>Audio (.mp3, .wav, .ogg, .flac, .aac, .m4a)</td><td>Yes</td><td></td></tr>
-              <tr><td>PDF</td><td>Yes</td><td></td></tr>
+              <tr><td>PDF</td><td>Yes, with page thumbnails, zoom and find (see <a href="#pdf">PDFs</a>)</td><td></td></tr>
               <tr><td>Word (.docx)</td><td>Yes</td><td>Yes</td></tr>
               <tr><td>PowerPoint (.pptx)</td><td>Yes</td><td></td></tr>
               <tr><td>Excel (.xlsx)</td><td>Yes</td><td>Yes</td></tr>
@@ -163,6 +164,17 @@
         <p>Markdown files open as a formatted page: headings, lists, tables, task lists and code. Switch to <strong>Edit</strong> above the page to change the text (<strong>Source</strong> when you may only view the file), and back to <strong>Preview</strong> to see the result, unsaved changes included.</p>
         <p>The page is shown safely: HTML written in the file is not run and can't take on the look of ThirtyFile, links open in a new tab, and only pictures embedded in the file itself are shown. Pictures from other websites are left out, so opening the file doesn't tell those sites about it.</p>
 
+        <h2 id="pdf">PDFs</h2>
+        <p>PDFs open in ThirtyFile's own viewer, which works the same in every browser and on phones. Pages are drawn as you scroll to them, so a large file opens without being downloaded first. Above the pages:</p>
+        <ul>
+          <li><strong>Page thumbnails</strong> (the button on the left) shows a small picture of each page; click one to go there. On phones the panel closes once you pick a page.</li>
+          <li>The arrows go to the previous and next page, and you can type a page number and press <kbd>Enter</kbd>. <kbd>Home</kbd> and <kbd>End</kbd> go to the first and last page.</li>
+          <li><strong>Zoom</strong>: <strong>Automatic</strong>, <strong>Fit width</strong>, <strong>Fit page</strong> or a size from 25% to 400%, the buttons beside it, <kbd>Ctrl</kbd> + <kbd>+</kbd> and <kbd>Ctrl</kbd> + <kbd>-</kbd>, <kbd>Ctrl</kbd> and the mouse wheel, or two fingers on a touch screen or touchpad.</li>
+          <li><strong>Find in document</strong> (<kbd>Ctrl</kbd> + <kbd>F</kbd> while the viewer has the focus) marks every match and counts them; <kbd>Enter</kbd> goes to the next and <kbd>Shift</kbd> + <kbd>Enter</kbd> to the previous. It finds text the PDF holds, not words in scanned pages without a text layer.</li>
+          <li><strong>Print</strong> (<kbd>Ctrl</kbd> + <kbd>P</kbd>) and <strong>Download</strong>, when you may download the file. A share link that doesn't allow downloads shows neither.</li>
+        </ul>
+        <p>Text can be selected and copied, and links in the PDF work: links to another page move there, and links to websites open in a new tab. Form fields are shown as filled in, but can't be typed in. A PDF protected with a password asks for it; the password is only used in your browser.</p>
+        <p>When a search looks inside files (see <a href="files.html#search-inside">Searching</a>), a PDF opened from the results goes to the first place the words were found and marks them.</p>
         <h2 id="thumbnails">Thumbnails</h2>
         <p>In the icon views (<strong>Large icons</strong>, <strong>Medium icons</strong> and <strong>Tiles</strong>), pictures, PDFs and videos show a thumbnail. The server makes those of pictures. For PDFs (the first page) and videos (a frame near the start), the first browser of someone who may change the file makes the thumbnail and keeps it on the server, so everyone who can open the file in that space sees it from then on. People who may only view it see one made in their own browser until then. Videos your browser can't play, and PDFs larger than 200 MB, keep their icon. Thumbnails are kept in <code>data/thumbs</code>: those of a file in the content store go when its content is deleted for good, and any thumbnail nobody was shown for 30 days is removed (it is made again when someone looks at the file).</p>
 

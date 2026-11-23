@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useEffectEvent, useMemo, useState } from "react";
-import { Navigate, useNavigate, useParams } from "react-router";
+import { Navigate, useNavigate, useParams, useSearchParams } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronLeftIcon,
@@ -47,13 +47,16 @@ import { neighbours, useFolderWindows } from "@/lib/windows";
 const SheetEditor = lazy(() => import("@/components/sheet/SheetEditor"));
 const DocxEditor = lazy(() => import("@/components/docx/DocxEditor"));
 
-/** Where focus takes the arrow keys for itself: typing, a media player's seek bar, lists, menus and the workbook */
+/** Where focus takes the arrow keys for itself: typing, a media player's seek bar, lists, menus, the workbook and a PDF's pages */
 const OWN_ARROWS =
-  ".cm-editor, video, audio, input, textarea, select, [contenteditable], [role=grid], [role=tree], [role=tablist], [role=menu], [role=listbox], [role=slider], [data-slot=dialog-content]";
+  ".cm-editor, video, audio, input, textarea, select, [contenteditable], [role=grid], [role=tree], [role=tablist], [role=menu], [role=listbox], [role=slider], [data-slot=dialog-content], .tf-pdf";
 
 /** File opened in a tab: `/view/:id` */
 export function FileViewPage() {
   const { id = "" } = useParams();
+  // Opened from search results that looked inside files: the words found, for the viewer to show
+  const [params] = useSearchParams();
+  const find = params.get("find") ?? undefined;
   const me = useMe();
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -250,7 +253,7 @@ export function FileViewPage() {
                     <DocxEditor node={node} source={privateSource} onExit={() => setEditingId(null)} onSaved={onSaved} />
                   </Suspense>
                 ) : (
-                  <FileViewer node={node} source={privateSource} editable={caps.write} embedded onSaved={onSaved} />
+                  <FileViewer node={node} source={privateSource} editable={caps.write} embedded find={find} onSaved={onSaved} />
                 )}
               </div>
             )}
