@@ -44,7 +44,7 @@ jobs:
       # Use the same native tool and fresh, revision-logged advisory database as the release gate.
       - run: rustup toolchain install
         working-directory: server
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: cargo-deny
       - run: bash "$RUNNER_TEMP/check-rust-dependencies.sh" advisories
@@ -77,7 +77,7 @@ jobs:
           output: trivy.sarif
           severity: CRITICAL,HIGH,MEDIUM
           ignore-unfixed: true
-      - uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+      - uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           sarif_file: trivy.sarif
           category: image-latest
