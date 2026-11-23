@@ -72,6 +72,8 @@ const KEEP_FINISHED_SECS: i64 = 3600;
 pub enum Limit {
     /// Compressing and extracting: they use the processor and temporary space
     Archive,
+    /// Page operations on PDFs: they hold whole files in memory
+    Pdf,
     /// Other changes started from the page
     Changes,
     /// WebDAV requests (each waits for its own job; a client sends several at once)
@@ -82,6 +84,7 @@ impl Limit {
     fn of(self) -> Option<(usize, &'static str)> {
         match self {
             Limit::Archive => Some((4, "Several ZIP files are being made or extracted already. Wait for one to finish.")),
+            Limit::Pdf => Some((3, "Several PDF changes are being made already. Wait for one to finish.")),
             Limit::Changes => Some((8, "Several changes are still being made. Wait for one to finish.")),
             Limit::None => None,
         }
@@ -91,7 +94,7 @@ impl Limit {
 #[derive(Debug, Clone, Serialize)]
 pub struct Job {
     pub id: String,
-    /// "compress", "extract", "move", "copy", "delete", "restore", "empty_trash", "scan", "delete_user",
+    /// "compress", "extract", "pdf_pages", "pdf_split", "pdf_combine", "move", "copy", "delete", "restore", "empty_trash", "scan", "delete_user",
     /// "remove_personal" or "webdav"
     pub kind: &'static str,
     /// "running", "done" or "failed"

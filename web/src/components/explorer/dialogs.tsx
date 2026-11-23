@@ -1,4 +1,5 @@
 /** File explorer dialogs: move / copy, delete, share and access (creating and renaming are edited inline in the list) */
+import { lazy, Suspense } from "react";
 import { AccessDialog } from "@/components/AccessDialog";
 import { ConfirmDialog } from "@/components/dialogs";
 import { FolderPickerDialog } from "@/components/FolderPickerDialog";
@@ -12,6 +13,10 @@ import { trashHint } from "@/lib/utils";
 import type { ExplorerProps } from "../Explorer";
 import type { ExplorerState } from "./state";
 import type { ExplorerActions } from "./actions";
+
+// pdf.js comes with the page grid only
+const OrganizePagesDialog = lazy(() => import("@/components/pdf/OrganizePagesDialog"));
+const PdfPageDialogs = lazy(() => import("@/components/pdf/PdfPageDialogs").then((m) => ({ default: m.PdfPageDialogs })));
 
 export function ExplorerDialogs({ p, s, a }: { p: ExplorerProps; s: ExplorerState; a: ExplorerActions }) {
   const { dialog, setDialog } = s;
@@ -51,6 +56,10 @@ export function ExplorerDialogs({ p, s, a }: { p: ExplorerProps; s: ExplorerStat
       {dialog?.t === "share" && <ShareDialog node={dialog.node} onClose={() => setDialog(null)} />}
       {dialog?.t === "s3" && <S3BucketDialog nodeId={dialog.nodeId} onClose={() => setDialog(null)} />}
       {dialog?.t === "ftp" && <FtpFolderDialog nodeId={dialog.nodeId} onClose={() => setDialog(null)} />}
+      <Suspense>
+        {dialog?.t === "pdf-organize" && <OrganizePagesDialog node={dialog.node} canVersion={s.caps.write} onClose={() => setDialog(null)} />}
+        {(dialog?.t === "pdf-extract" || dialog?.t === "pdf-split" || dialog?.t === "pdf-combine") && <PdfPageDialogs dialog={dialog} onClose={() => setDialog(null)} />}
+      </Suspense>
       {dialog?.t === "access" && <AccessDialog nodeId={dialog.nodeId} onClose={() => setDialog(null)} />}
     </>
   );

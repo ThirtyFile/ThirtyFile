@@ -49,6 +49,7 @@ export function macMenu(m: MenuEntries): ReactNode {
         ),
         m.compressItem,
         m.extractItem,
+        m.pdfItems,
         m.downloadItem,
       ],
       [

@@ -87,6 +87,7 @@
             <li><a href="#upload">Uploading</a></li>
             <li><a href="#download">Downloading</a></li>
             <li><a href="#zip">Compressing and extracting ZIP files</a></li>
+            <li><a href="#pdf-pages">Organising PDF pages</a></li>
             <li><a href="#organise">Organising</a></li>
             <li><a href="#search-inside">Searching inside files</a></li>
             <li><a href="#tags">Tags</a></li>
@@ -192,6 +193,17 @@
           <li>a name inside it leads outside the new folder (<code>../</code> or a full path), or isn't allowed (for example it contains <code>:</code> or <code>?</code>);</li>
           <li>it is protected with a password, or compressed with a method other than the usual one (deflate).</li>
         </ul>
+
+
+        <h2 id="pdf-pages">Organising PDF pages</h2>
+        <p>Right-click a PDF to change its pages without leaving the browser. The server copies the pages it keeps exactly as they are, so text, pictures and quality don't change.</p>
+        <ul>
+          <li><strong>Organize pages…</strong>: a grid of the pages. Turn a page left or right, delete it, or drag it to another place (the arrow buttons move it one place for the keyboard). Select pages to turn or delete several at once. <strong>Undo</strong> takes back each step until you save. Then save the result as <strong>a new file</strong> next to the original, or as <strong>a new version</strong> of the same file: the earlier version stays and can be restored from the file's versions. A new version isn't saved over someone else's newer save; reload the file and try again.</li>
+          <li><strong>Extract pages…</strong>: type the pages to take, like <code>1-3, 5</code>, and they go into a new PDF in the order written. In the page grid, <strong>Extract selected pages</strong> does the same for the pages you selected.</li>
+          <li><strong>Split PDF…</strong>: a new file for each page, or for each range you type (<code>1-3, 4-6</code>); at most 500 files at once. Their names end in the page numbers.</li>
+          <li><strong>Combine PDFs…</strong>: select two or more PDFs, right-click and choose it. Put the files in the order you want and name the result; it is saved next to the first file.</li>
+        </ul>
+        <p>You need to be able to add files to the folder (a new version also needs permission to change the file), and the new files count against the space's storage. Each file is read at once, so a PDF can be up to 256 MB, and 512 MB together for a combine. They run on the server as tasks, like compressing, and keep running if you leave the page. A PDF that is protected with a password or damaged is refused with a message that says so; remove the password first.</p>
 
         <h2 id="organise">Organising</h2>
         <ul>

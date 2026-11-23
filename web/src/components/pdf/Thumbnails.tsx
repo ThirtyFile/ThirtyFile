@@ -9,7 +9,7 @@ const WIDTH = 96;
 
 /** Pictures are drawn one after another, so scrolling through a long document doesn't start hundreds at once */
 let queue: Promise<unknown> = Promise.resolve();
-function inTurn<T>(work: () => Promise<T>): Promise<T> {
+export function inTurn<T>(work: () => Promise<T>): Promise<T> {
   const next = queue.then(work, work);
   queue = next.catch(() => undefined);
   return next;

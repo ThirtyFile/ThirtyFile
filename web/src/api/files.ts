@@ -72,6 +72,13 @@ export const filesApi = {
   compress: (ids: string[], parentId: string) => post<Job>("/archive/compress", { ids, parent_id: parentId, tz: new Date().getTimezoneOffset() }),
   /** Extracts a ZIP file into a new folder next to it, on the server */
   extract: (id: string) => post<Job>("/archive/extract", { id }),
+  /** A new PDF of chosen pages of one (`pages`: counting from 0, turned by `rotate` degrees; or `ranges` like "1-3, 5"): a new file, or a new version of the file. A task */
+  pdfPages: (body: { id: string; pages?: { page: number; rotate: number }[]; ranges?: string; save: "new" | "version"; name?: string; base_version?: number }) =>
+    post<Job>("/pdf/pages", body),
+  /** A PDF split into a file per page, or per range. A task */
+  pdfSplit: (id: string, ranges?: string) => post<Job>("/pdf/split", { id, ranges }),
+  /** PDFs put into one, in the order given. A task */
+  pdfCombine: (ids: string[], name?: string) => post<Job>("/pdf/combine", { ids, name }),
   job: (id: string) => get<Job>(enc`/jobs/${id}`),
   /** Save from the online editor; with baseVersion (updated_at when the file was opened), returns 409 if someone else changed the file */
   saveContent: (id: string, content: BodyInit, baseVersion?: number) =>

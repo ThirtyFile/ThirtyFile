@@ -11,7 +11,11 @@ export type DialogState =
   | { t: "share"; node: Node }
   | { t: "s3"; nodeId: string }
   | { t: "ftp"; nodeId: string }
-  | { t: "access"; nodeId: string };
+  | { t: "access"; nodeId: string }
+  | { t: "pdf-organize"; node: Node }
+  | { t: "pdf-extract"; node: Node }
+  | { t: "pdf-split"; node: Node }
+  | { t: "pdf-combine"; nodes: Node[] };
 
 /** Inputs that take no typing: shortcuts keep working while one has the focus */
 const NOT_TYPED = new Set(["checkbox", "radio", "button", "submit", "reset", "range", "color", "file"]);

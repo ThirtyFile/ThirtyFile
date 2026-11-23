@@ -9,6 +9,10 @@ import {
   CopyIcon,
   DownloadIcon,
   FileArchiveIcon,
+  FilesIcon,
+  LayoutGridIcon,
+  ScissorsIcon,
+  SplitIcon,
   PackageOpenIcon,
   EyeIcon,
   FilePlusIcon,
@@ -35,7 +39,7 @@ import { TagSubmenu } from "@/components/tags";
 import { PublishBucketMenu } from "@/components/S3Buckets";
 import { FtpFolderMenu } from "@/components/FtpFolders";
 import { t } from "@/lib/i18n";
-import { isZip } from "@/components/FileIcon";
+import { isPdf, isZip } from "@/components/FileIcon";
 
 /** The parts of a menu that have something in them, with a line between each */
 export function sections(...parts: ReactNode[][]) {
@@ -66,6 +70,8 @@ export interface MenuEntries {
   downloadItem: ReactNode;
   compressItem: ReactNode;
   extractItem: ReactNode;
+  /** Page operations on PDFs: organize, extract and split one, combine several */
+  pdfItems: ReactNode;
   shareWith: ReactNode;
   shareLink: ReactNode;
   publishBucket: ReactNode;
@@ -181,6 +187,27 @@ export function explorerMenus(p: ExplorerProps, s: ExplorerState, a: ExplorerAct
       <PackageOpenIcon /> {t("Extract all")}
     </DropdownMenuItem>
   );
+  // New files are made next to the PDF, so only where files can be added; a new version of the PDF itself needs more
+  // (the dialog offers it when it is allowed)
+  const pdfItems = canUpload && single && isPdf(single) && (
+    <Fragment key="pdf">
+      <DropdownMenuItem onClick={() => setDialog({ t: "pdf-organize", node: single })}>
+        <LayoutGridIcon /> {t("Organize pages…")}
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => setDialog({ t: "pdf-extract", node: single })}>
+        <ScissorsIcon /> {t("Extract pages…")}
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => setDialog({ t: "pdf-split", node: single })}>
+        <SplitIcon /> {t("Split PDF…")}
+      </DropdownMenuItem>
+    </Fragment>
+  );
+  const combine = canUpload && s.count > 1 && s.selectedNodes.length === s.count && s.selectedNodes.every(isPdf);
+  const combineItem = combine && (
+    <DropdownMenuItem key="combine" onClick={() => setDialog({ t: "pdf-combine", nodes: s.selectedNodes })}>
+      <FilesIcon /> {t("Combine PDFs…")}
+    </DropdownMenuItem>
+  );
   const shareWith = single && !s.me.single_user && (
     <DropdownMenuItem key="access" onClick={() => setDialog({ t: "access", nodeId: single.id })}>
       <UsersRoundIcon /> {t("Share with…")}
@@ -252,6 +279,7 @@ export function explorerMenus(p: ExplorerProps, s: ExplorerState, a: ExplorerAct
     downloadItem,
     compressItem,
     extractItem,
+    pdfItems: pdfItems || combineItem,
     shareWith,
     shareLink,
     publishBucket,
