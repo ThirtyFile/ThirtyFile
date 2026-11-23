@@ -73,7 +73,7 @@ data-encoding = "2"
 quick-xml = "0.42"
 # Backup schedules in a named time zone (backups/policy.rs), with the time zone database built in: the Docker image
 # has none
-jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
+jiff = { version = "1.0", default-features = false, features = ["std", "tzdb-bundle-always"] }
 async-trait = "0.1"
 # The FTP server for receive folders is our own library, ThirtyFTP (#612)
 thirtyftp = "0.1.1"
