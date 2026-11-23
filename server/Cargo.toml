@@ -35,7 +35,7 @@ uuid = { version = "1", features = ["v4"] }
 rand = "0.10"
 sha2 = "0.11"
 hmac = "0.13"
-# Encryption of the secrets saved in the database (secrets.rs); already used by russh
+# Encryption of the secrets saved in the database (secrets.rs); already used by thirtyssh
 aes-gcm = "0.11"
 subtle = "2"
 # The signatures of passkeys (passkeys/cose.rs); the same library rustls uses for TLS
@@ -57,8 +57,8 @@ thirtys3-client = "0.1.1"
 # The S3 service: the protocol is ThirtyS3's, the buckets are ours (src/s3/)
 thirtys3-core = "0.1.1"
 thirtys3-server = "0.1.1"
-russh = "0.65"
-russh-sftp = "3"
+thirtyssh = "0.2"
+thirtysftp = "0.1"
 suppaftp = { version = "13", features = ["tokio-rustls-aws-lc-rs"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }

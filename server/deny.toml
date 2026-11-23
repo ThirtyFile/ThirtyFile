@@ -3,16 +3,7 @@
 [advisories]
 # RustSec advisories, including crates marked unmaintained or unsound; yanked versions fail too
 yanked = "deny"
-ignore = [
-  # rsa (through russh, the SFTP client): not constant-time, no fixed version exists yet. ThirtyFile only uses it to
-  # sign in to an SFTP server with an RSA key the administrator configured; Ed25519 keys don't use it at all, and the
-  # storage guide recommends them. Remove this once rsa is fixed.
-  { id = "RUSTSEC-2023-0071", reason = "No fix available; only used for SFTP sign-in with an RSA key" },
-  # chrono (through russh-sftp, the SFTP client and server): marked unmaintained, not a vulnerability. russh-sftp 3.0.1 is
-  # the latest release and exposes chrono in its public API, so only an upstream release can remove it. The FTP client
-  # no longer uses it (suppaftp 13). Tracked in #704; remove this when russh-sftp stops depending on chrono.
-  { id = "RUSTSEC-2026-0543", reason = "chrono is unmaintained; only russh-sftp still needs it (#704)" },
-]
+ignore = []
 
 [licenses]
 # Permissive licences only: ThirtyFile is Apache-2.0 and ships as one binary with its dependencies.
@@ -43,14 +34,9 @@ multiple-versions = "warn"
 wildcards = "deny"
 skip = [
   { crate = "base64@0.22.1", reason = "sqlx-core" },
-  { crate = "block-buffer@0.10.4", reason = "the 0.10 RustCrypto crates sqlx and crc-fast use" },
-  { crate = "cpufeatures@0.2.17", reason = "the 0.10 RustCrypto crates sqlx and crc-fast use" },
   { crate = "crypto-common@0.1.6", reason = "the 0.10 RustCrypto crates sqlx and crc-fast use" },
   { crate = "digest@0.10.7", reason = "the 0.10 RustCrypto crates sqlx and crc-fast use" },
-  { crate = "generic-array@0.14.9", reason = "the 0.10 RustCrypto crates sqlx and crc-fast use" },
-  { crate = "sha2@0.10.9", reason = "sqlx-core and sqlx-macros-core" },
-  { crate = "sha3@0.11.0", reason = "ml-kem (through russh)" },
-  { crate = "hashbrown@0.14.5", reason = "dashmap" },
+  { crate = "getrandom@0.2.17", reason = "ring (through thirtyssh)" },
   { crate = "hashbrown@0.16.1", reason = "hashlink and sqlx-core" },
   { crate = "jiff@1.0.1", reason = "suppaftp (the FTP client) uses jiff 1; ThirtyFile itself uses 0.2" },
   { crate = "jiff-core@1.0.1", reason = "suppaftp (the FTP client) uses jiff 1; ThirtyFile itself uses 0.2" },

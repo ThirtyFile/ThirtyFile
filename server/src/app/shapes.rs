@@ -121,7 +121,7 @@ async fn api_shapes_match_the_recorded_ones() {
     record("FtpCreated", &call(&app, &me, Method::POST, "/api/ftp/folders", Some(receive)).await);
     record("FtpFolder", &call(&app, &me, Method::GET, &format!("/api/ftp/folders?node_id={exchange}"), None).await["folders"][0]);
     record("SftpSettings", &call(&app, &me, Method::GET, "/api/admin/sftp", None).await);
-    let private = russh::keys::PrivateKey::from(russh::keys::ssh_key::private::Ed25519Keypair::from_seed(&[7; 32]));
+    let private = thirtyssh::keys::PrivateKey::from(thirtyssh::keys::ssh_key::private::Ed25519Keypair::from_seed(&[7; 32]));
     let public = private.public_key().to_openssh().unwrap();
     record("SftpKey", &call(&app, &me, Method::POST, "/api/auth/sftp-keys", Some(json!({ "name": "Laptop", "public_key": public, "password": password }))).await);
     let app_password = json!({ "name": "Backup", "scope": "read", "password": password });

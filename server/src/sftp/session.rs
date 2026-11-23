@@ -8,8 +8,12 @@ use crate::{
     tree::Node,
     util::new_id,
 };
-use russh_sftp::protocol::{Attrs, Data, File, FileAttributes, Handle, Name, OpenFlags, Status, StatusCode};
-use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use bytes::Bytes;
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use thirtysftp::{
+    server::{Filesystem, FsError, format_long_name},
+    wire::{Attributes, NameEntry, OpenFlags, StatusCode, Times},
+};
 
 /// How long the checks of a session (the account, its app password or key, SFTP's settings) and of a file being
 /// written (its size against the limits, the quota and the disk's room) are taken as still true: a transfer isn't
@@ -21,21 +25,33 @@ const RECHECK: Duration = Duration::from_secs(3);
 const SIZE_SLACK: u64 = 8 << 20;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
+/// The most files and folders one session keeps open
+pub(super) const MAX_HANDLES: usize = 32;
+
 pub(super) struct Files {
     st: AppState,
     peer: SocketAddr,
     login: Login,
-    handles: HashMap<String, Opened>,
     _permit: Arc<Permit>,
     /// The account as checked last, when, and whether for writing (`RECHECK`)
     checked: crate::sync::Mutex<Option<(tokio::time::Instant, bool, User)>>,
 }
-enum Opened {
+/// An open file: one that is read from the stored content, or one being written to a staged copy
+pub(super) enum OpenFile {
     Read { id: String },
-    Write(Box<Staged>),
-    Directory { path: Vec<String>, after: Option<String>, done: bool },
+    Write(tokio::sync::Mutex<Box<Staged>>),
 }
-struct Staged {
+/// An open folder, and how far its listing has come
+pub(super) struct OpenDir {
+    path: Vec<String>,
+    state: tokio::sync::Mutex<ListState>,
+}
+#[derive(Default)]
+struct ListState {
+    after: Option<String>,
+    done: bool,
+}
+pub(super) struct Staged {
     path: PathBuf,
     file: tokio::fs::File,
     up: access::Upload,
@@ -62,21 +78,41 @@ fn code(e: AppError) -> StatusCode {
         _ => StatusCode::Failure,
     }
 }
-fn okay(id: u32) -> Status {
-    Status { id, status_code: StatusCode::Ok, error_message: String::new(), language_tag: "en".into() }
+/// A status code as the reply to a request (the messages say nothing about the server)
+fn fs(code: StatusCode) -> FsError {
+    let message = match code {
+        StatusCode::PermissionDenied => "permission denied",
+        StatusCode::NoSuchFile => "no such file",
+        StatusCode::BadMessage => "bad request",
+        StatusCode::OpUnsupported => "operation not supported",
+        _ => "failure",
+    };
+    FsError::new(code, message)
 }
-fn attrs(node: Option<&Node>) -> FileAttributes {
+/// A path as sent by the client: it must be text
+fn text(path: &[u8]) -> Result<&str, StatusCode> {
+    std::str::from_utf8(path).map_err(|_| StatusCode::BadMessage)
+}
+fn has_any(flags: OpenFlags, wanted: &[OpenFlags]) -> bool {
+    wanted.iter().any(|w| flags.0 & w.0 != 0)
+}
+fn same_time(seconds: u32) -> Times {
+    Times { accessed: seconds, modified: seconds }
+}
+fn attrs(node: Option<&Node>) -> Attributes {
     let directory = node.is_none_or(Node::is_folder);
-    FileAttributes {
+    Attributes {
         size: node.map(|n| n.size.max(0) as u64),
         permissions: Some(if directory { 0o040755 } else { 0o100644 }),
-        mtime: node.map(|n| n.updated_at.clamp(0, i64::from(u32::MAX)) as u32),
-        atime: node.map(|n| n.updated_at.clamp(0, i64::from(u32::MAX)) as u32),
+        times: node.map(|n| same_time(n.updated_at.clamp(0, i64::from(u32::MAX)) as u32)),
         ..Default::default()
     }
 }
+fn entry(name: &str, attrs: Attributes) -> NameEntry {
+    NameEntry { name: Bytes::copy_from_slice(name.as_bytes()), long_name: format_long_name(name.as_bytes(), &attrs), attrs }
+}
 
-async fn file_attrs(st: &AppState, node: &Node) -> Result<FileAttributes, StatusCode> {
+async fn file_attrs(st: &AppState, node: &Node) -> Result<Attributes, StatusCode> {
     let mut attributes = attrs(Some(node));
     if !node.is_folder() {
         let source = crate::files::Source::resolve(st, node).await.map_err(code)?;
@@ -85,7 +121,7 @@ async fn file_attrs(st: &AppState, node: &Node) -> Result<FileAttributes, Status
         // The time a client set for this content (`keep_mtime`), else when it changed in ThirtyFile
         if let Some(seconds) = crate::s3::metadata::read(st, &node.id, &version).await.ok().flatten().and_then(|t| t.split('.').next()?.parse::<i64>().ok()) {
             let seconds = seconds.clamp(0, i64::from(u32::MAX)) as u32;
-            (attributes.mtime, attributes.atime) = (Some(seconds), Some(seconds));
+            attributes.times = Some(same_time(seconds));
         }
     }
     Ok(attributes)
@@ -132,7 +168,7 @@ fn segments(path: &str) -> Result<Vec<String>, StatusCode> {
 
 impl Files {
     pub(super) fn new(st: AppState, peer: SocketAddr, login: Login, permit: Arc<Permit>) -> Self {
-        Self { st, peer, login, handles: HashMap::new(), _permit: permit, checked: Default::default() }
+        Self { st, peer, login, _permit: permit, checked: Default::default() }
     }
     /// The account, as checked within `RECHECK` (for writing when `write`), else checked again
     async fn user(&self, write: bool) -> Result<User, StatusCode> {
@@ -150,18 +186,10 @@ impl Files {
         *self.checked.lock() = Some((tokio::time::Instant::now(), write, user.clone()));
         Ok(user)
     }
-    fn insert(&mut self, id: u32, opened: Opened) -> Result<Handle, StatusCode> {
-        if self.handles.len() >= 32 {
-            return Err(StatusCode::Failure);
-        }
-        let handle = new_id();
-        self.handles.insert(handle.clone(), opened);
-        Ok(Handle { id, handle })
-    }
     async fn node(&self, user: &User, path: &[String]) -> Result<Node, StatusCode> {
         access::item(&self.st, user, path).await.map_err(code)
     }
-    async fn description(&self, user: &User, path: &[String]) -> Result<FileAttributes, StatusCode> {
+    async fn description(&self, user: &User, path: &[String]) -> Result<Attributes, StatusCode> {
         let found =
             paths::resolve(&mut *self.st.db.acquire().await.map_err(|_| StatusCode::Failure)?, user, path).await.map_err(code)?.ok_or(StatusCode::NoSuchFile)?;
         Ok(match found.target {
@@ -186,7 +214,7 @@ impl Files {
         if up.existing.is_none() && !flags.contains(OpenFlags::CREATE) {
             return Err(StatusCode::NoSuchFile);
         }
-        if up.existing.is_some() && flags.contains(OpenFlags::EXCLUDE) {
+        if up.existing.is_some() && flags.contains(OpenFlags::EXCLUSIVE) {
             return Err(StatusCode::Failure);
         }
         let path = self.st.tmp_dir().join(format!("sftp-{}", new_id()));
@@ -198,7 +226,7 @@ impl Files {
             append: flags.contains(OpenFlags::APPEND),
             readable: flags.contains(OpenFlags::READ),
             failed: false,
-            create_only: flags.contains(OpenFlags::EXCLUDE),
+            create_only: flags.contains(OpenFlags::EXCLUSIVE),
             checked: None,
             mtime: None,
         };
@@ -236,30 +264,23 @@ async fn stage_size(st: &AppState, user: &User, stage: &Staged, size: u64) -> Re
 
 /// Refuses what can't be kept: owners. Permissions are accepted and left as they are (`scp -p` and WinSCP set them
 /// after an upload, and showed an error when refused); times are kept (`keep_mtime`).
-fn metadata_supported(a: &FileAttributes) -> Result<(), StatusCode> {
-    if a.uid.is_some() || a.gid.is_some() || a.user.is_some() || a.group.is_some() {
+fn metadata_supported(a: &Attributes) -> Result<(), StatusCode> {
+    if a.owner.is_some() {
         return Err(StatusCode::OpUnsupported);
     }
     Ok(())
 }
 
-impl russh_sftp::server::Handler for Files {
-    type Error = StatusCode;
-    fn unimplemented(&self) -> StatusCode {
-        StatusCode::OpUnsupported
-    }
-    async fn open(&mut self, id: u32, filename: String, flags: OpenFlags, _: FileAttributes) -> Result<Handle, StatusCode> {
-        if self.handles.len() >= 32 {
-            return Err(StatusCode::Failure);
-        }
-        let write = flags.intersects(OpenFlags::WRITE | OpenFlags::APPEND | OpenFlags::TRUNCATE | OpenFlags::CREATE);
+impl Files {
+    async fn open_file(&self, path: &[u8], flags: OpenFlags) -> Result<OpenFile, StatusCode> {
+        let write = has_any(flags, &[OpenFlags::WRITE, OpenFlags::APPEND, OpenFlags::TRUNCATE, OpenFlags::CREATE]);
         let user = self.user(write).await?;
         if write && !flags.contains(OpenFlags::WRITE) {
             return Err(StatusCode::BadMessage);
         }
-        let path = segments(&filename)?;
-        let opened = if write {
-            Opened::Write(Box::new(self.open_write(&user, &path, flags).await?))
+        let path = segments(text(path)?)?;
+        Ok(if write {
+            OpenFile::Write(tokio::sync::Mutex::new(Box::new(self.open_write(&user, &path, flags).await?)))
         } else {
             if !flags.contains(OpenFlags::READ) {
                 return Err(StatusCode::BadMessage);
@@ -268,15 +289,16 @@ impl russh_sftp::server::Handler for Files {
             if node.is_folder() {
                 return Err(StatusCode::Failure);
             }
-            Opened::Read { id: node.id }
-        };
-        self.insert(id, opened)
+            OpenFile::Read { id: node.id }
+        })
     }
-    async fn close(&mut self, id: u32, handle: String) -> Result<Status, StatusCode> {
-        let opened = self.handles.remove(&handle).ok_or(StatusCode::NoSuchFile)?;
-        if let Opened::Write(mut stage) = opened {
+
+    async fn close_open(&self, opened: OpenFile) -> Result<(), StatusCode> {
+        if let OpenFile::Write(stage) = opened {
+            let stage = stage.into_inner();
             // In full before it is stored, whatever was checked while it was written
             let user = self.user_now(true).await?;
+            let mut stage = stage;
             if stage.failed {
                 return Err(StatusCode::Failure);
             }
@@ -299,13 +321,18 @@ impl russh_sftp::server::Handler for Files {
         } else {
             self.user(false).await?;
         }
-        Ok(okay(id))
+        Ok(())
     }
-    async fn read(&mut self, id: u32, handle: String, offset: u64, len: u32) -> Result<Data, StatusCode> {
+
+    async fn read_open(&self, file: &OpenFile, offset: u64, len: u32) -> Result<Option<Bytes>, StatusCode> {
         let user = self.user(false).await?;
-        let data = match self.handles.get_mut(&handle).ok_or(StatusCode::NoSuchFile)? {
-            Opened::Read { id } => access::read_at(&self.st, &user, id, offset, len).await.map_err(code)?,
-            Opened::Write(s) if s.readable => {
+        let data = match file {
+            OpenFile::Read { id } => access::read_at(&self.st, &user, id, offset, len).await.map_err(code)?,
+            OpenFile::Write(s) => {
+                let mut s = s.lock().await;
+                if !s.readable {
+                    return Err(StatusCode::PermissionDenied);
+                }
                 crate::tree::folder_for(&mut *self.st.db.acquire().await.map_err(|_| StatusCode::Failure)?, &user, &s.up.parent.id, crate::tree::Need::Read)
                     .await
                     .map_err(code)?;
@@ -315,18 +342,17 @@ impl russh_sftp::server::Handler for Files {
                 data.truncate(n);
                 data
             }
-            _ => return Err(StatusCode::PermissionDenied),
         };
-        if data.is_empty() {
-            return Err(StatusCode::Eof);
-        }
-        Ok(Data { id, data })
+        Ok(if data.is_empty() { None } else { Some(Bytes::from(data)) })
     }
-    async fn write(&mut self, id: u32, handle: String, offset: u64, data: Vec<u8>) -> Result<Status, StatusCode> {
+
+    async fn write_open(&self, file: &OpenFile, offset: u64, data: Bytes) -> Result<(), StatusCode> {
         let user = self.user(true).await?;
-        let Some(Opened::Write(s)) = self.handles.get_mut(&handle) else {
+        let OpenFile::Write(s) = file else {
             return Err(StatusCode::PermissionDenied);
         };
+        let mut s = s.lock().await;
+        let s = &mut **s;
         if s.failed || data.len() > 256 * 1024 {
             return Err(StatusCode::Failure);
         }
@@ -346,20 +372,18 @@ impl russh_sftp::server::Handler for Files {
         if result.is_err() {
             s.failed = true;
         }
-        result?;
-        Ok(okay(id))
+        result
     }
-    async fn stat(&mut self, id: u32, path: String) -> Result<Attrs, StatusCode> {
+
+    async fn stat_path(&self, path: &[u8]) -> Result<Attributes, StatusCode> {
         let user = self.user(false).await?;
-        Ok(Attrs { id, attrs: self.description(&user, &segments(&path)?).await? })
+        self.description(&user, &segments(text(path)?)?).await
     }
-    async fn lstat(&mut self, id: u32, path: String) -> Result<Attrs, StatusCode> {
-        self.stat(id, path).await
-    }
-    async fn fstat(&mut self, id: u32, handle: String) -> Result<Attrs, StatusCode> {
+
+    async fn stat_open(&self, file: &OpenFile) -> Result<Attributes, StatusCode> {
         let user = self.user(false).await?;
-        let a = match self.handles.get(&handle).ok_or(StatusCode::NoSuchFile)? {
-            Opened::Read { id } => {
+        Ok(match file {
+            OpenFile::Read { id } => {
                 file_attrs(
                     &self.st,
                     &crate::tree::node_for(&mut *self.st.db.acquire().await.map_err(|_| StatusCode::Failure)?, &user, id, crate::tree::Need::Read)
@@ -368,7 +392,8 @@ impl russh_sftp::server::Handler for Files {
                 )
                 .await?
             }
-            Opened::Write(s) => {
+            OpenFile::Write(s) => {
+                let s = s.lock().await;
                 crate::tree::folder_for(&mut *self.st.db.acquire().await.map_err(|_| StatusCode::Failure)?, &user, &s.up.parent.id, crate::tree::Need::Read)
                     .await
                     .map_err(code)?;
@@ -377,31 +402,33 @@ impl russh_sftp::server::Handler for Files {
                 a.permissions = Some(0o100644);
                 a
             }
-            Opened::Directory { path, .. } => self.description(&user, path).await?,
-        };
-        Ok(Attrs { id, attrs: a })
+        })
     }
-    async fn setstat(&mut self, id: u32, path: String, a: FileAttributes) -> Result<Status, StatusCode> {
+
+    async fn set_path(&self, path: &[u8], a: &Attributes) -> Result<(), StatusCode> {
         let user = self.user(true).await?;
-        let node = self.node(&user, &segments(&path)?).await?;
-        metadata_supported(&a)?;
+        let node = self.node(&user, &segments(text(path)?)?).await?;
+        metadata_supported(a)?;
         crate::tree::node_for(&mut *self.st.db.acquire().await.map_err(|_| StatusCode::Failure)?, &user, &node.id, crate::tree::Need::Write).await.map_err(code)?;
         if a.size.is_some_and(|n| n != node.size as u64) {
             return Err(StatusCode::OpUnsupported);
         }
-        if let Some(mtime) = a.mtime {
-            keep_mtime(&self.st, &node, mtime).await?;
+        if let Some(times) = a.times {
+            keep_mtime(&self.st, &node, times.modified).await?;
         }
-        Ok(okay(id))
+        Ok(())
     }
-    async fn fsetstat(&mut self, id: u32, handle: String, a: FileAttributes) -> Result<Status, StatusCode> {
+
+    async fn set_open(&self, file: &OpenFile, a: &Attributes) -> Result<(), StatusCode> {
         let user = self.user(true).await?;
-        let Some(Opened::Write(s)) = self.handles.get_mut(&handle) else {
+        let OpenFile::Write(s) = file else {
             return Err(StatusCode::PermissionDenied);
         };
-        metadata_supported(&a)?;
-        if a.mtime.is_some() {
-            s.mtime = a.mtime;
+        let mut s = s.lock().await;
+        let s = &mut **s;
+        metadata_supported(a)?;
+        if let Some(times) = a.times {
+            s.mtime = Some(times.modified);
         }
         if let Some(size) = a.size {
             let change = async {
@@ -414,92 +441,141 @@ impl russh_sftp::server::Handler for Files {
             }
             change?;
         }
-        Ok(okay(id))
+        Ok(())
     }
-    async fn opendir(&mut self, id: u32, path: String) -> Result<Handle, StatusCode> {
+
+    async fn open_folder(&self, path: &[u8]) -> Result<OpenDir, StatusCode> {
         let user = self.user(false).await?;
-        let path = segments(&path)?;
+        let path = segments(text(path)?)?;
         if !self.description(&user, &path).await?.is_dir() {
             return Err(StatusCode::Failure);
         }
-        self.insert(id, Opened::Directory { path, after: None, done: false })
+        Ok(OpenDir { path, state: Default::default() })
     }
-    async fn readdir(&mut self, id: u32, handle: String) -> Result<Name, StatusCode> {
+
+    async fn list_folder(&self, dir: &OpenDir) -> Result<Option<Vec<NameEntry>>, StatusCode> {
         let user = self.user(false).await?;
-        let Some(Opened::Directory { path, after, done }) = self.handles.get_mut(&handle) else {
-            return Err(StatusCode::NoSuchFile);
-        };
-        if *done {
-            return Err(StatusCode::Eof);
+        let mut state = dir.state.lock().await;
+        if state.done {
+            return Ok(None);
         }
         let mut c = self.st.db.acquire().await.map_err(|_| StatusCode::Failure)?;
-        let found = paths::resolve(&mut c, &user, path).await.map_err(code)?.ok_or(StatusCode::NoSuchFile)?;
+        let found = paths::resolve(&mut c, &user, &dir.path).await.map_err(code)?.ok_or(StatusCode::NoSuchFile)?;
         let files = match found.target {
             Target::Root => {
-                *done = true;
-                let mut files =
-                    paths::tops(&mut c, &user).await.map_err(code)?.spaces.into_iter().map(|(name, _)| File::new(&name, attrs(None))).collect::<Vec<_>>();
-                files.push(File::new(paths::SHARED, attrs(None)));
+                state.done = true;
+                let mut files = paths::tops(&mut c, &user).await.map_err(code)?.spaces.into_iter().map(|(name, _)| entry(&name, attrs(None))).collect::<Vec<_>>();
+                files.push(entry(paths::SHARED, attrs(None)));
                 files
             }
             Target::Shared => {
-                *done = true;
+                state.done = true;
                 let shared = paths::tops(&mut c, &user).await.map_err(code)?.shared;
                 drop(c);
                 let mut files = Vec::with_capacity(shared.len());
                 for (name, node) in shared {
-                    files.push(File::new(&name, file_attrs(&self.st, &node).await?));
+                    files.push(entry(&name, file_attrs(&self.st, &node).await?));
                 }
                 files
             }
             Target::Node(n) => {
                 drop(c);
-                let (nodes, next) = access::list_page(&self.st, &user, &n.id, after.take()).await.map_err(code)?;
-                *done = next.is_none();
-                *after = next;
+                let (nodes, next) = access::list_page(&self.st, &user, &n.id, state.after.take()).await.map_err(code)?;
+                state.done = next.is_none();
+                state.after = next;
                 let mut files = Vec::with_capacity(nodes.len());
                 for node in nodes {
-                    files.push(File::new(&node.name, file_attrs(&self.st, &node).await?));
+                    files.push(entry(&node.name, file_attrs(&self.st, &node).await?));
                 }
                 files
             }
         };
-        if files.is_empty() {
-            return Err(StatusCode::Eof);
-        }
-        Ok(Name { id, files })
+        Ok(if files.is_empty() { None } else { Some(files) })
     }
-    async fn realpath(&mut self, id: u32, path: String) -> Result<Name, StatusCode> {
+
+    async fn real_path(&self, path: &[u8]) -> Result<Bytes, StatusCode> {
         let user = self.user(false).await?;
-        let path = segments(&path)?;
+        let path = segments(text(path)?)?;
         self.description(&user, &path).await?;
-        Ok(Name { id, files: vec![File::dummy(format!("/{}", path.join("/")))] })
+        Ok(Bytes::from(format!("/{}", path.join("/"))))
     }
-    async fn mkdir(&mut self, id: u32, path: String, _: FileAttributes) -> Result<Status, StatusCode> {
+
+    async fn make_folder(&self, path: &[u8]) -> Result<(), StatusCode> {
         let user = self.user(true).await?;
         let (parent, name) =
-            access::parent_and_name(&mut *self.st.db.acquire().await.map_err(|_| StatusCode::Failure)?, &user, &segments(&path)?).await.map_err(code)?;
-        access::make_folder(&self.st, &user, &parent, &name).await.map_err(code)?;
-        Ok(okay(id))
+            access::parent_and_name(&mut *self.st.db.acquire().await.map_err(|_| StatusCode::Failure)?, &user, &segments(text(path)?)?).await.map_err(code)?;
+        access::make_folder(&self.st, &user, &parent, &name).await.map_err(code)
     }
-    async fn remove(&mut self, id: u32, path: String) -> Result<Status, StatusCode> {
-        self.delete(&path, false).await?;
-        Ok(okay(id))
-    }
-    async fn rmdir(&mut self, id: u32, path: String) -> Result<Status, StatusCode> {
-        self.delete(&path, true).await?;
-        Ok(okay(id))
-    }
-    async fn rename(&mut self, id: u32, old: String, new: String) -> Result<Status, StatusCode> {
+
+    async fn move_item(&self, old: &[u8], new: &[u8]) -> Result<(), StatusCode> {
         let user = self.user(true).await?;
-        let source = self.node(&user, &segments(&old)?).await?;
+        let source = self.node(&user, &segments(text(old)?)?).await?;
         if source.parent_id.is_none() {
             return Err(StatusCode::PermissionDenied);
         }
         let (parent, name) =
-            access::parent_and_name(&mut *self.st.db.acquire().await.map_err(|_| StatusCode::Failure)?, &user, &segments(&new)?).await.map_err(code)?;
-        access::move_to(&self.st, &user, &source, &parent, &name).await.map_err(code)?;
-        Ok(okay(id))
+            access::parent_and_name(&mut *self.st.db.acquire().await.map_err(|_| StatusCode::Failure)?, &user, &segments(text(new)?)?).await.map_err(code)?;
+        access::move_to(&self.st, &user, &source, &parent, &name).await.map_err(code)
+    }
+}
+
+impl Filesystem for Files {
+    type File = OpenFile;
+    type Dir = OpenDir;
+
+    async fn open(&self, path: &[u8], flags: OpenFlags, _: &Attributes) -> Result<OpenFile, FsError> {
+        self.open_file(path, flags).await.map_err(fs)
+    }
+    async fn close_file(&self, file: OpenFile) -> Result<(), FsError> {
+        self.close_open(file).await.map_err(fs)
+    }
+    async fn read(&self, file: &OpenFile, offset: u64, len: u32) -> Result<Option<Bytes>, FsError> {
+        self.read_open(file, offset, len).await.map_err(fs)
+    }
+    async fn write(&self, file: &OpenFile, offset: u64, data: Bytes) -> Result<(), FsError> {
+        self.write_open(file, offset, data).await.map_err(fs)
+    }
+    async fn fstat(&self, file: &OpenFile) -> Result<Attributes, FsError> {
+        self.stat_open(file).await.map_err(fs)
+    }
+    async fn fsetstat(&self, file: &OpenFile, attrs: &Attributes) -> Result<(), FsError> {
+        self.set_open(file, attrs).await.map_err(fs)
+    }
+    async fn stat(&self, path: &[u8]) -> Result<Attributes, FsError> {
+        self.stat_path(path).await.map_err(fs)
+    }
+    async fn lstat(&self, path: &[u8]) -> Result<Attributes, FsError> {
+        self.stat_path(path).await.map_err(fs)
+    }
+    async fn setstat(&self, path: &[u8], attrs: &Attributes) -> Result<(), FsError> {
+        self.set_path(path, attrs).await.map_err(fs)
+    }
+    async fn open_dir(&self, path: &[u8]) -> Result<OpenDir, FsError> {
+        self.open_folder(path).await.map_err(fs)
+    }
+    async fn read_dir(&self, dir: &OpenDir) -> Result<Option<Vec<NameEntry>>, FsError> {
+        self.list_folder(dir).await.map_err(fs)
+    }
+    async fn remove(&self, path: &[u8]) -> Result<(), FsError> {
+        self.delete(text(path).map_err(fs)?, false).await.map_err(fs)
+    }
+    async fn mkdir(&self, path: &[u8], _: &Attributes) -> Result<(), FsError> {
+        self.make_folder(path).await.map_err(fs)
+    }
+    async fn rmdir(&self, path: &[u8]) -> Result<(), FsError> {
+        self.delete(text(path).map_err(fs)?, true).await.map_err(fs)
+    }
+    async fn realpath(&self, path: &[u8]) -> Result<Bytes, FsError> {
+        self.real_path(path).await.map_err(fs)
+    }
+    async fn rename(&self, from: &[u8], to: &[u8]) -> Result<(), FsError> {
+        self.move_item(from, to).await.map_err(fs)
+    }
+    async fn read_link(&self, _: &[u8]) -> Result<Bytes, FsError> {
+        Err(FsError::unsupported())
+    }
+    async fn symlink(&self, _: &[u8], _: &[u8]) -> Result<(), FsError> {
+        Err(FsError::unsupported())
     }
 }
 

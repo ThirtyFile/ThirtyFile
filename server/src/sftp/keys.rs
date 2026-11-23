@@ -4,8 +4,8 @@ use axum::{
     Json,
     extract::{Path, State},
 };
-use russh::keys::{PublicKey, ssh_key::HashAlg};
 use serde::{Deserialize, Serialize};
+use thirtyssh::keys::{HashAlg, PublicKey};
 
 use crate::{
     auth::User,
