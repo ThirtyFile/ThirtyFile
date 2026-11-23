@@ -2,26 +2,23 @@
 //! characters. There is no layout: text that is shown one place after another comes out in the order the page draws
 //! it, which for the programs that write documents is reading order.
 //!
-//! The file is read by scanning for its objects (object.rs), so a damaged table of cross-references or an updated file
+//! The file is read by scanning for its objects (pdf/object.rs), so a damaged table of cross-references or an updated file
 //! is no trouble; what can't be read is left out, and nothing in a file can make this do more than a fixed amount of
 //! work (the sizes streams expand to, the number of pages, the depth of forms and the count of operators are limited).
 //! Encrypted files are not read, and pages that are pictures (scans) hold no text to find.
 
 mod font;
-mod object;
 
 #[cfg(test)]
 pub(in crate::contentsearch) mod tests;
 
-use std::{collections::HashMap, collections::HashSet, rc::Rc};
+use std::{collections::HashMap, rc::Rc};
 
+use crate::pdf::object::{Dict, Doc, Lexer, Obj, Tok};
 use font::Font;
-use object::{Dict, Doc, Lexer, Obj, Tok};
 
 use super::extract::MAX_BYTES;
 
-/// Pages read at most
-const MAX_PAGES: usize = 20_000;
 /// Forms (pieces of a page drawn by another stream) inside forms, at most
 const MAX_FORM_DEPTH: usize = 4;
 /// Operands and operators looked at in all, at most
@@ -55,49 +52,13 @@ pub fn text(data: &[u8]) -> Result<String, &'static str> {
 
 /// The pages, in the order the page tree gives them, each with the resources it inherits
 fn pages(doc: &Doc) -> Vec<(Dict, Obj)> {
-    let mut out = Vec::new();
-    if let Some(root) = doc.root
-        && let Obj::Dict(catalog) = doc.object(root)
-        && let Some(tree) = catalog.get("Pages")
-    {
-        walk(doc, tree, &Obj::Null, &mut out, &mut HashSet::new(), 0);
-    }
-    // No page tree that leads anywhere: every page there is, by object number
-    if out.is_empty() {
-        for number in doc.numbers() {
-            if let Obj::Dict(d) = doc.object(number)
-                && d.get("Type").and_then(Obj::name) == Some("Page")
-            {
-                let resources = d.get("Resources").cloned().unwrap_or(Obj::Null);
-                out.push((d, resources));
-                if out.len() >= MAX_PAGES {
-                    break;
-                }
-            }
-        }
-    }
-    out
-}
-
-fn walk(doc: &Doc, node: &Obj, inherited: &Obj, out: &mut Vec<(Dict, Obj)>, seen: &mut HashSet<u32>, depth: usize) {
-    if depth > 32 || out.len() >= MAX_PAGES {
-        return;
-    }
-    if let Obj::Ref(n) = node
-        && !seen.insert(*n)
-    {
-        return;
-    }
-    let Obj::Dict(dict) = doc.resolve(node) else { return };
-    let resources = dict.get("Resources").cloned().unwrap_or_else(|| inherited.clone());
-    match doc.get(&dict, "Kids") {
-        Obj::Array(kids) => {
-            for kid in &kids {
-                walk(doc, kid, &resources, out, seen, depth + 1);
-            }
-        }
-        _ => out.push((dict, resources)),
-    }
+    crate::pdf::pages(doc)
+        .into_iter()
+        .map(|page| {
+            let resources = page.dict.get("Resources").cloned().unwrap_or(Obj::Null);
+            (page.dict, resources)
+        })
+        .collect()
 }
 
 /// Where the text is on the page: the matrix of the text and of its line, the size and spacing of the font, and where the

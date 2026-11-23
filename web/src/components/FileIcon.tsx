@@ -172,6 +172,11 @@ export function isZip(n: NodeLike) {
   return n.kind === "file" && (extOf(n.name) === "zip" || n.mime === "application/zip" || n.mime === "application/x-zip-compressed");
 }
 
+/** A PDF the server can change the pages of (pdf/api.rs, is_pdf) */
+export function isPdf(n: NodeLike) {
+  return n.kind === "file" && (extOf(n.name) === "pdf" || n.mime === "application/pdf");
+}
+
 /** The largest file the text editor opens (the server takes saves of up to 20 MB, files.rs MAX_EDIT_BYTES) */
 export const MAX_TEXT_BYTES = 5 * 1024 * 1024;
 

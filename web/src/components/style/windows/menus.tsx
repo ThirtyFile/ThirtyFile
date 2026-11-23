@@ -92,7 +92,7 @@ export function windowsMenu(m: MenuEntries): ReactNode {
         </IconRow>
         {sections(
           [m.openItem, m.openInNewTab, m.openLocation],
-          [m.downloadItem, m.compressItem, m.extractItem],
+          [m.downloadItem, m.compressItem, m.extractItem, m.pdfItems],
           [m.favorite, m.tags, m.shareLink, m.publishBucket, m.shareWith],
           [m.moveTo, m.copyTo],
           [m.itemProperties],

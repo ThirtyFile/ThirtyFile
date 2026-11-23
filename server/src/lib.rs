@@ -50,6 +50,7 @@ mod nodes;
 mod notify;
 mod passkeys;
 mod paths;
+mod pdf;
 mod personal;
 #[cfg(unix)]
 mod privileges;

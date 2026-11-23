@@ -337,7 +337,7 @@ fn edit_conflict() -> AppError {
 /// Gives the file `before` the saved content (content.rs). A file of a folder space changed on the server since it was
 /// indexed (or removed there) isn't overwritten: the new content is saved next to it as "name (conflict copy)", in the
 /// system default language (`i18n::names`), and the save reports a conflict.
-async fn store_content(st: AppState, user: User, before: Node, body: Bytes, hash: Option<String>, base: Option<i64>) -> AppResult<Json<Node>> {
+pub async fn store_content(st: AppState, user: User, before: Node, body: Bytes, hash: Option<String>, base: Option<i64>) -> AppResult<Json<Node>> {
     let tmp = st.tmp_dir().join(new_id());
     let received = async {
         tokio::fs::write(&tmp, &body).await?;

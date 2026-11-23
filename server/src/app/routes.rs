@@ -138,6 +138,9 @@ fn file_api() -> Router<AppState> {
         .route("/download/{link}", get(downloads::download_by_link))
         .route("/archive/compress", post(archive::compress))
         .route("/archive/extract", post(archive::extract))
+        .route("/pdf/pages", post(crate::pdf::api::pages))
+        .route("/pdf/split", post(crate::pdf::api::split))
+        .route("/pdf/combine", post(crate::pdf::api::combine_files))
         .route("/jobs/{id}", get(jobs::get))
         .route_layer(middleware::from_fn(auth::app_passwords::allow))
 }

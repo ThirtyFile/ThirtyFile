@@ -32,7 +32,8 @@ import notifications from "./notifications";
 import folderSpaces from "./folderSpaces";
 import backups from "./backups";
 import replicas from "./replicas";
+import pdfPages from "./pdfPages";
 
 export const LANG = "zh-TW";
 
-export const DICT: Record<string, string> = { ...ftp, ...guests, ...restrictedFolders, ...s3, ...sftp, ...server, ...settings, ...spaces, ...users, ...explorer, ...sharing, ...viewer, ...login, ...notices, ...core, ...sso, ...wording, ...accessibility, ...undo, ...largeFolders, ...accountSecurity, ...shareLinks, ...conflicts, ...details, ...dragAndDrop, ...webdav, ...search, ...archives, ...addressBar, ...notifications, ...folderSpaces, ...backups, ...replicas };
+export const DICT: Record<string, string> = { ...ftp, ...guests, ...restrictedFolders, ...s3, ...sftp, ...server, ...settings, ...spaces, ...users, ...explorer, ...sharing, ...viewer, ...login, ...notices, ...core, ...sso, ...wording, ...accessibility, ...undo, ...largeFolders, ...accountSecurity, ...shareLinks, ...conflicts, ...details, ...dragAndDrop, ...webdav, ...search, ...archives, ...addressBar, ...notifications, ...folderSpaces, ...backups, ...replicas, ...pdfPages };

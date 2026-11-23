@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use super::object::{Dict, Doc, Lexer, Obj, Tok};
+use crate::pdf::object::{Dict, Doc, Lexer, Obj, Tok};
 
 /// Entries a code map may hold at most
 const MAX_MAP: usize = 200_000;

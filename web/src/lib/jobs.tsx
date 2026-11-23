@@ -35,6 +35,12 @@ function runningText(kind: Job["kind"]) {
       return t("Compressing to ZIP…");
     case "extract":
       return t("Extracting…");
+    case "pdf_pages":
+      return t("Changing PDF pages…");
+    case "pdf_split":
+      return t("Splitting the PDF…");
+    case "pdf_combine":
+      return t("Combining PDFs…");
     case "move":
       return t("Moving…");
     case "copy":

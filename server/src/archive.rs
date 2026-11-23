@@ -283,7 +283,7 @@ async fn run_compress(st: AppState, user: User, progress: Tracker, roots: Vec<No
 
 /// Stores a finished temporary file as a new file in `folder_id` (numbered if the name is taken), like an upload
 /// (content.rs). Returns its id and name
-async fn store_new_file(
+pub async fn store_new_file(
     st: &AppState,
     user: &User,
     folder_id: &str,
