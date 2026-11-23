@@ -6,10 +6,14 @@
 
 use std::{
     collections::HashSet,
+    future::Future,
     io::{self, SeekFrom},
     path::Path,
     pin::Pin,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     task::{Context, Poll},
     time::Duration,
 };
@@ -17,25 +21,29 @@ use std::{
 use crate::sync::Mutex as StdMutex;
 
 use futures_util::future::BoxFuture;
-use russh::{
-    client,
-    keys::{self, HashAlg, PrivateKeyWithHashAlg, PublicKeyOrCertificate},
-};
-use russh_sftp::{
-    client::{SftpSession, error::Error as SftpError},
-    protocol::StatusCode,
-};
 use serde::{Deserialize, Serialize};
+use thirtysftp::{
+    Error as SftpError,
+    client::{Config as SftpClientConfig, Dir, File, Session as SftpSession, fs as sftp_fs},
+    ssh as sftp_ssh,
+    wire::{Attributes, StatusCode},
+};
+use thirtyssh::{
+    client,
+    keys::{Algorithm, Credential, HashAlg, PrivateKeyReader, PublicKey},
+    session,
+};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWriteExt, ReadBuf},
-    sync::Mutex,
+    sync::{Mutex, oneshot},
 };
 
 use crate::storage::{BoxReader, Entry, EntryKind, Storage, StorageError, UNAVAILABLE, valid_hash};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-/// Maximum time to wait for a response to a single SFTP request (seconds)
-const REQUEST_TIMEOUT: u64 = 20;
+/// Maximum time to wait for a response to a single SFTP request. Transfers have no overall limit: a connection that
+/// stops answering is dropped by the keepalive probes instead.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SftpConfig {
@@ -77,25 +85,28 @@ fn denied(message: &'static str, detail: impl std::fmt::Display) -> io::Error {
 }
 
 fn sftp_err(e: SftpError) -> io::Error {
-    match &e {
-        SftpError::Status(s) if s.status_code == StatusCode::NoSuchFile => io::Error::new(io::ErrorKind::NotFound, e.to_string()),
-        SftpError::Status(s) if s.status_code == StatusCode::PermissionDenied => {
-            denied("The storage service denied access. Make sure the account has read and write permission for this folder.", e)
-        }
+    match e.status_code() {
+        Some(StatusCode::NoSuchFile) => io::Error::new(io::ErrorKind::NotFound, e.to_string()),
+        Some(StatusCode::PermissionDenied) => denied("The storage service denied access. Make sure the account has read and write permission for this folder.", e),
         _ => unavailable(e),
     }
 }
 
 fn is_not_found(e: &SftpError) -> bool {
-    matches!(e, SftpError::Status(s) if s.status_code == StatusCode::NoSuchFile)
+    e.status_code() == Some(StatusCode::NoSuchFile)
+}
+
+/// Gives a single SFTP request a time limit
+async fn limited<T>(request: impl Future<Output = Result<T, SftpError>>) -> Result<T, SftpError> {
+    match tokio::time::timeout(REQUEST_TIMEOUT, request).await {
+        Ok(result) => result,
+        Err(_) => Err(SftpError::Io(Arc::new(io::Error::new(io::ErrorKind::TimedOut, "The request timed out")))),
+    }
 }
 
 /// SHA256 fingerprint of the host key (the same as shown by `ssh-keygen -lf`)
-fn fingerprint(key: &PublicKeyOrCertificate) -> String {
-    match key {
-        PublicKeyOrCertificate::PublicKey { key, .. } => key.fingerprint(HashAlg::Sha256).to_string(),
-        PublicKeyOrCertificate::Certificate(c) => c.public_key().fingerprint(HashAlg::Sha256).to_string(),
-    }
+fn fingerprint(key: &Credential) -> String {
+    PublicKey::from(key.key_data().clone()).fingerprint(HashAlg::Sha256).to_string()
 }
 
 struct Handler {
@@ -103,20 +114,29 @@ struct Handler {
     seen: Arc<StdMutex<Option<String>>>,
 }
 
-impl client::Handler for Handler {
-    type Error = russh::Error;
+impl session::Handler for Handler {}
 
-    async fn check_server_key(&mut self, key: &PublicKeyOrCertificate) -> Result<bool, Self::Error> {
-        let fp = fingerprint(key);
+impl client::Handler for Handler {
+    async fn verify_host(&mut self, host: &Credential, _: &Algorithm) -> io::Result<bool> {
+        let fp = fingerprint(host);
         let ok = self.expected.as_deref().is_none_or(|e| e == fp);
         *self.seen.lock() = Some(fp);
         Ok(ok)
     }
 }
 
+/// The SFTP session, and the SSH connection under it: dropping it ends the connection
 struct Conn {
-    handle: client::Handle<Handler>,
     sftp: SftpSession,
+    /// Set when the SSH connection has ended
+    closed: Arc<AtomicBool>,
+    _stop: oneshot::Sender<()>,
+}
+
+impl Conn {
+    fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::Relaxed)
+    }
 }
 
 pub struct SftpStorage {
@@ -156,7 +176,7 @@ impl SftpStorage {
     async fn conn(&self) -> io::Result<Arc<Conn>> {
         let mut slot = self.conn.lock().await;
         if let Some(c) = slot.as_ref()
-            && !c.handle.is_closed()
+            && !c.is_closed()
         {
             return Ok(c.clone());
         }
@@ -177,7 +197,7 @@ impl SftpStorage {
         let handler = Handler { expected: expected.clone(), seen: self.seen_key.clone() };
         let config = client::Config { inactivity_timeout: Some(Duration::from_secs(600)), keepalive_interval: Some(Duration::from_secs(30)), ..Default::default() };
         let addr = (cfg.host.trim().to_string(), cfg.port());
-        let mut handle = match tokio::time::timeout(CONNECT_TIMEOUT, client::connect(Arc::new(config), addr, handler)).await {
+        let mut ssh = match tokio::time::timeout(CONNECT_TIMEOUT, client::connect(Arc::new(config), addr, handler)).await {
             Err(_) => return Err(unavailable("Timed out")),
             Ok(Err(e)) => {
                 let seen = self.host_key();
@@ -191,29 +211,47 @@ impl SftpStorage {
                 }
                 return Err(unavailable(e));
             }
-            Ok(Ok(h)) => h,
+            Ok(Ok(c)) => c,
         };
-        let authed = if !cfg.private_key.trim().is_empty() {
+        let outcome = if !cfg.private_key.trim().is_empty() {
             let pass = Some(cfg.key_passphrase.as_str()).filter(|p| !p.is_empty());
-            let key = keys::decode_secret_key(cfg.private_key.trim(), pass)
+            let key = PrivateKeyReader::new()
+                .passphrase(pass)
+                .text(cfg.private_key.trim())
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, format!("Couldn't read the private key (invalid format or wrong passphrase): {e}")))?;
-            let hash = handle.best_supported_rsa_hash().await.ok().flatten().flatten();
-            handle.authenticate_publickey(cfg.username.trim(), PrivateKeyWithHashAlg::new(Arc::new(key), hash)).await
+            ssh.authenticate(cfg.username.trim(), &key).await
         } else {
-            handle.authenticate_password(cfg.username.trim(), cfg.password.as_str()).await
+            ssh.authenticate(cfg.username.trim(), client::Method::Password(cfg.password.as_str())).await
         }
         .map_err(unavailable)?;
-        if !authed.success() {
+        if !outcome.is_accepted() {
             return Err(denied("Incorrect username, password, or private key. Couldn't sign in to SFTP.", "authentication failed"));
         }
         if expected.is_none() {
             *self.first_key.lock() = self.host_key();
         }
-        let channel = handle.channel_open_session().await.map_err(unavailable)?;
-        channel.request_subsystem(true, "sftp").await.map_err(unavailable)?;
-        let sftp = SftpSession::new(channel.into_stream()).await.map_err(sftp_err)?;
-        sftp.set_timeout(REQUEST_TIMEOUT);
-        Ok(Conn { handle, sftp })
+        let running = ssh.start().map_err(unavailable)?;
+        let handle = running.handle();
+        // The connection ends when `Conn` is dropped (its sender goes away) or when the server ends it
+        let closed = Arc::new(AtomicBool::new(false));
+        let (stop, stopped) = oneshot::channel::<()>();
+        let done = closed.clone();
+        tokio::spawn(async move {
+            let mut running = running;
+            tokio::select! {
+                _ = &mut running => {}
+                _ = stopped => {
+                    let _ = running.disconnect().await;
+                }
+            }
+            done.store(true, Ordering::Relaxed);
+        });
+        let sftp = match tokio::time::timeout(CONNECT_TIMEOUT, sftp_ssh::connect(&handle, SftpClientConfig::default())).await {
+            Err(_) => return Err(unavailable("Timed out")),
+            Ok(Err(e)) => return Err(sftp_err(e)),
+            Ok(Ok(sftp)) => sftp,
+        };
+        Ok(Conn { sftp, closed, _stop: stop })
     }
 
     fn blob_dir(&self, hash: &str) -> String {
@@ -234,10 +272,10 @@ impl SftpStorage {
             if self.dirs.lock().contains(&path) {
                 continue;
             }
-            if !conn.sftp.try_exists(path.as_str()).await.map_err(sftp_err)? {
+            if !limited(sftp_fs::try_exists(&conn.sftp, path.as_str())).await.map_err(sftp_err)? {
                 // With concurrent uploads another request may have created it first
-                if let Err(e) = conn.sftp.create_dir(path.as_str()).await
-                    && !conn.sftp.try_exists(path.as_str()).await.unwrap_or(false)
+                if let Err(e) = limited(sftp_fs::create_dir(&conn.sftp, path.as_str())).await
+                    && !limited(sftp_fs::try_exists(&conn.sftp, path.as_str())).await.unwrap_or(false)
                 {
                     return Err(sftp_err(e));
                 }
@@ -265,8 +303,8 @@ impl SftpStorage {
         let n = if last { parts.len() } else { parts.len().saturating_sub(1) };
         for i in 1..=n {
             let path = format!("{}/{}", self.root, parts[..i].join("/"));
-            match conn.sftp.symlink_metadata(path.as_str()).await {
-                Ok(m) if m.file_type().is_symlink() => return Err(io::Error::new(io::ErrorKind::InvalidInput, "a symbolic link")),
+            match limited(sftp_fs::symlink_metadata(&conn.sftp, path.as_str())).await {
+                Ok(m) if m.is_symlink() => return Err(io::Error::new(io::ErrorKind::InvalidInput, "a symbolic link")),
                 Ok(_) => {}
                 // Nothing there: what comes next says so
                 Err(e) if is_not_found(&e) => return Ok(()),
@@ -282,7 +320,7 @@ impl SftpStorage {
         }
         let conn = self.conn().await?;
         let opened = async {
-            let mut f = conn.sftp.open(path.as_str()).await.map_err(sftp_err)?;
+            let mut f = limited(File::open(&conn.sftp, path.as_str())).await.map_err(sftp_err)?;
             if start > 0 {
                 f.seek(SeekFrom::Start(start)).await.map_err(unavailable)?;
             }
@@ -302,7 +340,7 @@ impl SftpStorage {
 
     async fn delete_path(&self, path: &str) -> io::Result<()> {
         let conn = self.conn().await?;
-        match conn.sftp.remove_file(path).await {
+        match limited(sftp_fs::remove_file(&conn.sftp, path)).await {
             Ok(()) => Ok(()),
             Err(e) if is_not_found(&e) => Ok(()),
             Err(e) => {
@@ -318,7 +356,7 @@ impl SftpStorage {
         self.ensure_dir(&conn, dir).await?;
         let tmp = format!("{path}.part-{}", uuid::Uuid::new_v4().simple());
         let mut input = tokio::fs::File::open(src).await?;
-        let mut out = conn.sftp.create(tmp.as_str()).await.map_err(sftp_err)?;
+        let mut out = limited(File::create(&conn.sftp, tmp.as_str())).await.map_err(sftp_err)?;
         let written: io::Result<()> = async {
             tokio::io::copy(&mut input, &mut out).await.map_err(unavailable)?;
             out.shutdown().await.map_err(unavailable)?;
@@ -327,17 +365,18 @@ impl SftpStorage {
         .await;
         drop(out);
         if let Err(e) = written {
-            let _ = conn.sftp.remove_file(tmp.as_str()).await;
+            let _ = limited(sftp_fs::remove_file(&conn.sftp, tmp.as_str())).await;
             return Err(e);
         }
         // SFTP v3 rename doesn't overwrite existing files. Ordinary writes keep the original, but a repair
         // replaces it only after the complete replacement has reached its temporary name.
-        if let Err(e) = conn.sftp.rename(tmp.as_str(), path).await {
-            let exists = conn.sftp.try_exists(path).await.unwrap_or(false);
+        // (the plain request, not the replacing `posix-rename`)
+        if let Err(e) = limited(conn.sftp.rename(tmp.as_str(), path)).await {
+            let exists = limited(sftp_fs::try_exists(&conn.sftp, path)).await.unwrap_or(false);
             let result = if repair && exists {
                 async {
-                    conn.sftp.remove_file(path).await.map_err(sftp_err)?;
-                    conn.sftp.rename(tmp.as_str(), path).await.map_err(sftp_err)
+                    limited(sftp_fs::remove_file(&conn.sftp, path)).await.map_err(sftp_err)?;
+                    limited(conn.sftp.rename(tmp.as_str(), path)).await.map_err(sftp_err)
                 }
                 .await
             } else if exists {
@@ -345,23 +384,36 @@ impl SftpStorage {
             } else {
                 Err(sftp_err(e))
             };
-            let _ = conn.sftp.remove_file(tmp.as_str()).await;
+            let _ = limited(sftp_fs::remove_file(&conn.sftp, tmp.as_str())).await;
             result?;
         }
         Ok(())
     }
 }
 
-fn sftp_entry(name: String, m: &russh_sftp::protocol::FileAttributes) -> Entry {
-    let t = m.file_type();
-    let kind = if t.is_symlink() {
+fn sftp_entry(name: String, m: &Attributes) -> Entry {
+    let kind = if m.is_symlink() {
         EntryKind::Link
-    } else if t.is_dir() {
+    } else if m.is_dir() {
         EntryKind::Folder
     } else {
         EntryKind::File
     };
-    Entry { name, kind, size: if kind == EntryKind::File { m.len() } else { 0 }, modified: m.mtime.map(i64::from) }
+    Entry { name, kind, size: if kind == EntryKind::File { m.size.unwrap_or(0) } else { 0 }, modified: m.times.map(|t| i64::from(t.modified)) }
+}
+
+/// The names (and attributes) in a folder, without `.` and `..`
+async fn read_names(sftp: &SftpSession, path: &str) -> Result<Vec<(String, Attributes)>, SftpError> {
+    let mut dir = limited(Dir::open(sftp, path)).await?;
+    let mut out = Vec::new();
+    while let Some(entry) = limited(dir.next_entry()).await? {
+        let name = String::from_utf8_lossy(&entry.name).into_owned();
+        if name != "." && name != ".." {
+            out.push((name, entry.attrs));
+        }
+    }
+    let _ = limited(dir.close()).await;
+    Ok(out)
 }
 
 /// Keeps the connection alive while reading (the SSH connection closes when the connection object is dropped)
@@ -381,8 +433,8 @@ impl Storage for SftpStorage {
         Box::pin(async move {
             let path = self.blob_path(hash)?;
             let conn = self.conn().await?;
-            match conn.sftp.metadata(path.as_str()).await.map_err(sftp_err) {
-                Ok(m) => Ok(Some(m.len())),
+            match limited(sftp_fs::metadata(&conn.sftp, path.as_str())).await.map_err(sftp_err) {
+                Ok(m) => Ok(Some(m.size.unwrap_or(0))),
                 Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
                 Err(e) => Err(e),
             }
@@ -395,8 +447,8 @@ impl Storage for SftpStorage {
             let names = |path: String| {
                 let conn = conn.clone();
                 async move {
-                    match conn.sftp.read_dir(path.as_str()).await.map_err(sftp_err) {
-                        Ok(dir) => Ok(dir.map(|e| e.file_name()).collect::<Vec<_>>()),
+                    match read_names(&conn.sftp, path.as_str()).await.map_err(sftp_err) {
+                        Ok(dir) => Ok(dir.into_iter().map(|(name, _)| name).collect::<Vec<_>>()),
                         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
                         Err(e) => Err(e),
                     }
@@ -439,8 +491,8 @@ impl Storage for SftpStorage {
             let path = self.path_at(dir)?;
             let conn = self.conn().await?;
             self.no_links(&conn, dir, true).await?;
-            let listed = conn.sftp.read_dir(path.as_str()).await.map_err(sftp_err)?;
-            Ok(listed.filter(|e| e.file_name() != "." && e.file_name() != "..").map(|e| sftp_entry(e.file_name(), &e.metadata())).collect())
+            let listed = read_names(&conn.sftp, path.as_str()).await.map_err(sftp_err)?;
+            Ok(listed.into_iter().map(|(name, attrs)| sftp_entry(name, &attrs)).collect())
         })
     }
 
@@ -450,7 +502,7 @@ impl Storage for SftpStorage {
             let conn = self.conn().await?;
             self.no_links(&conn, key, false).await?;
             // The item itself: a link isn't followed
-            match conn.sftp.symlink_metadata(path.as_str()).await {
+            match limited(sftp_fs::symlink_metadata(&conn.sftp, path.as_str())).await {
                 Ok(m) => Ok(Some(sftp_entry(key.rsplit('/').next().unwrap_or_default().to_string(), &m))),
                 Err(e) if is_not_found(&e) => Ok(None),
                 Err(e) => Err(sftp_err(e)),
@@ -491,7 +543,7 @@ impl Storage for SftpStorage {
             let conn = self.conn().await?;
             // A link may point anywhere on that server, on the way or at the end: refused
             self.no_links(&conn, key, true).await?;
-            conn.sftp.symlink_metadata(path.as_str()).await.map_err(sftp_err)?;
+            limited(sftp_fs::symlink_metadata(&conn.sftp, path.as_str())).await.map_err(sftp_err)?;
             self.open_path(path, start, len).await
         })
     }
@@ -506,11 +558,11 @@ impl Storage for SftpStorage {
             self.ensure_dir(&conn, &self.root).await?;
             let probe = format!("{}/.thirtyfile-check-{}", self.root, uuid::Uuid::new_v4().simple());
             let result: io::Result<()> = async {
-                let mut f = conn.sftp.create(probe.as_str()).await.map_err(sftp_err)?;
+                let mut f = limited(File::create(&conn.sftp, probe.as_str())).await.map_err(sftp_err)?;
                 f.write_all(b"ok").await.map_err(unavailable)?;
                 f.shutdown().await.map_err(unavailable)?;
                 drop(f);
-                let back = conn.sftp.read(probe.as_str()).await.map_err(sftp_err)?;
+                let back = limited(sftp_fs::read(&conn.sftp, probe.as_str())).await.map_err(sftp_err)?;
                 if back != b"ok" {
                     return Err(io::Error::other("The content read back didn't match"));
                 }
@@ -518,7 +570,7 @@ impl Storage for SftpStorage {
             }
             .await;
             // An account that can write but not delete would pass and fail later, when files are deleted
-            let deleted = conn.sftp.remove_file(probe.as_str()).await.map_err(sftp_err);
+            let deleted = limited(sftp_fs::remove_file(&conn.sftp, probe.as_str())).await.map_err(sftp_err);
             let result = result.and_then(|()| deleted.map_err(|e| crate::storage::delete_failed(e, crate::storage::CANT_DELETE_ACCOUNT)));
             if result.is_err() {
                 self.reset().await;
@@ -530,7 +582,7 @@ impl Storage for SftpStorage {
     fn ping(&self) -> BoxFuture<'_, io::Result<()>> {
         Box::pin(async move {
             let conn = self.conn().await?;
-            if let Err(e) = conn.sftp.canonicalize(self.root.as_str()).await {
+            if let Err(e) = limited(sftp_fs::canonicalize(&conn.sftp, self.root.as_str())).await {
                 self.reset().await;
                 return Err(sftp_err(e));
             }
@@ -545,188 +597,44 @@ impl Storage for SftpStorage {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::{
-        collections::HashMap,
-        io::{Read, Seek, Write},
-        path::PathBuf,
-    };
+    use std::path::PathBuf;
 
-    use russh::{
-        Channel, ChannelId,
-        server::{Auth, ChannelOpenHandle, Msg, Session},
-    };
-    use russh_sftp::protocol::{Attrs, Data, File, FileAttributes, Handle, Name, OpenFlags, Status, Version};
+    use thirtysftp::server::{LocalFs, ServerConfig};
+    use thirtyssh::{keys, server, transport::HostKey};
 
     use super::*;
     use crate::testutil;
 
-    /// The files of an SFTP session, in a folder: only the requests the storage makes. Like SFTP v3 servers, a rename
-    /// doesn't replace an existing file.
-    struct Files {
-        root: PathBuf,
-        open: HashMap<String, std::fs::File>,
-        listings: HashMap<String, Vec<File>>,
-        next: u64,
-    }
-
-    fn code(e: io::Error) -> StatusCode {
-        match e.kind() {
-            io::ErrorKind::NotFound => StatusCode::NoSuchFile,
-            io::ErrorKind::PermissionDenied => StatusCode::PermissionDenied,
-            _ => StatusCode::Failure,
-        }
-    }
-
-    fn ok(id: u32) -> Status {
-        Status { id, status_code: StatusCode::Ok, error_message: "Ok".into(), language_tag: "en-US".into() }
-    }
-
-    impl Files {
-        fn path(&self, p: &str) -> PathBuf {
-            self.root.join(p.trim_start_matches('/'))
-        }
-
-        fn handle(&mut self) -> String {
-            self.next += 1;
-            self.next.to_string()
-        }
-
-        fn file(&mut self, handle: &str) -> Result<&mut std::fs::File, StatusCode> {
-            self.open.get_mut(handle).ok_or(StatusCode::Failure)
-        }
-    }
-
-    impl russh_sftp::server::Handler for Files {
-        type Error = StatusCode;
-
-        fn unimplemented(&self) -> StatusCode {
-            StatusCode::OpUnsupported
-        }
-
-        async fn init(&mut self, _: u32, _: HashMap<String, String>) -> Result<Version, StatusCode> {
-            Ok(Version::new())
-        }
-
-        async fn open(&mut self, id: u32, filename: String, pflags: OpenFlags, _: FileAttributes) -> Result<Handle, StatusCode> {
-            let f = std::fs::OpenOptions::from(pflags).open(self.path(&filename)).map_err(code)?;
-            let handle = self.handle();
-            self.open.insert(handle.clone(), f);
-            Ok(Handle { id, handle })
-        }
-
-        async fn close(&mut self, id: u32, handle: String) -> Result<Status, StatusCode> {
-            self.open.remove(&handle);
-            self.listings.remove(&handle);
-            Ok(ok(id))
-        }
-
-        async fn read(&mut self, id: u32, handle: String, offset: u64, len: u32) -> Result<Data, StatusCode> {
-            let f = self.file(&handle)?;
-            f.seek(SeekFrom::Start(offset)).map_err(code)?;
-            let mut data = vec![0; len as usize];
-            match f.read(&mut data).map_err(code)? {
-                0 => Err(StatusCode::Eof),
-                n => {
-                    data.truncate(n);
-                    Ok(Data { id, data })
-                }
-            }
-        }
-
-        async fn write(&mut self, id: u32, handle: String, offset: u64, data: Vec<u8>) -> Result<Status, StatusCode> {
-            let f = self.file(&handle)?;
-            f.seek(SeekFrom::Start(offset)).map_err(code)?;
-            f.write_all(&data).map_err(code)?;
-            Ok(ok(id))
-        }
-
-        async fn stat(&mut self, id: u32, path: String) -> Result<Attrs, StatusCode> {
-            let meta = std::fs::metadata(self.path(&path)).map_err(code)?;
-            Ok(Attrs { id, attrs: FileAttributes::from(&meta) })
-        }
-
-        async fn lstat(&mut self, id: u32, path: String) -> Result<Attrs, StatusCode> {
-            let meta = std::fs::symlink_metadata(self.path(&path)).map_err(code)?;
-            Ok(Attrs { id, attrs: FileAttributes::from(&meta) })
-        }
-
-        async fn fstat(&mut self, id: u32, handle: String) -> Result<Attrs, StatusCode> {
-            let meta = self.file(&handle)?.metadata().map_err(code)?;
-            Ok(Attrs { id, attrs: FileAttributes::from(&meta) })
-        }
-
-        async fn opendir(&mut self, id: u32, path: String) -> Result<Handle, StatusCode> {
-            let mut files = Vec::new();
-            for e in std::fs::read_dir(self.path(&path)).map_err(code)?.flatten() {
-                files.push(File::new(e.file_name().to_string_lossy(), FileAttributes::from(&e.metadata().map_err(code)?)));
-            }
-            let handle = self.handle();
-            self.listings.insert(handle.clone(), files);
-            Ok(Handle { id, handle })
-        }
-
-        async fn readdir(&mut self, id: u32, handle: String) -> Result<Name, StatusCode> {
-            match self.listings.get_mut(&handle).map(std::mem::take) {
-                Some(files) if !files.is_empty() => Ok(Name { id, files }),
-                _ => Err(StatusCode::Eof),
-            }
-        }
-
-        async fn remove(&mut self, id: u32, filename: String) -> Result<Status, StatusCode> {
-            std::fs::remove_file(self.path(&filename)).map_err(code)?;
-            Ok(ok(id))
-        }
-
-        async fn mkdir(&mut self, id: u32, path: String, _: FileAttributes) -> Result<Status, StatusCode> {
-            std::fs::create_dir(self.path(&path)).map_err(code)?;
-            Ok(ok(id))
-        }
-
-        async fn realpath(&mut self, id: u32, path: String) -> Result<Name, StatusCode> {
-            std::fs::metadata(self.path(&path)).map_err(code)?;
-            Ok(Name { id, files: vec![File::dummy(path)] })
-        }
-
-        async fn rename(&mut self, id: u32, oldpath: String, newpath: String) -> Result<Status, StatusCode> {
-            if self.path(&newpath).exists() {
-                return Err(StatusCode::Failure);
-            }
-            std::fs::rename(self.path(&oldpath), self.path(&newpath)).map_err(code)?;
-            Ok(ok(id))
-        }
-    }
-
-    /// One SSH connection: a password, and the SFTP subsystem over `root`
+    /// One SSH connection: a password, and the SFTP subsystem over the test folder (a rename doesn't replace an
+    /// existing file, like on SFTP v3 servers)
+    #[derive(Clone)]
     struct Ssh {
-        root: PathBuf,
+        files: Arc<LocalFs>,
         password: &'static str,
-        channels: HashMap<ChannelId, Channel<Msg>>,
     }
 
-    impl russh::server::Handler for Ssh {
-        type Error = russh::Error;
+    impl server::AuthPolicy for Ssh {
+        async fn password(&mut self, _: &str, password: &[u8]) -> io::Result<bool> {
+            Ok(password == self.password.as_bytes())
+        }
+    }
 
-        async fn auth_password(&mut self, _: &str, password: &str) -> Result<Auth, Self::Error> {
-            Ok(if password == self.password { Auth::Accept } else { Auth::reject() })
+    impl session::Handler for Ssh {
+        async fn channel_open(&mut self, request: session::IncomingChannel, _: &session::Context) -> io::Result<()> {
+            thirtysftp::ssh::accept_session(request, self.files.clone(), ServerConfig::default()).await
+        }
+    }
+
+    struct Factory(Ssh);
+
+    impl server::Connections for Factory {
+        type Handler = Ssh;
+
+        fn handler(&mut self, _: std::net::SocketAddr) -> Ssh {
+            self.0.clone()
         }
 
-        async fn channel_open_session(&mut self, channel: Channel<Msg>, reply: ChannelOpenHandle, _: &mut Session) -> Result<(), Self::Error> {
-            self.channels.insert(channel.id(), channel);
-            reply.accept().await;
-            Ok(())
-        }
-
-        async fn subsystem_request(&mut self, id: ChannelId, name: &str, session: &mut Session) -> Result<(), Self::Error> {
-            match self.channels.remove(&id) {
-                Some(channel) if name == "sftp" => {
-                    session.channel_success(id)?;
-                    let files = Files { root: self.root.clone(), open: HashMap::new(), listings: HashMap::new(), next: 0 };
-                    russh_sftp::server::run(channel.into_stream(), files).await;
-                }
-                _ => session.channel_failure(id)?,
-            }
-            Ok(())
-        }
+        fn failed(&mut self, _: io::Error) {}
     }
 
     /// An SSH server over a temporary folder, with a new host key
@@ -752,14 +660,10 @@ pub(crate) mod tests {
     async fn server_on(password: &'static str, port: u16) -> Server {
         let dir = std::env::temp_dir().join(format!("thirtyfile-sftp-{}", uuid::Uuid::new_v4().simple()));
         std::fs::create_dir_all(dir.join("files")).unwrap();
-        let key = keys::PrivateKey::from(keys::ssh_key::private::Ed25519Keypair::from_seed(&rand::random()));
-        let fingerprint = key.public_key().fingerprint(HashAlg::Sha256).to_string();
-        let config = Arc::new(russh::server::Config {
-            keys: vec![key],
-            auth_rejection_time: Duration::from_millis(10),
-            auth_rejection_time_initial: Some(Duration::ZERO),
-            ..Default::default()
-        });
+        let host = HostKey::generate().unwrap();
+        let fingerprint = keys::public::from_ed25519(&host.public_key()).fingerprint(HashAlg::Sha256).to_string();
+        let mut config = server::Config::new(host);
+        config.authentication.rejection_delay = Duration::from_millis(10);
         let mut tries = 0;
         let listener = loop {
             // A port just given up may take a moment to be free again
@@ -773,17 +677,10 @@ pub(crate) mod tests {
             }
         };
         let port = listener.local_addr().unwrap().port();
-        let root = dir.clone();
+        let ssh = Ssh { files: Arc::new(LocalFs::new(&dir).unwrap()), password };
+        let listening = server::listen_on(Arc::new(config), listener, Factory(ssh)).unwrap();
         let task = tokio::spawn(async move {
-            while let Ok((stream, _)) = listener.accept().await {
-                let ssh = Ssh { root: root.clone(), password, channels: HashMap::new() };
-                let config = config.clone();
-                tokio::spawn(async move {
-                    if let Ok(session) = russh::server::run_stream(config, stream, ssh).await {
-                        let _ = session.await;
-                    }
-                });
-            }
+            let _ = listening.await;
         });
         Server { dir, port, fingerprint, task }
     }

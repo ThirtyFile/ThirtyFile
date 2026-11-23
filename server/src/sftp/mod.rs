@@ -18,12 +18,12 @@ use axum::{
     extract::ConnectInfo,
     http::{Method, Request},
 };
-use russh::{
-    Channel, ChannelId,
-    keys::{PrivateKey, ssh_key::HashAlg},
-    server::{Auth, ChannelOpenHandle, Msg, PublicKeyOffer, Session, VerifiedPublicKey},
+use std::{collections::HashMap, io, net::SocketAddr, sync::Arc, time::Duration};
+use thirtysftp::server::ServerConfig;
+use thirtyssh::{
+    keys::{HashAlg, PrivateKey, PrivateKeyReader, PublicKey},
+    server, session as ssh,
 };
-use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 
 /// How often the settings are read again when nothing says they changed
 const IDLE: Duration = Duration::from_secs(5);
@@ -210,9 +210,9 @@ pub fn supervise(st: AppState, address: &str) -> Listener {
 fn host_key(st: &AppState) -> Result<PrivateKey, Box<dyn std::error::Error>> {
     let path = st.data_dir.join("sftp_host_ed25519");
     Ok(if path.exists() {
-        russh::keys::load_secret_key(&path, None)?
+        PrivateKeyReader::new().file(&path)?
     } else {
-        let key = PrivateKey::from(russh::keys::ssh_key::private::Ed25519Keypair::from_seed(&rand::random()));
+        let key = PrivateKey::from(thirtyssh::keys::ssh_key::private::Ed25519Keypair::from_seed(&rand::random()));
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
@@ -222,7 +222,7 @@ fn host_key(st: &AppState) -> Result<PrivateKey, Box<dyn std::error::Error>> {
         }
         use std::io::Write;
         let mut file = options.open(&path)?;
-        file.write_all(key.to_openssh(russh::keys::ssh_key::LineEnding::LF)?.as_bytes())?;
+        file.write_all(key.to_openssh(thirtyssh::keys::ssh_key::LineEnding::LF)?.as_bytes())?;
         file.sync_all()?;
         key
     })
@@ -233,13 +233,13 @@ pub async fn start(st: AppState, address: &str) -> Result<Listener, Box<dyn std:
     let socket = tokio::net::TcpListener::bind(address).await?;
     *st.part::<Memory>().address.write() = socket.local_addr()?.to_string();
     *st.part::<Memory>().fingerprint.write() = key.public_key().fingerprint(HashAlg::Sha256).to_string();
-    let config = Arc::new(russh::server::Config {
-        keys: vec![key],
-        max_auth_attempts: 5,
-        inactivity_timeout: Some(Duration::from_secs(300)),
-        auth_rejection_time: Duration::from_millis(500),
-        ..Default::default()
-    });
+    let mut config = server::Config::new(key);
+    config.authentication.max_attempts = std::num::NonZeroUsize::new(5).expect("positive attempt limit");
+    config.authentication.rejection_delay = Duration::from_millis(500);
+    config.inactivity_timeout = Some(Duration::from_secs(300));
+    config.handshake_timeout = Duration::from_secs(10);
+    config.authentication_timeout = Duration::from_secs(20);
+    let config = Arc::new(config);
     let (stop, mut stopped) = tokio::sync::watch::channel(false);
     let _task = tokio::spawn(async move {
         let slots = Arc::new(tokio::sync::Semaphore::new(256));
@@ -268,29 +268,25 @@ pub async fn start(st: AppState, address: &str) -> Result<Listener, Box<dyn std:
 
 async fn serve_connection(
     st: AppState,
-    config: Arc<russh::server::Config>,
+    config: Arc<server::Config<PrivateKey>>,
     stream: tokio::net::TcpStream,
     peer: SocketAddr,
     mut stopped: tokio::sync::watch::Receiver<bool>,
     (_slot, mut waiting): (tokio::sync::OwnedSemaphorePermit, auth::pending::PendingGuard),
 ) {
-    let authenticated = Arc::new(tokio::sync::Notify::new());
-    let connection = Connection { st, peer, login: None, channels: HashMap::new(), permit: None, authenticated: authenticated.clone(), channel_used: false };
-    let running = tokio::time::timeout(Duration::from_secs(10), russh::server::run_stream(config, stream, connection)).await;
-    let Ok(Ok(mut running)) = running else { return };
-    let handle = running.handle();
-    let completed = tokio::select! {
-        _ = &mut running => true,
-        _ = stopped.changed() => false,
-        _ = tokio::time::sleep(Duration::from_secs(20)) => false,
-        _ = authenticated.notified() => {
-            waiting.signed_in();
-            tokio::select! { _ = &mut running => true, _ = stopped.changed() => false }
-        }
+    let connection = Connection { st, peer, login: None, permit: None, channel_used: false };
+    // The handshake and the sign-in are limited by the server's settings (10 and 20 seconds)
+    let accepted = tokio::select! {
+        accepted = server::accept_over(config, stream, Some(peer), connection) => accepted,
+        _ = stopped.changed() => return,
     };
-    if !completed {
-        let _ = handle.disconnect(russh::Disconnect::ByApplication, "Session ended".into(), "en".into()).await;
-        let _ = tokio::time::timeout(Duration::from_secs(2), running).await;
+    let Ok(mut running) = accepted else { return };
+    waiting.signed_in();
+    tokio::select! {
+        _ = &mut running => {}
+        _ = stopped.changed() => {
+            let _ = tokio::time::timeout(Duration::from_secs(2), running.disconnect()).await;
+        }
     }
 }
 
@@ -298,116 +294,89 @@ struct Connection {
     st: AppState,
     peer: SocketAddr,
     login: Option<Login>,
-    channels: HashMap<ChannelId, Channel<Msg>>,
     permit: Option<Arc<Permit>>,
-    authenticated: Arc<tokio::sync::Notify>,
     channel_used: bool,
 }
 
 impl Connection {
-    async fn accept(&mut self, login: Login) -> Auth {
-        let user = match login.user(&self.st, self.peer, false).await {
-            Ok(u) => u,
-            Err(_) => return Auth::Reject { proceed_with_methods: None, partial_success: false },
-        };
+    /// Whether the sign-in is accepted (and the account has a free session)
+    async fn accept(&mut self, login: Login) -> bool {
+        let Ok(user) = login.user(&self.st, self.peer, false).await else { return false };
         let mut sessions = self.st.part::<Memory>().sessions.lock();
         let count = sessions.entry(user.id).or_default();
         if *count >= 5 {
-            return Auth::Reject { proceed_with_methods: None, partial_success: false };
+            return false;
         }
         *count += 1;
         self.permit = Some(Arc::new(Permit { st: self.st.clone(), user: user.id }));
         self.login = Some(login);
-        self.authenticated.notify_one();
-        Auth::Accept
+        true
     }
 }
 
-impl russh::server::Handler for Connection {
-    type Error = russh::Error;
-    async fn auth_password(&mut self, username: &str, password: &str) -> Result<Auth, Self::Error> {
-        Ok(self.accept(Login::Password { username: username.to_string(), token: password.to_string() }).await)
+impl server::AuthPolicy for Connection {
+    async fn password(&mut self, username: &str, password: &[u8]) -> io::Result<bool> {
+        let Ok(token) = std::str::from_utf8(password) else { return Ok(false) };
+        Ok(self.accept(Login::Password { username: username.to_string(), token: token.to_string() }).await)
     }
     /// A key offered without a signature yet (an SSH agent offers each of its keys in turn): accepted only if it is one
     /// of the account's, without counting the others as failed sign-ins
-    async fn auth_publickey_offered(&mut self, username: &str, public: PublicKeyOffer<'_>) -> Result<Auth, Self::Error> {
+    async fn public_key_probe(&mut self, username: &str, key: &PublicKey) -> io::Result<bool> {
         let ip = self.peer.ip().to_string();
-        let rejected = Auth::Reject { proceed_with_methods: None, partial_success: false };
         if auth::attempts_exhausted(&self.st, &format!("ip:{}", auth::limit_key_ip(&ip)), auth::IP_FAIL_LIMIT) {
-            return Ok(rejected);
+            return Ok(false);
         }
         let (known,): (bool,) = sqlx::query_as(
             "SELECT EXISTS(SELECT 1 FROM sftp_keys k JOIN users u ON u.id = k.user_id WHERE u.username = ? COLLATE NOCASE AND k.fingerprint = ? AND u.disabled = 0)",
         )
         .bind(username)
-        .bind(public.public_key.fingerprint(HashAlg::Sha256).to_string())
+        .bind(key.fingerprint(HashAlg::Sha256).to_string())
         .fetch_one(&self.st.db)
         .await
         .unwrap_or((false,));
-        Ok(if known { Auth::Accept } else { rejected })
+        Ok(known)
     }
-    async fn auth_publickey(&mut self, username: &str, public: VerifiedPublicKey<'_>) -> Result<Auth, Self::Error> {
+    async fn public_key_verified(&mut self, username: &str, key: &PublicKey) -> io::Result<bool> {
         let ip = self.peer.ip().to_string();
-        let key = format!("ip:{}", auth::limit_key_ip(&ip));
-        if auth::attempts_exhausted(&self.st, &key, auth::IP_FAIL_LIMIT) {
-            return Ok(Auth::Reject { proceed_with_methods: None, partial_success: false });
+        let limit = format!("ip:{}", auth::limit_key_ip(&ip));
+        if auth::attempts_exhausted(&self.st, &limit, auth::IP_FAIL_LIMIT) {
+            return Ok(false);
         }
         let key_id: Option<(String,)> = sqlx::query_as(
             "SELECT k.id FROM sftp_keys k JOIN users u ON u.id = k.user_id WHERE u.username = ? COLLATE NOCASE AND k.fingerprint = ? AND u.disabled = 0",
         )
         .bind(username)
-        .bind(public.public_key.fingerprint(HashAlg::Sha256).to_string())
+        .bind(key.fingerprint(HashAlg::Sha256).to_string())
         .fetch_optional(&self.st.db)
         .await
         .unwrap_or(None);
-        let answer = if let Some((key_id,)) = key_id {
-            self.accept(Login::Key { username: username.to_string(), key_id }).await
-        } else {
-            Auth::Reject { proceed_with_methods: None, partial_success: false }
-        };
         // An unknown key isn't counted as a failed sign-in: nobody guesses a private key, and an SSH agent tries each
         // of its keys in turn (the connection's own limit on attempts still applies)
-        Ok(answer)
+        Ok(match key_id {
+            Some((key_id,)) => self.accept(Login::Key { username: username.to_string(), key_id }).await,
+            None => false,
+        })
     }
-    async fn channel_open_session(&mut self, channel: Channel<Msg>, reply: ChannelOpenHandle, _: &mut Session) -> Result<(), Self::Error> {
-        if !self.channel_used && self.login.is_some() {
-            self.channel_used = true;
-            self.channels.insert(channel.id(), channel);
-            reply.accept().await;
-        } else {
-            reply.reject(russh::ChannelOpenFailure::AdministrativelyProhibited).await;
-        }
-        Ok(())
-    }
-    async fn subsystem_request(&mut self, channel: ChannelId, name: &str, ssh: &mut Session) -> Result<(), Self::Error> {
-        if name == "sftp"
-            && let Some(ch) = self.channels.remove(&channel)
+}
+
+impl ssh::Handler for Connection {
+    /// One session channel for SFTP: no shell, no commands, no forwarding. The subsystem request is answered by the
+    /// SFTP server, which refuses every other request.
+    async fn channel_open(&mut self, request: ssh::IncomingChannel, _: &ssh::Context) -> io::Result<()> {
+        if !self.channel_used
             && let (Some(login), Some(permit)) = (self.login.clone(), self.permit.clone())
         {
-            ssh.channel_success(channel)?;
-            russh_sftp::server::run_with_config(
-                ch.into_stream(),
-                session::Files::new(self.st.clone(), self.peer, login, permit),
-                russh_sftp::server::Config { max_client_packet_len: 512 * 1024 },
-            )
-            .await;
+            self.channel_used = true;
+            let files = Arc::new(session::Files::new(self.st.clone(), self.peer, login, permit));
+            let config = ServerConfig::default()
+                .with_max_packet(512 * 1024)
+                .with_max_handles(session::MAX_HANDLES)
+                .with_max_read_length(256 * 1024)
+                .with_max_write_length(256 * 1024);
+            thirtysftp::ssh::accept_session(request, files, config).await
         } else {
-            ssh.channel_failure(channel)?;
+            // Administratively prohibited
+            request.refuse(1).await
         }
-        Ok(())
-    }
-    async fn shell_request(&mut self, channel: ChannelId, ssh: &mut Session) -> Result<(), Self::Error> {
-        ssh.channel_failure(channel)?;
-        Ok(())
-    }
-    async fn exec_request(&mut self, channel: ChannelId, _: &[u8], ssh: &mut Session) -> Result<(), Self::Error> {
-        ssh.channel_failure(channel)?;
-        Ok(())
-    }
-    async fn channel_eof(&mut self, channel: ChannelId, ssh: &mut Session) -> Result<(), Self::Error> {
-        // OpenSSH scp checks the subsystem's exit status after all SFTP requests have completed.
-        ssh.exit_status_request(channel, 0)?;
-        ssh.close(channel)?;
-        Ok(())
     }
 }
