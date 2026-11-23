@@ -78,3 +78,31 @@ test("a file that isn't a PDF inside says so rather than showing an empty page",
   await expect(page.getByRole("alert")).toContainText("This file is damaged or isn't a PDF");
   await expect(page.getByRole("alert").getByRole("button", { name: "Download" })).toBeVisible();
 });
+
+test("a share link shows the PDF in the viewer, with Print and Download only when it allows downloading, and it fits a phone", async ({ page }) => {
+  await signIn(page);
+  const folder = await makeFolder(page, "Shared reports");
+  await uploadFile(page, folder, "shared.pdf", pdfWithPages(["Shared page one", "Shared page two"]));
+  const link = async (allow_download: boolean) => (await (await page.request.post("/api/shares", { data: { node_id: folder, allow_download } })).json()).id;
+
+  await page.goto(`/share/${await link(false)}`);
+  await page.getByText("shared.pdf", { exact: true }).dblclick();
+  const tools = page.getByRole("toolbar", { name: "PDF tools" });
+  await expect(tools.getByText("of 2")).toBeVisible();
+  await expect(tools.getByRole("button", { name: "Print" })).toHaveCount(0);
+  await expect(tools.getByRole("button", { name: "Download" })).toHaveCount(0);
+
+  await page.goto(`/share/${await link(true)}`);
+  await page.getByText("shared.pdf", { exact: true }).dblclick();
+  await expect(tools.getByRole("button", { name: "Print" })).toBeVisible();
+  await expect(tools.getByRole("button", { name: "Download" })).toBeVisible();
+
+  // A phone-sized screen: the toolbar and the first page stay inside it, and the page picture panel opens on request
+  await page.setViewportSize({ width: 375, height: 700 });
+  await page.reload();
+  await page.getByText("shared.pdf", { exact: true }).dblclick();
+  await expect(page.getByRole("document", { name: "shared.pdf" }).getByText("Shared page one")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await tools.getByRole("button", { name: "Page thumbnails" }).click();
+  await expect(page.getByRole("navigation", { name: "Pages" })).toBeVisible();
+});
