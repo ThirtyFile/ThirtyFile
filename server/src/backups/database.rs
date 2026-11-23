@@ -259,7 +259,7 @@ fn copy_name(t: i64) -> String {
 fn copy_time(name: &str) -> Option<i64> {
     let stamp = name.strip_prefix("thirtyfile-")?.strip_suffix("Z.tfdb")?;
     let t = jiff::civil::DateTime::strptime("%Y%m%d-%H%M%S", stamp).ok()?;
-    Some(t.to_zoned(TimeZone::UTC).ok()?.timestamp().as_second())
+    Some(t.to_zoned_datetime(TimeZone::UTC).ok()?.timestamp().as_second())
 }
 
 // ───────────── Making a copy ─────────────
@@ -380,11 +380,11 @@ fn kept(copies: &[(String, i64)], c: &Config, tz: &TimeZone) -> HashSet<String> 
     sorted.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| b.0.cmp(&a.0)));
     let mut keep: HashSet<String> = sorted.iter().take(c.keep_last.max(1) as usize).map(|(n, _)| n.clone()).collect();
     // The newest of each day, week and month, for so many of them
-    let mut periods = |count: u32, period: &dyn Fn(&jiff::Zoned) -> (i32, i32)| {
+    let mut periods = |count: u32, period: &dyn Fn(&jiff::ZonedDateTime) -> (i32, i32)| {
         let mut seen = HashSet::new();
         for (name, t) in &sorted {
             let Ok(at) = Timestamp::from_second(*t) else { continue };
-            let p = period(&at.to_zoned(tz.clone()));
+            let p = period(&at.to_zoned_datetime(tz.clone()));
             if seen.len() >= count as usize && !seen.contains(&p) {
                 break;
             }

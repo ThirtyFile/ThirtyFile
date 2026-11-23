@@ -38,8 +38,6 @@ skip = [
   { crate = "digest@0.10.7", reason = "the 0.10 RustCrypto crates sqlx and crc-fast use" },
   { crate = "getrandom@0.2.17", reason = "ring (through thirtyssh)" },
   { crate = "hashbrown@0.16.1", reason = "hashlink and sqlx-core" },
-  { crate = "jiff@1.0.1", reason = "suppaftp (the FTP client) uses jiff 1; ThirtyFile itself uses 0.2" },
-  { crate = "jiff-core@1.0.1", reason = "suppaftp (the FTP client) uses jiff 1; ThirtyFile itself uses 0.2" },
   { crate = "miniz_oxide@0.8.9", reason = "png" },
   { crate = "spin@0.9.9", reason = "flume (through sqlx)" },
   { crate = "syn@2.0.119", reason = "most derive macros, next to syn 3" },

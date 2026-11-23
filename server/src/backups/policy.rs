@@ -104,12 +104,12 @@ pub fn next_after(s: &Schedule, tz: &TimeZone, after: i64) -> Option<i64> {
         Schedule::Daily(h, m) => (*h, *m, None),
         Schedule::Weekly(h, m, days) => (*h, *m, Some(days)),
     };
-    let start = Timestamp::from_second(after).ok()?.to_zoned(tz.clone()).date();
+    let start = Timestamp::from_second(after).ok()?.to_zoned_datetime(tz.clone()).date();
     let mut date = start.yesterday().ok()?;
     for _ in 0..16 {
         if days.is_none_or(|d| d.contains(&date.weekday().to_monday_one_offset())) {
             let at: civil::DateTime = date.at(h, m, 0, 0);
-            let ambiguous = tz.to_ambiguous_zoned(at);
+            let ambiguous = tz.to_ambiguous_zoned_datetime(at);
             if !matches!(ambiguous.offset(), jiff::tz::AmbiguousOffset::Gap { .. })
                 && let Ok(z) = ambiguous.earlier()
                 && z.timestamp().as_second() > after

@@ -21,11 +21,11 @@ use crate::{
 
 fn at(s: &str, tz: &str) -> i64 {
     let tz = jiff::tz::TimeZone::get(tz).unwrap();
-    s.parse::<jiff::civil::DateTime>().unwrap().to_zoned(tz).unwrap().timestamp().as_second()
+    s.parse::<jiff::civil::DateTime>().unwrap().to_zoned_datetime(tz).unwrap().timestamp().as_second()
 }
 
 fn local(t: i64, tz: &str) -> String {
-    jiff::Timestamp::from_second(t).unwrap().to_zoned(jiff::tz::TimeZone::get(tz).unwrap()).strftime("%Y-%m-%d %H:%M %Z").to_string()
+    jiff::Timestamp::from_second(t).unwrap().to_zoned_datetime(jiff::tz::TimeZone::get(tz).unwrap()).strftime("%Y-%m-%d %H:%M %Z").to_string()
 }
 
 #[test]
