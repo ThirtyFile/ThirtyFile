@@ -2,7 +2,7 @@
 //! characters. There is no layout: text that is shown one place after another comes out in the order the page draws
 //! it, which for the programs that write documents is reading order.
 //!
-//! The file is read by scanning for its objects (object.rs), so a damaged table of cross-references or an updated file
+//! The file is read by scanning for its objects (pdf/object.rs), so a damaged table of cross-references or an updated file
 //! is no trouble; what can't be read is left out, and nothing in a file can make this do more than a fixed amount of
 //! work (the sizes streams expand to, the number of pages, the depth of forms and the count of operators are limited).
 //! Encrypted files are not read, and pages that are pictures (scans) hold no text to find.
