@@ -86,6 +86,7 @@
             <li><a href="#word">編輯 Word 文件</a></li>
             <li><a href="#text">編輯文字檔案</a></li>
             <li><a href="#markdown">Markdown</a></li>
+            <li><a href="#pdf">PDF</a></li>
             <li><a href="#thumbnails">縮圖</a></li>
             <li><a href="#together">兩人編輯同一檔案時</a></li>
           </ol>
@@ -98,7 +99,7 @@
             <tr><td>圖片（.jpg、.png、.gif、.webp、.avif、.svg、.bmp、.ico）</td><td>支援</td><td></td></tr>
             <tr><td>影片（.mp4、.webm、.mov）</td><td>支援</td><td></td></tr>
             <tr><td>音訊（.mp3、.wav、.ogg、.flac、.aac、.m4a）</td><td>支援</td><td></td></tr>
-            <tr><td>PDF</td><td>支援</td><td></td></tr>
+            <tr><td>PDF</td><td>支援，含頁面縮圖、縮放和尋找（見 <a href="#pdf">PDF</a>）</td><td></td></tr>
             <tr><td>Word（.docx）</td><td>支援</td><td>支援</td></tr>
             <tr><td>PowerPoint（.pptx）</td><td>支援</td><td></td></tr>
             <tr><td>Excel（.xlsx）</td><td>支援</td><td>支援</td></tr>
@@ -159,6 +160,17 @@
         <h2 id="markdown">Markdown</h2>
         <p>Markdown 檔案以排版頁面顯示，包括標題、清單、表格、任務清單和程式碼。按一下頁面上方<strong>編輯</strong>修改文字（只有檢視權限時顯示<strong>原始碼</strong>），再切回<strong>預覽</strong>檢視結果，未儲存的修改也會顯示。</p>
         <p>頁面採用安全顯示方式：檔案內的 HTML 不會執行，也不能偽裝成 ThirtyFile 介面；連結在新分頁開啟，只顯示嵌入檔案本身的圖片。外部網站圖片不會載入，因此開啟檔案不會向這些網站透露存取情況。</p>
+        <h2 id="pdf">PDF</h2>
+        <p>PDF 在 ThirtyFile 自己的閱讀器中開啟，在各種瀏覽器和手機上的效果都一樣。頁面在捲動到時才繪製，所以大型檔案不必先下載就能開啟。頁面上方有：</p>
+        <ul>
+          <li><strong>頁面縮圖</strong>（最左邊的按鈕）顯示每一頁的小圖，按一下即可跳到該頁。在手機上選好頁面後面板會自動關閉。</li>
+          <li>箭頭按鈕跳到上一頁和下一頁，也可以輸入頁碼後按 <kbd>Enter</kbd>。<kbd>Home</kbd> 和 <kbd>End</kbd> 跳到第一頁和最後一頁。</li>
+          <li><strong>縮放</strong>：<strong>自動</strong>、<strong>符合寬度</strong>、<strong>符合頁面</strong>，或 25% 到 400% 的比例；也可以用旁邊的按鈕、<kbd>Ctrl</kbd> + <kbd>+</kbd> 和 <kbd>Ctrl</kbd> + <kbd>-</kbd>、按住 <kbd>Ctrl</kbd> 捲動滑鼠滾輪，或在觸控螢幕和觸控板上用兩指縮放。</li>
+          <li><strong>在文件中尋找</strong>（閱讀器有焦點時按 <kbd>Ctrl</kbd> + <kbd>F</kbd>）會標出所有符合的地方並顯示數量；<kbd>Enter</kbd> 跳到下一個，<kbd>Shift</kbd> + <kbd>Enter</kbd> 跳到上一個。只能找到 PDF 中的文字，沒有文字層的掃描頁面中的字找不到。</li>
+          <li>可以下載檔案時顯示<strong>列印</strong>（<kbd>Ctrl</kbd> + <kbd>P</kbd>）和<strong>下載</strong>。不允許下載的分享連結兩者都不顯示。</li>
+        </ul>
+        <p>文字可以選取和複製，PDF 中的連結也能使用：指向其他頁面的連結會跳到該頁，指向網站的連結在新分頁開啟。表單欄位顯示填寫後的內容，但不能輸入。有密碼保護的 PDF 會要求輸入密碼；密碼只在你的瀏覽器中使用。</p>
+        <p>搜尋時也找檔案內容的話（見<a href="files.html#search-inside">搜尋</a>），從搜尋結果開啟的 PDF 會跳到第一個找到關鍵字的位置，並標出這些關鍵字。</p>
         <h2 id="thumbnails">縮圖</h2>
         <p>在圖示檢視（<strong>大圖示</strong>、<strong>中圖示</strong>和<strong>並排</strong>）中，圖片、PDF 和影片會顯示縮圖。圖片縮圖由伺服器產生。PDF（第一頁）和影片（靠近開頭的一幀）的縮圖由第一位具有修改權限的使用者瀏覽器產生並儲存到伺服器，之後同空間內可開啟檔案的人都能看到。在此之前，只能檢視的人會在自己的瀏覽器中產生縮圖。瀏覽器不能播放的影片，以及超過 200 MB 的 PDF，保留原圖示。縮圖儲存在 <code>data/thumbs</code>：內容儲存區的檔案內容被永久刪除後，其縮圖一併刪除；30 天內未向任何人展示的縮圖也會刪除（再次檢視檔案時重新產生）。</p>
         <h2 id="together">兩人編輯同一檔案時</h2>
