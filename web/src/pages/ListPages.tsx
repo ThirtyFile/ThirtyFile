@@ -15,6 +15,7 @@ import { useMe } from "@/lib/session";
 import { useSort } from "@/lib/sort";
 import { t } from "@/lib/i18n";
 import { extOf, nameCollator } from "@/lib/utils";
+import { viewPath } from "@/lib/pdfView";
 import { NativeSelect } from "@/components/ui/native-select";
 
 function Empty({ icon: Icon, text, hint }: { icon: typeof ClockIcon; text: string; hint?: string }) {
@@ -280,6 +281,8 @@ export function SearchPage() {
       onSort={onSort}
       onSortChange={setSort}
       notice={filters}
+      // A PDF the search found words inside opens at the first of them, marked
+      fileLink={(n) => viewPath(n.id, content && extOf(n.name) === "pdf" && q.data?.snippets[n.id] ? shown.current : undefined)}
       extraColumn={content ? { label: t("Found in"), width: 340, value: (n) => (q.data?.snippets[n.id] ? <Snippet pieces={q.data.snippets[n.id]} /> : "") } : undefined}
       // A new search from here looks where this one does
       searchPlaceholder={within ? t("Search {name}", { name: folderName || "…" }) : undefined}

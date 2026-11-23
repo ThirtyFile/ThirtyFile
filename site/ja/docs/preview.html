@@ -85,6 +85,7 @@
             <li><a href="#word">Word 文書を編集する</a></li>
             <li><a href="#text">テキストファイルを編集する</a></li>
             <li><a href="#markdown">Markdown</a></li>
+            <li><a href="#pdf">PDF</a></li>
             <li><a href="#thumbnails">サムネイル</a></li>
             <li><a href="#together">2 人が同じファイルを編集する場合</a></li>
           </ol>
@@ -94,7 +95,7 @@
           <tr><td>画像（.jpg、.png、.gif、.webp、.avif、.svg、.bmp、.ico）</td><td>可能</td><td></td></tr>
           <tr><td>動画（.mp4、.webm、.mov）</td><td>可能</td><td></td></tr>
           <tr><td>音声（.mp3、.wav、.ogg、.flac、.aac、.m4a）</td><td>可能</td><td></td></tr>
-          <tr><td>PDF</td><td>可能</td><td></td></tr>
+          <tr><td>PDF</td><td>可能（ページのサムネイル、ズーム、検索付き。<a href="#pdf">PDF</a> を参照）</td><td></td></tr>
           <tr><td>Word（.docx）</td><td>可能</td><td>可能</td></tr>
           <tr><td>PowerPoint（.pptx）</td><td>可能</td><td></td></tr>
           <tr><td>Excel（.xlsx）</td><td>可能</td><td>可能</td></tr>
@@ -154,6 +155,17 @@
         <h2 id="markdown">Markdown</h2>
         <p>Markdown は、見出し、一覧、表、タスクリスト、コードを書式付きのページで表示します。ページ上の <strong>編集</strong>（閲覧権限のみなら <strong>ソース</strong>）でテキストを変更し、<strong>プレビュー</strong> に戻ると未保存の変更も含めて結果を表示します。</p>
         <p>安全に表示するため、ファイルの HTML は実行せず、ThirtyFile の外観を装うこともできません。リンクは新しいタブで開き、画像はファイル自体に埋め込まれたものだけ表示します。他サイトの画像は表示しないため、ファイルを開いたことをそのサイトに伝えません。</p>
+        <h2 id="pdf">PDF</h2>
+        <p>PDF は ThirtyFile 独自のビューアーで開きます。どのブラウザーでも、スマートフォンでも同じように動作します。ページはスクロールして表示されるときに描画されるため、大きなファイルも先にダウンロードせずに開けます。ページの上には次の機能があります。</p>
+        <ul>
+          <li><strong>ページのサムネイル</strong>（左端のボタン）で各ページの縮小画像を表示します。クリックするとそのページへ移動します。スマートフォンではページを選ぶとパネルが閉じます。</li>
+          <li>矢印で前後のページへ移動します。ページ番号を入力して <kbd>Enter</kbd> を押しても移動できます。<kbd>Home</kbd> と <kbd>End</kbd> で最初と最後のページへ移動します。</li>
+          <li><strong>ズーム</strong>：<strong>自動</strong>、<strong>幅に合わせる</strong>、<strong>ページに合わせる</strong>、または 25% から 400% までの倍率を選べます。横のボタン、<kbd>Ctrl</kbd> + <kbd>+</kbd> と <kbd>Ctrl</kbd> + <kbd>-</kbd>、<kbd>Ctrl</kbd> とマウスホイール、タッチスクリーンやタッチパッドの 2 本指操作でも拡大・縮小できます。</li>
+          <li><strong>ドキュメント内を検索</strong>（ビューアーにフォーカスがあるときは <kbd>Ctrl</kbd> + <kbd>F</kbd>）は、一致した箇所をすべて強調表示して件数を表示します。<kbd>Enter</kbd> で次へ、<kbd>Shift</kbd> + <kbd>Enter</kbd> で前へ移動します。検索できるのは PDF が持つテキストで、テキストレイヤーのないスキャンページの文字は検索できません。</li>
+          <li>ダウンロードが許可されている場合は <strong>印刷</strong>（<kbd>Ctrl</kbd> + <kbd>P</kbd>）と <strong>ダウンロード</strong> を表示します。ダウンロードを許可しない共有リンクでは、どちらも表示しません。</li>
+        </ul>
+        <p>テキストは選択してコピーできます。PDF 内のリンクも使えます。別のページへのリンクはそのページへ移動し、Web サイトへのリンクは新しいタブで開きます。フォームのフィールドは入力済みの状態で表示されますが、入力はできません。パスワードで保護された PDF はパスワードを求めます。パスワードはブラウザー内でのみ使われます。</p>
+        <p>ファイルの中身も検索した場合（<a href="files.html#search-inside">検索</a>を参照）、検索結果から開いた PDF は語句が最初に見つかった場所へ移動し、その語句を強調表示します。</p>
         <h2 id="thumbnails">サムネイル</h2>
         <p>アイコン表示（<strong>大アイコン</strong>、<strong>中アイコン</strong>、<strong>タイル</strong>）では画像、PDF、動画にサムネイルを表示します。画像はサーバーで作成します。PDF の最初のページと動画の冒頭付近のフレームは、変更権限のある人の最初のブラウザーが作成してサーバーに保存し、その後は同じスペースでファイルを開ける全員に表示します。それまでは閲覧のみの人は自分のブラウザーで作ったものを見ます。再生できない動画と 200 MB を超える PDF はアイコンのままです。保存先は <code>data/thumbs</code> です。コンテンツストアのファイルの内容が完全に削除されるとそのサムネイルも削除し、30 日間誰にも表示していないものも削除します（次に見ると再作成します）。</p>
         <h2 id="together">2 人が同じファイルを編集する場合</h2>

@@ -192,7 +192,7 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
     if (n.kind === "folder") {
       s.enteredByKey.current = byKey ? n.id : null;
       void navigate(`/files/${n.id}`);
-    } else tabs.openFile(`/view/${n.id}`);
+    } else tabs.openFile(p.fileLink?.(n) ?? `/view/${n.id}`);
   };
 
   // Multiple items or folders are zipped by the server while streaming; progress shows in the download panel at the bottom right.

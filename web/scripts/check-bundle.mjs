@@ -9,7 +9,7 @@ const dist = new URL("../dist/", import.meta.url).pathname.replace(/^\/([A-Za-z]
 const KB = 1024;
 /** JavaScript loaded with the page (the entry and what it preloads); 392 kB in October 2026 */
 const START_BUDGET = 450 * KB;
-/** Any chunk (the largest, pdf.js for PDF thumbnails, is 476 kB) */
+/** Any chunk (the largest, pdf.js for PDF thumbnails and the PDF viewer, is 518 kB) */
 const CHUNK_BUDGET = 600 * KB;
 /** Chunks only the Mac style uses */
 const MAC_ONLY = /^(macKit|art)-/;
