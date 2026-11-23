@@ -275,7 +275,7 @@ pub async fn combine_files(State(st): State<AppState>, user: User, Json(req): Js
     if req.ids.len() > MAX_COMBINE {
         return Err(AppError::bad_request(format!("At most {MAX_COMBINE} PDF files can be combined at once")));
     }
-    let mut nodes = Vec::with_capacity(req.ids.len());
+    let mut nodes = Vec::new();
     for id in &req.ids {
         nodes.push(pdf_node(&st, &user, id, Need::Read).await?);
     }
@@ -293,7 +293,7 @@ pub async fn combine_files(State(st): State<AppState>, user: User, Json(req): Js
 
 async fn run_combine(st: AppState, user: User, progress: Tracker, nodes: Vec<Node>, folder: String, name: String) -> AppResult<Outcome> {
     progress.set_total(nodes.len() as u64 + 1);
-    let mut files = Vec::with_capacity(nodes.len());
+    let mut files = Vec::new();
     let mut total = 0u64;
     for node in &nodes {
         let data = read(&st, node).await?;
