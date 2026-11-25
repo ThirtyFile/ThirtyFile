@@ -87,12 +87,6 @@ http-body-util = "0.1"
 # Switching to an unprivileged user in the Docker image (privileges.rs)
 libc = "0.2"
 
-[patch.crates-io]
-# SQLx 0.9.0 excludes patched SQLite. Backport only the upper-bound change from upstream commit 10462fa4414c6c7f1ed1d39bb31678e3b726878c.
-# The published driver's source is unchanged; upstream.json records its checksum and the bounded patch.
-# Remove this override when a published SQLx driver permits libsqlite3-sys 0.39.
-sqlx-sqlite = { path = "vendor/sqlx-sqlite" }
-
 # The Docker image is a static musl build and keeps musl's own memory allocator. Measured against mimalloc
 # (same build, 4 cores, 160 concurrent 4 MB saves, 24 thumbnails of 1600×1200 pictures, 8 concurrent ZIPs of
 # 320 MB; see #54): mimalloc saved about 30% of the time on concurrent saves and changed thumbnails and ZIPs
