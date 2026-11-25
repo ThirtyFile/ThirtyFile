@@ -1218,4 +1218,12 @@ export default {
   "The directory gave no stable id for this account. Ask your administrator to check the attribute for it.": "ディレクトリはこのアカウントの安定した ID を返しませんでした。管理者にその属性を確認してもらってください。",
   "This directory account has no account here yet. Ask your administrator.": "このディレクトリのアカウントには、ここにまだアカウントがありません。管理者にお問い合わせください。",
   "An account with this name already exists here and doesn't belong to the directory. Ask your administrator.": "この名前のアカウントがすでにここにあり、ディレクトリのものではありません。管理者にお問い合わせください。",
+  "Give every folder in THIRTYFILE_FILES a name, as in Workspace=/workspace: \"{entry}\" has none":
+    "THIRTYFILE_FILES のフォルダーにはすべて名前が必要です（例: Workspace=/workspace）。「{entry}」には名前がありません",
+  "The folder named \"{name}\" in THIRTYFILE_FILES has no path":
+    "THIRTYFILE_FILES で「{name}」という名前のフォルダーにパスがありません",
+  "THIRTYFILE_FILES names \"{name}\" twice":
+    "THIRTYFILE_FILES で「{name}」が 2 回使われています",
+  "THIRTYFILE_FILES: {first} and {second} are the same folder or one is inside the other. Each name needs a folder of its own.":
+    "THIRTYFILE_FILES: {first} と {second} は同じフォルダーか、一方がもう一方の中にあります。名前ごとに別のフォルダーが必要です。",
 } satisfies Record<string, string>;

@@ -1218,4 +1218,12 @@ export default {
   "The directory gave no stable id for this account. Ask your administrator to check the attribute for it.": "目錄沒有給這個帳號穩定識別碼。請洽詢管理員檢查存放它的屬性。",
   "This directory account has no account here yet. Ask your administrator.": "這個目錄帳號在這裡還沒有帳號。請洽詢管理員。",
   "An account with this name already exists here and doesn't belong to the directory. Ask your administrator.": "這裡已有同名的帳號，而且它不屬於目錄。請洽詢管理員。",
+  "Give every folder in THIRTYFILE_FILES a name, as in Workspace=/workspace: \"{entry}\" has none":
+    "THIRTYFILE_FILES 裡的每個資料夾都要有名稱，例如 Workspace=/workspace：「{entry}」沒有名稱",
+  "The folder named \"{name}\" in THIRTYFILE_FILES has no path":
+    "THIRTYFILE_FILES 裡名為「{name}」的資料夾沒有路徑",
+  "THIRTYFILE_FILES names \"{name}\" twice":
+    "THIRTYFILE_FILES 把「{name}」用了兩次",
+  "THIRTYFILE_FILES: {first} and {second} are the same folder or one is inside the other. Each name needs a folder of its own.":
+    "THIRTYFILE_FILES：{first} 和 {second} 是同一個資料夾，或其中一個在另一個裡面。每個名稱都需要自己的資料夾。",
 } satisfies Record<string, string>;
