@@ -20,11 +20,12 @@ pub struct Settings {
     /// (default 0.0.0.0:8080, and 127.0.0.1:8080 in single-user mode)
     #[arg(long, env = "THIRTYFILE_ADDR")]
     pub addr: Option<String>,
-    /// Single-user mode: no sign-in, one folder (THIRTYFILE_FILES) as the files, no accounts, permissions or sharing.
+    /// Single-user mode: no sign-in, one folder (THIRTYFILE_FILES) as the files, or several named ones, no accounts, permissions or sharing.
     /// For a sandbox or another place only one trusted person reaches (the guide "Single-user mode")
     #[arg(long, env = "THIRTYFILE_SINGLE_USER", default_value = "false", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::Set)]
     pub single_user: bool,
-    /// Single-user mode: the folder whose files are managed, as a full path
+    /// Single-user mode: the folder whose files are managed, as a full path; or several, each with a name for its
+    /// space: `Workspace=/workspace,Home=/home/sandbox`
     #[arg(long, env = "THIRTYFILE_FILES")]
     pub files: Option<String>,
     /// Single-user mode: names the site answers to besides localhost, separated by commas (a host name given by
@@ -153,7 +154,9 @@ async fn accounts(
 ) -> Result<Option<i64>, Box<dyn std::error::Error>> {
     let single_user = if cfg.single_user {
         let Some(files) = cfg.files.as_deref().map(str::trim).filter(|f| !f.is_empty()) else {
-            return Err("THIRTYFILE_SINGLE_USER needs THIRTYFILE_FILES: the full path of the folder whose files are managed".into());
+            return Err(
+                "THIRTYFILE_SINGLE_USER needs THIRTYFILE_FILES: the full path of the folder whose files are managed, or several as Name=/path,Name=/path".into()
+            );
         };
         if !loopback(addr) {
             tracing::warn!(

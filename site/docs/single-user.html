@@ -93,7 +93,7 @@
         <p>Single-user mode is for a place only you can reach: a sandbox, a virtual machine, a container on your own computer. You open the page and the files are there. It is off unless you turn it on, and a normal server is not affected.</p>
         <ul>
           <li><strong>No sign-in.</strong> Everyone who reaches the page is the same person. There are no accounts, passwords or two-factor codes.</li>
-          <li><strong>One folder.</strong> The files are the ordinary files of the folder you choose (<code>THIRTYFILE_FILES</code>). Browse, upload, download, create, edit, rename, move and delete them, with the same previews, search, tags, trash and editors as always. Anything you change in the folder from outside shows up too.</li>
+          <li><strong>One folder.</strong> The files are the ordinary files of the folder you choose (<code>THIRTYFILE_FILES</code>), or of several named folders (<a href="#several">below</a>). Browse, upload, download, create, edit, rename, move and delete them, with the same previews, search, tags, trash and editors as always. Anything you change in the folder from outside shows up too.</li>
           <li><strong>Nothing for several people.</strong> Users and groups, permissions, share links, guests, the Control panel, notifications, WebDAV, S3 buckets and FTP receive folders are not just hidden but switched off: the server doesn't answer them. SFTP stays off too.</li>
           <li><strong>Only that folder.</strong> The server reads and writes only inside it. Links in it that point elsewhere are skipped, as in every folder space.</li>
         </ul>
@@ -121,6 +121,11 @@
         </div>
         <p>The <code>/data</code> folder keeps the index, thumbnails and settings. It must not be inside the files folder, and it belongs to this mode: a data folder made in single-user mode can't start a normal server, and the other way round. Choosing another folder later shows that folder instead; the old one is left as it is.</p>
 
+        <h3 id="several">Several folders</h3>
+        <p>To work with more than one folder in the same window, give each a name. Each one becomes a space of its own with that name, listed under "All spaces", and has the usual navigation and file operations. The names are yours: they don't have to match the folders on disk.</p>
+        <pre><code>-e THIRTYFILE_FILES=Workspace=/workspace,Home=/home/sandbox</code></pre>
+        <p>Mount each folder into the container the same way as <code>/files</code> above. Separate the entries with commas, and give every folder a name. No folder may be inside another, and the data folder must be outside all of them. A folder you take out of the list later is left as it is on disk and shown again if you name it again. A single path without a name works as before and is shown as "My files".</p>
+
         <h2 id="reach">Reaching it from your computer</h2>
         <p>Inside the container the server listens on all addresses, and Docker passes only what you publish. With <code>-p 127.0.0.1:8080:8080</code>, open <code>http://localhost:8080</code> on the computer that runs Docker. Without Docker, the server listens on <code>127.0.0.1:8080</code> by itself (change it with <code>THIRTYFILE_ADDR</code>).</p>
         <p>When the sandbox is another machine or a virtual machine, forward the port from your computer, so that the page still arrives as <code>localhost</code>:</p>
@@ -145,7 +150,7 @@
             <thead><tr><th>Variable</th><th>Default</th><th>What it does</th></tr></thead>
             <tbody>
               <tr><td><code>THIRTYFILE_SINGLE_USER</code></td><td><code>false</code></td><td>Turns single-user mode on</td></tr>
-              <tr><td><code>THIRTYFILE_FILES</code></td><td></td><td>The full path of the folder to manage. Required in this mode, and it must not hold or be inside the data folder</td></tr>
+              <tr><td><code>THIRTYFILE_FILES</code></td><td></td><td>The full path of the folder to manage, or several as <code>Name=/path,Name=/path</code> (see below). Required in this mode, and none may hold or be inside the data folder or another of them</td></tr>
               <tr><td><code>THIRTYFILE_ADDR</code></td><td><code>127.0.0.1:8080</code></td><td>Where the server listens (a normal server: <code>0.0.0.0:8080</code>; the Docker image sets that itself)</td></tr>
               <tr><td><code>THIRTYFILE_ALLOWED_HOSTS</code></td><td></td><td>Names the page may be reached under besides <code>localhost</code>, separated by commas</td></tr>
             </tbody>

@@ -64,10 +64,65 @@ pub async fn refuse_single_user_data(db: &SqlitePool) -> AppResult<()> {
     Ok(())
 }
 
-/// Before the server starts in single-user mode: the local user, and their space showing `files`. Returns the user's
-/// id. Choosing another folder later shows that folder instead (the old folder is left alone).
+/// The folders `THIRTYFILE_FILES` names: a single full path (shown as "My files"), or a list of `Name=/full/path`
+/// entries separated by commas, each shown as a space of its own with that name
+#[derive(Debug, PartialEq)]
+pub enum Folders {
+    One(String),
+    Named(Vec<(String, String)>),
+}
+
+/// Reads `THIRTYFILE_FILES`. A path without a name has no `=` before its first folder separator, so a folder with an `=`
+/// in its name still works as the only one.
+pub fn parse_folders(spec: &str) -> AppResult<Folders> {
+    let spec = spec.trim();
+    let named = |entry: &str| entry.split_once('=').filter(|(name, _)| !name.contains(['/', '\\'])).map(|(n, p)| (n.trim().to_string(), p.trim().to_string()));
+    if !spec.split(',').any(|e| named(e).is_some()) {
+        return Ok(Folders::One(spec.to_string()));
+    }
+    let mut out: Vec<(String, String)> = Vec::new();
+    for entry in spec.split(',').map(str::trim).filter(|e| !e.is_empty()) {
+        let Some((name, path)) = named(entry) else {
+            return Err(AppError::bad_request(format!("Give every folder in THIRTYFILE_FILES a name, as in Workspace=/workspace: \"{entry}\" has none")));
+        };
+        let name = crate::util::validate_name(&name)?;
+        if path.is_empty() {
+            return Err(AppError::bad_request(format!("The folder named \"{name}\" in THIRTYFILE_FILES has no path")));
+        }
+        if out.iter().any(|(n, _)| n.eq_ignore_ascii_case(&name)) {
+            return Err(AppError::bad_request(format!("THIRTYFILE_FILES names \"{name}\" twice")));
+        }
+        out.push((name, path));
+    }
+    Ok(Folders::Named(out))
+}
+
+/// Before the server starts in single-user mode: the local user, and their spaces showing the folders of `files`
+/// (`parse_folders`). Returns the user's id. Choosing other folders later shows those instead (a folder no longer
+/// named is left alone, and shown again if it is named again).
 pub async fn prepare(db: &SqlitePool, data_dir: &Path, storage_dir: &Path, files: &str) -> AppResult<i64> {
-    let root = crate::folders::check_source_in(data_dir, storage_dir, files)?;
+    let wanted = match parse_folders(files)? {
+        Folders::One(path) => vec![(None, path)],
+        Folders::Named(list) => list.into_iter().map(|(name, path)| (Some(name), path)).collect(),
+    };
+    let mut roots: Vec<(Option<String>, String)> = Vec::new();
+    for (name, path) in wanted {
+        let root = crate::folders::check_source_in(data_dir, storage_dir, &path).map_err(|e| match &name {
+            Some(name) => AppError::bad_request(format!("{} (the folder named \"{name}\")", e.message)),
+            None => e,
+        })?;
+        for (other, taken) in &roots {
+            if Path::new(&root).starts_with(taken) || Path::new(taken).starts_with(&root) {
+                let shown = |n: &Option<String>| n.as_deref().map_or_else(|| "a folder".to_string(), |n| format!("\"{n}\""));
+                return Err(AppError::bad_request(format!(
+                    "THIRTYFILE_FILES: {} and {} are the same folder or one is inside the other. Each name needs a folder of its own.",
+                    shown(other),
+                    shown(&name)
+                )));
+            }
+        }
+        roots.push((name, root));
+    }
     let existing: Option<(i64,)> = sqlx::query_as("SELECT id FROM users WHERE source = ?").bind(SOURCE).fetch_optional(db).await?;
     let (others,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users WHERE source <> ?").bind(SOURCE).fetch_one(db).await?;
     if others > 0 {
@@ -79,7 +134,6 @@ pub async fn prepare(db: &SqlitePool, data_dir: &Path, storage_dir: &Path, files
     let user_id = match existing {
         Some((id,)) => id,
         None => {
-            let location = crate::locations::default_location(&mut tx).await?;
             create_user(
                 &mut tx,
                 NewUser {
@@ -100,24 +154,70 @@ pub async fn prepare(db: &SqlitePool, data_dir: &Path, storage_dir: &Path, files
             )
             .await?;
             let (id,): (i64,) = sqlx::query_as("SELECT id FROM users WHERE source = ?").bind(SOURCE).fetch_one(&mut *tx).await?;
-            let (drive, root_id) = create_drive(&mut tx, crate::personal::NAME, "personal", id, 0, &location).await?;
-            add_grant(&mut tx, &root_id, "user", id, "owner", Some(id), None).await?;
-            crate::folders::set_up(&mut tx, &drive, &root_id, &root, None).await?;
-            sqlx::query("UPDATE users SET root_id = ? WHERE id = ?").bind(&root_id).bind(id).execute(&mut *tx).await?;
             id
         }
     };
-    // The folder chosen now: a space that showed another one shows this one
-    let space: Option<(String, String, Option<String>)> =
-        sqlx::query_as("SELECT id, root_id, source_path FROM drives WHERE kind = 'personal' AND owner_id = ?").bind(user_id).fetch_optional(&mut *tx).await?;
-    if let Some((drive, root_id, shown)) = space
-        && shown.as_deref() != Some(root.as_str())
-    {
-        crate::folders::set_up(&mut tx, &drive, &root_id, &root, None).await?;
-        sqlx::query("UPDATE drives SET last_scan_at = NULL, scan_report = NULL WHERE id = ?").bind(&drive).execute(&mut *tx).await?;
+    match roots.as_slice() {
+        // One folder, shown as "My files"
+        [(None, root)] => show_as_my_files(&mut tx, user_id, root).await?,
+        _ => show_by_name(&mut tx, user_id, &roots).await?,
     }
     tx.commit().await?;
     Ok(user_id)
+}
+
+/// "My files" shows `root`; the spaces a list of names made are put away
+async fn show_as_my_files(tx: &mut sqlx::SqliteConnection, user_id: i64, root: &str) -> AppResult<()> {
+    let space: Option<(String, String, Option<String>)> =
+        sqlx::query_as("SELECT id, root_id, source_path FROM drives WHERE kind = 'personal' AND owner_id = ?").bind(user_id).fetch_optional(&mut *tx).await?;
+    let (drive, root_id) = match space {
+        Some((drive, root_id, shown)) => {
+            // The folder chosen now: a space that showed another one shows this one
+            if shown.as_deref() != Some(root) {
+                crate::folders::set_up(tx, &drive, &root_id, root, None).await?;
+                sqlx::query("UPDATE drives SET last_scan_at = NULL, scan_report = NULL WHERE id = ?").bind(&drive).execute(&mut *tx).await?;
+            }
+            (drive, root_id)
+        }
+        None => {
+            let location = crate::locations::default_location(tx).await?;
+            let (drive, root_id) = create_drive(tx, crate::personal::NAME, "personal", user_id, 0, &location).await?;
+            add_grant(tx, &root_id, "user", user_id, "owner", Some(user_id), None).await?;
+            crate::folders::set_up(tx, &drive, &root_id, root, None).await?;
+            (drive, root_id)
+        }
+    };
+    sqlx::query("UPDATE drives SET disabled = 0 WHERE id = ?").bind(&drive).execute(&mut *tx).await?;
+    sqlx::query("UPDATE users SET root_id = ? WHERE id = ?").bind(&root_id).bind(user_id).execute(&mut *tx).await?;
+    sqlx::query("UPDATE drives SET disabled = 1 WHERE kind = 'team' AND owner_id = ?").bind(user_id).execute(&mut *tx).await?;
+    Ok(())
+}
+
+/// Each folder is a space of its own with its name, and there is no "My files": a space of an earlier start that isn't
+/// named now is put away (not deleted), and comes back when it is named again
+async fn show_by_name(tx: &mut sqlx::SqliteConnection, user_id: i64, roots: &[(Option<String>, String)]) -> AppResult<()> {
+    sqlx::query("UPDATE drives SET disabled = 1 WHERE owner_id = ? AND kind IN ('personal', 'team')").bind(user_id).execute(&mut *tx).await?;
+    sqlx::query("UPDATE users SET root_id = NULL WHERE id = ?").bind(user_id).execute(&mut *tx).await?;
+    for (name, root) in roots {
+        let name = name.as_deref().unwrap_or_default();
+        let space: Option<(String,)> = sqlx::query_as("SELECT id FROM drives WHERE kind = 'team' AND owner_id = ? AND source_path = ?")
+            .bind(user_id)
+            .bind(root)
+            .fetch_optional(&mut *tx)
+            .await?;
+        match space {
+            Some((drive,)) => {
+                sqlx::query("UPDATE drives SET name = ?, disabled = 0 WHERE id = ?").bind(name).bind(&drive).execute(&mut *tx).await?;
+            }
+            None => {
+                let location = crate::locations::default_location(tx).await?;
+                let (drive, root_id) = create_drive(tx, name, "team", user_id, 0, &location).await?;
+                add_grant(tx, &root_id, "user", user_id, "owner", Some(user_id), None).await?;
+                crate::folders::set_up(tx, &drive, &root_id, root, None).await?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The shared space ("All files") exists in every data folder and has nothing to do here: it is switched off (once
@@ -248,6 +348,82 @@ mod tests {
         for host in ["", "evil.example.com", "evil.example.com:8080", "localhost.evil.example.com", "127.0.0.1.evil.example.com", "192.168.1.5:8080", "[::3]"] {
             assert!(!host_allowed(&m, host), "{host}");
         }
+    }
+
+    #[test]
+    fn the_folders_are_one_path_or_a_list_of_named_ones() {
+        assert_eq!(parse_folders(" /srv/work ").unwrap(), Folders::One("/srv/work".into()));
+        // An `=` in a folder's name isn't a name
+        assert_eq!(parse_folders("/srv/a=b").unwrap(), Folders::One("/srv/a=b".into()));
+        assert_eq!(parse_folders(r"C:\work=1").unwrap(), Folders::One(r"C:\work=1".into()));
+        assert_eq!(
+            parse_folders("Workspace=/workspace, Home = /home/sandbox,").unwrap(),
+            Folders::Named(vec![("Workspace".into(), "/workspace".into()), ("Home".into(), "/home/sandbox".into())])
+        );
+        assert_eq!(parse_folders("Work=/srv/a=b").unwrap(), Folders::Named(vec![("Work".into(), "/srv/a=b".into())]));
+        for bad in ["Work=/a,/b", "Work=", "Work=/a,work=/b", "=/a", "A:B=/a"] {
+            assert!(parse_folders(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[tokio::test]
+    async fn several_named_folders_are_spaces_of_their_own() {
+        let (work, home) = (files_folder(), files_folder());
+        let spec = format!("Workspace={},Home={}", work.display(), home.display());
+        let env = crate::testutil::single_user_env(Path::new(&spec)).await;
+        let app = crate::app::routes::router(env.st.clone());
+        let (_, me) = call(&app, Method::GET, "/api/auth/me", &[], None).await;
+        assert!(me["root_id"].is_null(), "{me}");
+        let (status, drives) = call(&app, Method::GET, "/api/drives", &[], None).await;
+        assert_eq!(status, StatusCode::OK, "{drives}");
+        let mut names: Vec<&str> = drives.as_array().unwrap().iter().filter_map(|d| d["name"].as_str()).collect();
+        names.sort();
+        assert_eq!(names, ["Home", "Workspace"], "{drives}");
+        // Each shows its own folder, and a change is made in that folder
+        let workspace = drives.as_array().unwrap().iter().find(|d| d["name"] == "Workspace").unwrap();
+        let root = workspace["root_id"].as_str().unwrap().to_string();
+        let (drive,): (String,) = sqlx::query_as("SELECT id FROM drives WHERE root_id = ?").bind(&root).fetch_one(&env.st.db).await.unwrap();
+        crate::folders::scan(&env.st, &drive).await.unwrap();
+        let made = serde_json::json!({ "parent_id": root, "name": "Made" });
+        let (status, made) = call(&app, Method::POST, "/api/folders", &[("origin", "http://localhost:8080")], Some(made)).await;
+        assert_eq!(status, StatusCode::OK, "{made}");
+        assert!(work.join("Made").is_dir() && !home.join("Made").exists());
+        // Starting again with one name changed, and one folder left out: that one is put away, not deleted
+        let again = format!("Code={}", work.display());
+        let id = prepare(&env.st.db, &env.dir, &env.dir.join("blobs"), &again).await.unwrap();
+        let shown: Vec<(String,)> = sqlx::query_as("SELECT name FROM drives WHERE owner_id = ? AND kind <> 'company' AND disabled = 0 ORDER BY name")
+            .bind(id)
+            .fetch_all(&env.st.db)
+            .await
+            .unwrap();
+        assert_eq!(shown, [("Code".to_string(),)]);
+        let (put_away,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM drives WHERE owner_id = ? AND kind = 'team' AND disabled = 1").bind(id).fetch_one(&env.st.db).await.unwrap();
+        assert_eq!(put_away, 1);
+        // Back to one folder: "My files", and the named spaces go away from the list
+        prepare(&env.st.db, &env.dir, &env.dir.join("blobs"), &work.to_string_lossy()).await.unwrap();
+        let (_, me) = call(&app, Method::GET, "/api/auth/me", &[], None).await;
+        assert!(me["root_id"].is_string(), "{me}");
+        let (_, drives) = call(&app, Method::GET, "/api/drives", &[], None).await;
+        assert_eq!(drives.as_array().unwrap().len(), 1, "{drives}");
+        let _ = std::fs::remove_dir_all(&work);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[tokio::test]
+    async fn folders_that_overlap_are_refused() {
+        let work = files_folder();
+        let env = crate::testutil::single_user_env(&work).await;
+        let inside = work.join("Docs");
+        for spec in [
+            format!("A={},B={}", work.display(), inside.display()),
+            format!("A={},B={}", inside.display(), work.display()),
+            format!("A={},B={}", work.display(), work.display()),
+        ] {
+            let err = prepare(&env.st.db, &env.dir, &env.dir.join("blobs"), &spec).await.unwrap_err();
+            assert!(err.message.contains("inside the other"), "{spec}: {}", err.message);
+        }
+        let _ = std::fs::remove_dir_all(&work);
     }
 
     use axum::{

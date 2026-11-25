@@ -94,7 +94,7 @@
         <p>单人模式适合只有你能访问的地方：沙盒、虚拟机，或在自己电脑上运行的容器。打开网页，文件就在眼前。它默认关闭，必须明确开启，并且不影响普通服务器。</p>
         <ul>
           <li><strong>无需登录。</strong>访问网页的人都是同一个人。没有账号、密码或两步验证码。</li>
-          <li><strong>一个文件夹。</strong>文件就是你选的文件夹（<code>THIRTYFILE_FILES</code>）里的普通文件。可以浏览、上传、下载、创建、编辑、重命名、移动和删除，预览、搜索、标签、回收站和编辑器都和平时一样。在文件夹外面做的更改也会显示出来。</li>
+          <li><strong>一个文件夹。</strong>文件就是你选的文件夹（<code>THIRTYFILE_FILES</code>）里的普通文件，也可以是几个有名称的文件夹（<a href="#several">见下方</a>）。可以浏览、上传、下载、创建、编辑、重命名、移动和删除，预览、搜索、标签、回收站和编辑器都和平时一样。在文件夹外面做的更改也会显示出来。</li>
           <li><strong>多人才需要的功能都没有。</strong>用户和群组、权限、分享链接、访客、控制面板、通知、WebDAV、S3 存储桶和 FTP 接收文件夹不只是隐藏，而是直接关闭：服务器不会响应它们。SFTP 也保持关闭。</li>
           <li><strong>只动那个文件夹。</strong>服务器只在该文件夹内读写。文件夹内指向外面的链接会被跳过，和所有文件夹空间一样。</li>
         </ul>
@@ -122,6 +122,11 @@
         </div>
         <p><code>/data</code> 文件夹保存索引、缩略图和设置。它不能位于文件文件夹里面，而且只属于这个模式：在单人模式创建的数据文件夹无法启动普通服务器，反过来也一样。之后改选别的文件夹，就会改为显示那个文件夹；旧的文件夹保持原样。</p>
 
+        <h3 id="several">多个文件夹</h3>
+        <p>想在同一个窗口处理不止一个文件夹，就给每个文件夹取一个名称。每个文件夹会成为一个以该名称命名的空间，列在“所有空间”下面，导航和文件操作都和平时一样。名称由你决定，不必和磁盘上的文件夹名称相同。</p>
+        <pre><code>-e THIRTYFILE_FILES=Workspace=/workspace,Home=/home/sandbox</code></pre>
+        <p>每个文件夹都要像上面的 <code>/files</code> 一样挂载进容器。条目之间用逗号分隔，每个文件夹都要有名称。文件夹不能位于另一个文件夹里面，数据文件夹也必须在所有文件夹之外。之后从列表拿掉的文件夹，在磁盘上保持原样，再次取名后会重新显示。只写一个没有名称的路径，行为和以前相同，显示为“My files”。</p>
+
         <h2 id="reach">从你的电脑访问</h2>
         <p>在容器内，服务器监听所有地址，而 Docker 只会转发你发布的端口。使用 <code>-p 127.0.0.1:8080:8080</code> 时，在运行 Docker 的电脑上打开 <code>http://localhost:8080</code>。不用 Docker 时，服务器默认只监听 <code>127.0.0.1:8080</code>（可用 <code>THIRTYFILE_ADDR</code> 更改）。</p>
         <p>当沙盒是另一台机器或虚拟机时，从你的电脑转发端口，网页到达时仍然是 <code>localhost</code>：</p>
@@ -146,7 +151,7 @@
             <thead><tr><th>变量</th><th>默认值</th><th>作用</th></tr></thead>
             <tbody>
               <tr><td><code>THIRTYFILE_SINGLE_USER</code></td><td><code>false</code></td><td>开启单人模式</td></tr>
-              <tr><td><code>THIRTYFILE_FILES</code></td><td></td><td>要管理的文件夹的完整路径。此模式必填，且不能包含数据文件夹或位于其中</td></tr>
+              <tr><td><code>THIRTYFILE_FILES</code></td><td></td><td>要管理的文件夹的完整路径，或用 <code>名称=/路径,名称=/路径</code> 指定多个（见下方）。此模式必填，且都不能包含数据文件夹、位于其中，或互相包含</td></tr>
               <tr><td><code>THIRTYFILE_ADDR</code></td><td><code>127.0.0.1:8080</code></td><td>服务器监听的地址（普通服务器是 <code>0.0.0.0:8080</code>；Docker 镜像自己会设置）</td></tr>
               <tr><td><code>THIRTYFILE_ALLOWED_HOSTS</code></td><td></td><td>除了 <code>localhost</code> 之外，网页可以使用的名称，以逗号分隔</td></tr>
             </tbody>
