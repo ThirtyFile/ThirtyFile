@@ -3821,9 +3821,9 @@ dependencies = [
 
 [[package]]
 name = "thirtyftp"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3193a3dbbfd01b33be1199362eb83c106f16d5a863a191eba131542db599eb19"
+checksum = "2b178a77469ae5fa8d78b252b80b6352361e158e50d18a59dc28f048ed7ed4e5"
 dependencies = [
  "rustls",
  "thiserror",
@@ -3834,9 +3834,9 @@ dependencies = [
 
 [[package]]
 name = "thirtys3-client"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92b63a85642e5a79259ad3c9008065d187fe0fc79372d143cff940eac9c92d26"
+checksum = "0041b6c09e9ea0844ef2a86cbef3fbb1d29bd90afddad57e4ad999f6cd6e6951"
 dependencies = [
  "bytes",
  "futures-util",
@@ -3855,9 +3855,9 @@ dependencies = [
 
 [[package]]
 name = "thirtys3-core"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54dbfee0719ce6321bd7e94f9cde6ddee93dbfb81ee7f960b37ca8b1a47d1f2f"
+checksum = "e24fb6c66fc7588edb69abac001866375467516c758b6fc978174b9c82bcdfa3"
 dependencies = [
  "base64 0.23.1",
  "crc-fast",
@@ -3873,9 +3873,9 @@ dependencies = [
 
 [[package]]
 name = "thirtys3-server"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20914381f50982c4d7e15c261bce8a51b3075e17948e1fbbfa12a7696047dbb5"
+checksum = "a8f92cef23b322432624aa6339627a4737f940bd3ed003e66bd8ece19243f6e0"
 dependencies = [
  "async-trait",
  "bytes",
