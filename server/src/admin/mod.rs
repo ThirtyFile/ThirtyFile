@@ -899,14 +899,13 @@ mod tests {
         let a = env.stored_file(&amy, amy.root(), "a.txt", b"amy's").await;
         let space = env.folder_space("Scans").await;
         let go = std::sync::Arc::new(tokio::sync::Notify::new());
-        let _hook = crate::fsops::hook_after_place(crate::fsops::wait_for(&go));
         let asked = delete(State(env.st.clone()), Admin(env.admin().await), Path(amy.id), Query(serde_json::from_value(json!({ "move_to": space.drive })).unwrap()));
         // The page (or a proxy) stops waiting while the files are copied: the removal isn't cut off in the middle, which
         // left the space read-only until a restart
-        let _ = tokio::time::timeout(std::time::Duration::from_millis(300), asked).await;
+        let _hook = crate::fsops::give_up_once_placed(&go, asked).await;
         go.notify_one();
         let mut gone = false;
-        for _ in 0..200 {
+        for _ in 0..1500 {
             if get_row(&env.st, amy.id).await.is_err() {
                 gone = true;
                 break;

@@ -61,16 +61,18 @@ pub(crate) const DUMMY_HASH: &str = "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$
 
 pub async fn verify_password(password: String, hash: String) -> AppResult<bool> {
     let _permit = hash_permits().acquire().await.map_err(AppError::internal)?;
-    Ok(tokio::task::spawn_blocking(move || {
-        let (usable, parsed) = match PasswordHash::new(&hash) {
-            Ok(p) => (true, p),
-            Err(_) => (false, PasswordHash::new(DUMMY_HASH).expect("valid dummy hash")),
-        };
-        // Always run the check: `usable && …` would skip it and answer at once
-        let matches = Argon2::default().verify_password(password.as_bytes(), &parsed).is_ok();
-        usable && matches
-    })
-    .await?)
+    Ok(tokio::task::spawn_blocking(move || check_password(&hash, |parsed| Argon2::default().verify_password(password.as_bytes(), parsed).is_ok())).await?)
+}
+
+/// Whether the password of which `matches` tells matches `hash`; a hash that isn't valid is checked as `DUMMY_HASH`
+fn check_password(hash: &str, matches: impl FnOnce(&PasswordHash) -> bool) -> bool {
+    let (usable, parsed) = match PasswordHash::new(hash) {
+        Ok(p) => (true, p),
+        Err(_) => (false, PasswordHash::new(DUMMY_HASH).expect("valid dummy hash")),
+    };
+    // Always run the check: `usable && …` would skip it and answer at once
+    let matches = matches(&parsed);
+    usable && matches
 }
 
 /// Stored instead of a password hash for accounts that sign in through a provider only (it isn't a valid hash, so nothing matches it)
@@ -604,17 +606,24 @@ mod tests {
 
     #[tokio::test]
     async fn accounts_without_a_password_take_as_long_to_check() {
-        let time = |hash: &'static str| async move {
-            let start = std::time::Instant::now();
-            let ok = verify_password(crate::testutil::wrong_password(), hash.into()).await.unwrap();
-            (ok, start.elapsed())
-        };
-        let (ok, real) = time(DUMMY_HASH).await;
-        assert!(!ok);
+        // Told by the work done rather than by a clock, which a busy machine makes meaningless: a check costs what the
+        // hash's algorithm and parameters say
+        let cost = |h: &PasswordHash| (h.algorithm.to_string(), h.version, h.params.to_string());
+        let real = hash_password(crate::testutil::password().into()).await.unwrap();
+        let real = cost(&PasswordHash::new(&real).unwrap());
         // Accounts that only sign in through single sign-on store "!" as their hash
-        let (ok, none) = time("!").await;
-        assert!(!ok);
-        assert!(none * 3 > real, "an account without a password answers much faster: {none:?} vs {real:?}");
+        let mut checked = None;
+        let ok = check_password(NO_PASSWORD, |h| {
+            checked = Some((cost(h), h.to_string()));
+            true
+        });
+        assert!(!ok, "nothing matches an account without a password");
+        let (none, hash) = checked.expect("a hash is checked all the same");
+        assert_eq!(hash, DUMMY_HASH);
+        assert_eq!(none, real);
+        for hash in [NO_PASSWORD, DUMMY_HASH] {
+            assert!(!verify_password(crate::testutil::wrong_password(), hash.into()).await.unwrap());
+        }
     }
 
     #[test]

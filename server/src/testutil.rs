@@ -141,11 +141,13 @@ async fn make_env(space_folders: bool, single_user: Option<&std::path::Path>) ->
 impl TestEnv {
     /// Creates a standard user (with a personal space)
     pub async fn user(&self, name: &str, can_share: bool) -> User {
-        let mut conn = self.st.db.acquire().await.unwrap();
         let password_hash = auth::hash_password(password().into()).await.unwrap();
-        let location = crate::locations::default_location(&mut conn).await.unwrap();
+        // As everywhere an account is made: without a write transaction around it, its personal space would be made in
+        // a deferred one, which is refused at once ("database is locked") while something in the background writes
+        let mut tx = db::begin_write(&self.st.db).await.unwrap();
+        let location = crate::locations::default_location(&mut tx).await.unwrap();
         let id = crate::users::create_user(
-            &mut conn,
+            &mut tx,
             NewUser {
                 username: name,
                 password_hash: &password_hash,
@@ -163,6 +165,8 @@ impl TestEnv {
         )
         .await
         .unwrap();
+        tx.commit().await.unwrap();
+        let mut conn = self.st.db.acquire().await.unwrap();
         auth::user_by_id(&self.st, &mut conn, id).await.unwrap().unwrap()
     }
 
@@ -333,4 +337,27 @@ pub fn write_old(path: &std::path::Path, content: &[u8]) {
 pub fn blob_file(env: &TestEnv, content: &[u8]) -> std::path::PathBuf {
     let hash = crate::util::sha256_hex(content);
     env.dir.join("blobs").join(&hash[0..2]).join(&hash[2..4]).join(&hash)
+}
+
+#[cfg(test)]
+mod tests {
+    /// Accounts made while other changes are being saved get their personal space: making one reads before it writes
+    #[tokio::test]
+    async fn users_made_while_something_else_writes_have_a_personal_space() {
+        let env = super::folders_env().await;
+        let db = env.st.db.clone();
+        let writer = tokio::spawn(async move {
+            loop {
+                let mut tx = crate::db::begin_write(&db).await.unwrap();
+                sqlx::query("UPDATE users SET quota_bytes = quota_bytes WHERE role = 'admin'").execute(&mut *tx).await.unwrap();
+                tx.commit().await.unwrap();
+                tokio::task::yield_now().await;
+            }
+        });
+        for i in 0..20 {
+            let user = env.user(&format!("user{i}"), true).await;
+            assert!(user.root_id.is_some(), "user{i}");
+        }
+        writer.abort();
+    }
 }

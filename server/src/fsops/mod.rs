@@ -472,6 +472,23 @@ pub(crate) fn wait_for(go: &std::sync::Arc<tokio::sync::Notify>) -> impl Fn() ->
     }
 }
 
+/// Tests: gives up on `request` (as a browser or a proxy does) once it has put content in place and waits for `go`,
+/// however long that takes: the request may be given up before that too, but then nothing is changed
+#[cfg(test)]
+pub(crate) async fn give_up_once_placed(go: &std::sync::Arc<tokio::sync::Notify>, request: impl Future) -> HookGuard {
+    let placed = std::sync::Arc::new(tokio::sync::Notify::new());
+    let (seen, wait) = (placed.clone(), wait_for(go));
+    let hook = hook_after_place(move || {
+        seen.notify_one();
+        wait()
+    });
+    tokio::select! {
+        _ = placed.notified() => {}
+        _ = request => panic!("the request answered before its content was in place"),
+    }
+    hook
+}
+
 #[cfg(not(test))]
 fn other_disk() -> bool {
     false
@@ -1450,14 +1467,13 @@ mod tests {
         let (sub, _) = env.node_at(&one.drive, "Sub").await.unwrap();
         // The content takes a while to copy: longer than the browser waits
         let go = std::sync::Arc::new(tokio::sync::Notify::new());
-        let _hook = hook_after_place(wait_for(&go));
         OTHER_DISK.with(|d| d.set(true));
         let asked = crate::nodes::move_nodes(State(env.st.clone()), admin.clone(), req(json!({ "ids": [sub], "dest_id": two.root })));
         // The browser (or a proxy) gives up on the request: the move goes on regardless
-        let _ = tokio::time::timeout(std::time::Duration::from_millis(300), asked).await;
+        let hook = give_up_once_placed(&go, asked).await;
         go.notify_one();
         let mut moved = false;
-        for _ in 0..200 {
+        for _ in 0..1500 {
             if env.drive_of(&sub).await == two.drive {
                 moved = true;
                 break;
@@ -1466,6 +1482,7 @@ mod tests {
         }
         OTHER_DISK.with(|d| d.set(false));
         assert!(moved, "the move finished");
+        drop(hook);
         assert_eq!(std::fs::read(two.dir.join("Sub/x.txt")).unwrap(), b"x");
         assert!(eventually_gone(&one.dir.join("Sub")).await);
         let hidden: Vec<String> = std::fs::read_dir(&two.dir)
@@ -1478,10 +1495,10 @@ mod tests {
 
         // A copy inside a folder space, the same
         let asked = crate::nodes::copy_nodes(State(env.st.clone()), admin.clone(), req(json!({ "ids": [sub], "dest_id": two.root })));
-        let _ = tokio::time::timeout(std::time::Duration::from_millis(300), asked).await;
+        let _hook = give_up_once_placed(&go, asked).await;
         go.notify_one();
         let mut copied = false;
-        for _ in 0..200 {
+        for _ in 0..1500 {
             if env.node_at(&two.drive, "Sub (1)/x.txt").await.is_some() {
                 copied = true;
                 break;
