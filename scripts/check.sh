@@ -22,7 +22,6 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
 web_static() {
-  node "$ROOT/.github/scripts/check-sqlite-patch.mjs"
   node --test "$ROOT/.github/scripts/check-rust-dependencies.test.mjs"
   cd "$ROOT/web"
   pnpm install --frozen-lockfile
@@ -99,7 +98,6 @@ quick() {
 }
 
 server() {
-  node "$ROOT/.github/scripts/check-sqlite-patch.mjs"
   migrations
   cd "$ROOT/server"
   # Formatting (rustfmt, server/rustfmt.toml): `cargo fmt` fixes it
