@@ -107,17 +107,13 @@ pub async fn prepare(db: &SqlitePool, data_dir: &Path, storage_dir: &Path, files
     };
     let mut roots: Vec<(Option<String>, String)> = Vec::new();
     for (name, path) in wanted {
-        let root = crate::folders::check_source_in(data_dir, storage_dir, &path).map_err(|e| match &name {
-            Some(name) => AppError::bad_request(format!("{} (the folder named \"{name}\")", e.message)),
-            None => e,
-        })?;
+        let root = crate::folders::check_source_in(data_dir, storage_dir, &path)?;
         for (other, taken) in &roots {
             if Path::new(&root).starts_with(taken) || Path::new(taken).starts_with(&root) {
                 let shown = |n: &Option<String>| n.as_deref().map_or_else(|| "a folder".to_string(), |n| format!("\"{n}\""));
+                let (first, second) = (shown(other), shown(&name));
                 return Err(AppError::bad_request(format!(
-                    "THIRTYFILE_FILES: {} and {} are the same folder or one is inside the other. Each name needs a folder of its own.",
-                    shown(other),
-                    shown(&name)
+                    "THIRTYFILE_FILES: {first} and {second} are the same folder or one is inside the other. Each name needs a folder of its own."
                 )));
             }
         }
