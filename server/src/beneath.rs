@@ -14,8 +14,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use std::sync::Arc;
+
 #[cfg(target_os = "linux")]
-use std::{os::fd::OwnedFd, sync::Arc};
+use std::os::fd::OwnedFd;
 
 /// A file or folder inside a folder space's folder
 #[derive(Clone, Debug)]
@@ -27,6 +29,68 @@ pub struct Pinned {
     name: Option<String>,
     /// How the system reaches it: `/proc/self/fd/<dir>/<name>` (elsewhere: an ordinary path)
     path: PathBuf,
+    /// A space's folder whose own files (`.thirtyfile-trash` and the like) are kept elsewhere (`Overlay`)
+    overlay: Option<Arc<Overlay>>,
+}
+
+/// The names of ThirtyFile's own files in a space's folder, and the names they have in the folder that holds them
+/// instead (`Overlay`)
+pub const MOVED_NAMES: [(&str, &str); 4] =
+    [(".thirtyfile-space", "space"), (".thirtyfile-journal", "journal"), (".thirtyfile-versions", "versions"), (".thirtyfile-trash", "trash")];
+
+/// A space whose own files are kept in another folder (`THIRTYFILE_FOLDER_STATE`): what is looked up under the space's
+/// folder with one of the `MOVED_NAMES` is looked up there instead, so the folder holds only the person's files. Every
+/// place that looks for a space's trash, versions, journal or marker goes through `Pinned::join`, so none needs to know.
+#[derive(Debug)]
+pub struct Overlay {
+    /// The folder holding the space's own files
+    pub state: PathBuf,
+    /// The space
+    pub drive: String,
+    /// Why they can't be used now (the folder isn't on the same file system, say): nothing is looked up then
+    broken: crate::sync::Mutex<Option<String>>,
+}
+
+impl Overlay {
+    pub fn new(state: PathBuf, drive: String) -> Overlay {
+        Overlay { state, drive, broken: crate::sync::Mutex::new(None) }
+    }
+
+    pub fn set_broken(&self, why: Option<String>) {
+        *self.broken.lock() = why;
+    }
+
+    pub fn broken(&self) -> Option<String> {
+        self.broken.lock().clone()
+    }
+}
+
+/// The spaces whose folders have an `Overlay`, by the folder's path as the space records it
+static OVERLAYS: crate::sync::RwLock<Option<std::collections::HashMap<PathBuf, Arc<Overlay>>>> = crate::sync::RwLock::new(None);
+
+/// A space's own files are kept in `overlay.state` from now on (replacing what the same folder had)
+pub fn overlay_folder(root: &Path, overlay: Arc<Overlay>) {
+    OVERLAYS.write().get_or_insert_with(Default::default).insert(trimmed(root), overlay);
+}
+
+/// The overlay of the space folder `root`, when it has one
+pub fn overlay_of(root: &Path) -> Option<Arc<Overlay>> {
+    OVERLAYS.read().as_ref().and_then(|m| m.get(&trimmed(root)).cloned())
+}
+
+fn trimmed(p: &Path) -> PathBuf {
+    p.components().collect()
+}
+
+/// The folder holding a space's own files, when `rel` (below the space's folder) is one of them: the path to look up
+/// there instead
+fn moved(rel: &str) -> Option<String> {
+    let (first, rest) = rel.split_once('/').map_or((rel, None), |(f, r)| (f, Some(r)));
+    let (_, name) = MOVED_NAMES.iter().find(|(from, _)| *from == first)?;
+    Some(match rest {
+        Some(rest) => format!("{name}/{rest}"),
+        None => (*name).to_string(),
+    })
 }
 
 fn invalid(what: &str) -> io::Error {
@@ -106,14 +170,32 @@ impl Pinned {
         {
             let dir = sys::open_root(root)?;
             let path = sys::proc_path(&dir);
-            Ok(Pinned { dir: Arc::new(dir), name: None, path })
+            Ok(Pinned { dir: Arc::new(dir), name: None, path, overlay: overlay_of(root) })
         }
         #[cfg(not(target_os = "linux"))]
         {
             if !std::fs::metadata(root)?.is_dir() {
                 return Err(io::Error::new(io::ErrorKind::NotFound, "not a folder"));
             }
-            Ok(Pinned { name: None, path: root.to_path_buf() })
+            Ok(Pinned { name: None, path: root.to_path_buf(), overlay: overlay_of(root) })
+        }
+    }
+
+    /// A folder, opened, that has no overlay of its own even when it is a space's folder: the folder holding a space's
+    /// own files
+    fn plain_root(root: &Path) -> io::Result<Pinned> {
+        #[cfg(target_os = "linux")]
+        {
+            let dir = sys::open_root(root)?;
+            let path = sys::proc_path(&dir);
+            Ok(Pinned { dir: Arc::new(dir), name: None, path, overlay: None })
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            if !std::fs::metadata(root)?.is_dir() {
+                return Err(io::Error::new(io::ErrorKind::NotFound, "not a folder"));
+            }
+            Ok(Pinned { name: None, path: root.to_path_buf(), overlay: None })
         }
     }
 
@@ -122,6 +204,13 @@ impl Pinned {
     pub fn join(&self, rel: &str) -> io::Result<Pinned> {
         let parts = parts(rel)?;
         let Some((last, on_the_way)) = parts.split_last() else { return Ok(self.clone()) };
+        // The space's own files are in the overlay's folder
+        if let (Some(overlay), None, Some(there)) = (&self.overlay, &self.name, moved(rel)) {
+            if let Some(why) = overlay.broken() {
+                return Err(io::Error::other(why));
+            }
+            return Pinned::plain_root(&overlay.state)?.join(&there);
+        }
         #[cfg(target_os = "linux")]
         {
             let mut dir = self.dir()?.dir;
@@ -129,7 +218,7 @@ impl Pinned {
                 dir = Arc::new(sys::open_dir(&dir, p)?);
             }
             let path = sys::proc_path(&dir).join(last);
-            Ok(Pinned { dir, name: Some(last.to_string()), path })
+            Ok(Pinned { dir, name: Some(last.to_string()), path, overlay: None })
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -138,7 +227,7 @@ impl Pinned {
             for p in &parts {
                 path.push(p);
             }
-            Ok(Pinned { name: Some(last.to_string()), path })
+            Ok(Pinned { name: Some(last.to_string()), path, overlay: None })
         }
     }
 
@@ -149,7 +238,7 @@ impl Pinned {
         {
             let dir = sys::open_dir(&self.dir, name)?;
             let path = sys::proc_path(&dir);
-            Ok(Pinned { dir: Arc::new(dir), name: None, path })
+            Ok(Pinned { dir: Arc::new(dir), name: None, path, overlay: None })
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -157,7 +246,7 @@ impl Pinned {
             if std::fs::symlink_metadata(&self.path)?.file_type().is_symlink() {
                 return Err(io::Error::new(io::ErrorKind::NotADirectory, "a symbolic link"));
             }
-            Ok(Pinned { name: None, path: self.path.clone() })
+            Ok(Pinned { name: None, path: self.path.clone(), overlay: None })
         }
     }
 
@@ -166,12 +255,17 @@ impl Pinned {
         self.name.as_ref()?;
         #[cfg(target_os = "linux")]
         {
-            Some(Pinned { dir: self.dir.clone(), name: None, path: sys::proc_path(&self.dir) })
+            Some(Pinned { dir: self.dir.clone(), name: None, path: sys::proc_path(&self.dir), overlay: None })
         }
         #[cfg(not(target_os = "linux"))]
         {
-            Some(Pinned { name: None, path: self.path.parent()?.to_path_buf() })
+            Some(Pinned { name: None, path: self.path.parent()?.to_path_buf(), overlay: None })
         }
+    }
+
+    /// The overlay of a space's folder opened with `root`
+    pub fn overlay(&self) -> Option<&Arc<Overlay>> {
+        self.overlay.as_ref()
     }
 
     /// Its name in its folder (None for a folder that was opened itself)

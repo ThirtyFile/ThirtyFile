@@ -136,12 +136,17 @@ pub async fn set_up(conn: &mut SqliteConnection, drive_id: &str, root_id: &str, 
         .execute(&mut *conn)
         .await?;
     sqlx::query("UPDATE nodes SET fs_path = '' WHERE id = ?").bind(root_id).execute(&mut *conn).await?;
+    // The space's own files go elsewhere when the server is set to keep them there (state.rs)
+    let (read_only,): (bool,) = sqlx::query_as("SELECT read_only FROM drives WHERE id = ?").bind(drive_id).fetch_one(&mut *conn).await?;
+    let identity = crate::beneath::Pinned::root(Path::new(source)).ok().and_then(|r| super::folder_identity(&r));
+    if location.is_none() {
+        super::state::attach(drive_id, Path::new(source), read_only, identity).map_err(AppError::bad_request)?;
+    }
     // Before anything is written there (a folder that can't take it, read-only say, gets it from a scan if ever)
     if let Err(e) = mark_space(Path::new(source), drive_id) {
         tracing::debug!("Couldn't write the marker file in {source}: {e}");
     }
     // And its identity, which tells it apart from another folder put in its place where the marker can't
-    let identity = crate::beneath::Pinned::root(Path::new(source)).ok().and_then(|r| super::folder_identity(&r));
     super::record_root(conn, drive_id, identity).await?;
     Ok(())
 }

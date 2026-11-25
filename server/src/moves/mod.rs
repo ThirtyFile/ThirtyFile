@@ -617,6 +617,12 @@ async fn queue(conn: &mut SqliteConnection, user: &crate::auth::User, drive_id: 
     }
     // Its folder was found there before the write lock was taken (`create`)
     let from_path = space.source_path.clone().filter(|_| space.mode == SpaceMode::Folder);
+    // The trash and versions of a space that keeps its own files elsewhere (THIRTYFILE_FOLDER_STATE) would stay behind
+    if from_path.as_deref().is_some_and(|p| crate::beneath::overlay_of(std::path::Path::new(p)).is_some()) {
+        return Err(AppError::bad_request(format!(
+            "\"{shown}\" keeps its own files (trash and versions) outside its folder (THIRTYFILE_FOLDER_STATE), which a move doesn't carry over yet"
+        )));
+    }
     // Already there: only content still kept elsewhere (from an earlier move, say) is gathered there
     if space.location_id.as_deref() == Some(target) && space.mode == to_mode && !store::scattered(conn, drive_id, target).await? {
         return Err(AppError::bad_request(format!("\"{shown}\" is already on this location")));

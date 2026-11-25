@@ -27,6 +27,7 @@ use crate::{
 };
 
 mod source;
+pub mod state;
 pub use source::{check_location_folder, check_new_source, check_source, check_source_in, set_up};
 
 /// Files changed more recently than this are still being written, maybe: they are indexed by a later scan
@@ -54,7 +55,16 @@ pub fn space_marker(root: &crate::beneath::Pinned) -> std::io::Result<Option<Str
     };
     let mut b = Vec::new();
     file.take(MAX_MARKER).read_to_end(&mut b)?;
-    Ok(Some(String::from_utf8_lossy(&b).trim().to_string()))
+    let id = String::from_utf8_lossy(&b).trim().to_string();
+    // A space whose own files are kept elsewhere (state.rs): its marker isn't in its folder, so it tells only that the
+    // files are the space's. The folder has to be the one the space showed (another disk mounted in its place isn't)
+    if let Some(overlay) = root.overlay()
+        && let Some(known) = known_root(&overlay.drive)
+        && folder_identity(root).is_some_and(|now| now != known)
+    {
+        return Ok(None);
+    }
+    Ok(Some(id))
 }
 
 /// Bytes of a space's marker read at most (it holds a space id)

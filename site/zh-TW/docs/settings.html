@@ -117,6 +117,7 @@
             <tr><td><code>THIRTYFILE_FTP_KEY</code></td><td></td><td>該憑證的私鑰，掛載的 PEM 檔案需讓使用者 1000 可讀取</td></tr>
             <tr><td><code>THIRTYFILE_DATA</code></td><td><code>/data</code></td><td>資料庫、縮圖和進行中上傳的目錄。由映像設定，請在該處掛載資料夾，不要修改變數。獨立伺服器程式使用 <code>./data</code></td></tr>
             <tr><td><code>THIRTYFILE_STORAGE</code></td><td><code>/storage</code></td><td>內建儲存位置的資料夾，與 <code>THIRTYFILE_DATA</code> 一樣由映像設定。獨立伺服器程式使用資料目錄內的 <code>blobs</code></td></tr>
+            <tr><td><code>THIRTYFILE_FOLDER_STATE</code></td><td></td><td>把顯示所選資料夾的資料夾空間的資源回收筒、舊版本、日誌和標記檔，放在這個資料夾，而不是它們自己裡面。必須和那些資料夾在同一顆磁碟、同一個掛載上，見<a href="storage.html#folder-state">儲存位置</a></td></tr>
           </tbody>
         </table></div>
         <p>開關設定接受 <code>true</code> 和 <code>false</code>（也接受 <code>1</code>/<code>0</code>、<code>yes</code>/<code>no</code> 和 <code>on</code>/<code>off</code>，不區分大小寫）。在 <code>compose.yaml</code> 中加引號（<code>"true"</code>），否則 YAML 會將其解析為其他類型。</p>
