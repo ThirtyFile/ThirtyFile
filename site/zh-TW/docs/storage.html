@@ -301,6 +301,16 @@
           <li>項目原本所在的資料夾在伺服器上被刪除或改名時，資源回收筒裡的項目仍會保留；還原後會放在空間的最上層資料夾。</li>
         </ul>
 
+        <h3 id="folder-state">把 ThirtyFile 自己的檔案放在資料夾外面</h3>
+        <p>預設情況下，資料夾空間會把資源回收筒、舊版本、進行中變更的日誌和標記檔（<code>.thirtyfile-trash</code>、<code>.thirtyfile-versions</code>、<code>.thirtyfile-journal</code>、<code>.thirtyfile-space</code>）放在它的資料夾裡面。當資料夾還被其他程式共用（例如 Git 工作目錄）時，它們會礙事。把 <code>THIRTYFILE_FOLDER_STATE</code> 設成一個資料夾，每個顯示管理員所選資料夾的空間，就會改把它們放在 <code>&lt;該資料夾&gt;/&lt;空間 id&gt;/</code>，空間的資料夾裡只剩你的檔案。在儲存位置自己的資料夾裡的空間不受影響。</p>
+        <ul>
+          <li><strong>同一顆磁碟、同一個掛載。</strong>資源回收筒與舊版本靠重新命名檔案運作，而重新命名不能跨檔案系統，同一顆磁碟的兩個不同掛載也不行。這個資料夾必須和空間的資料夾在同一個本機檔案系統、同一個掛載上。ThirtyFile 會在兩者之間重新命名一個小檔案來檢查；沒通過的空間不會被使用：兩邊都不會寫入，原因會顯示在記錄與「檢查變更」中。物件儲存、SFTP、WebDAV，以及只是看起來像資料夾的掛載（以 FUSE 掛載的 S3 儲存貯體）都不行。在 Docker 裡，請掛載共同的上層資料夾，例如 <code>-v /home/me/projects:/projects</code>，把工作目錄放在 <code>/projects/app</code>，再設 <code>THIRTYFILE_FOLDER_STATE=/projects/.thirtyfile-state</code>。這個資料夾必須已經存在，且在所有空間的資料夾之外。</li>
+          <li><strong>開啟時。</strong>第一次啟動會把空間資料夾裡原有的內容搬到新位置。有未完成變更的空間不會被搬：先不帶這個設定啟動一次讓它恢復，再重新設定。</li>
+          <li><strong>辨認資料夾。</strong>標記檔不在資料夾裡了，所以 ThirtyFile 改用選擇資料夾時記下的資料夾識別資訊（裝置與 inode），分辨它和被換進來的別的磁碟。系統沒有識別資訊的地方（部分 Windows 與 exFAT 磁碟），這項檢查會比較弱。</li>
+          <li><strong>仍留在資料夾裡的。</strong>名為 <code>.thirtyfile-upload-…</code>、<code>.thirtyfile-copy-…</code>、<code>.thirtyfile-move-…</code> 的暫存檔，會在傳輸進行時出現，因為它們必須和最終位置在一起。傳輸結束就會消失。</li>
+          <li><strong>限制。</strong>這樣的空間目前還不能搬到其他位置。要改回去，請先停止 ThirtyFile，把新位置裡該空間資料夾中的 <code>space</code>、<code>journal</code>、<code>versions</code>、<code>trash</code> 搬回空間自己的資料夾，分別命名為 <code>.thirtyfile-space</code>、<code>.thirtyfile-journal</code>、<code>.thirtyfile-versions</code>、<code>.thirtyfile-trash</code>，再移除這個設定。新資料夾要和資料資料夾一起備份：資源回收筒與舊版本都在裡面。</li>
+        </ul>
+
         <h2 id="check">檢查位置中的內容</h2>
         <p><strong>控制台 › 儲存位置</strong>各位置的 <strong>…</strong> 選單還有三個操作，只有管理員可用。</p>
         <h3 id="test-steps">逐步測試</h3>

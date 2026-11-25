@@ -113,6 +113,7 @@
           <tr><td><code>THIRTYFILE_FTP_KEY</code></td><td></td><td>その証明書の秘密鍵。ユーザー 1000 が読める PEM ファイルをマウントします</td></tr>
           <tr><td><code>THIRTYFILE_DATA</code></td><td><code>/data</code></td><td>データベース、サムネイル、進行中のアップロードのフォルダー。イメージが設定するため値を変えず、そこにフォルダーをマウントしてください。単体プログラムでは <code>./data</code></td></tr>
           <tr><td><code>THIRTYFILE_STORAGE</code></td><td><code>/storage</code></td><td>組み込み保存場所のフォルダー。<code>THIRTYFILE_DATA</code> と同様にイメージが設定します。単体プログラムではデータフォルダーの <code>blobs</code></td></tr>
+          <tr><td><code>THIRTYFILE_FOLDER_STATE</code></td><td></td><td>選択したフォルダーを表示するフォルダースペースのごみ箱、バージョン、ジャーナル、マーカーを、そのフォルダーの中ではなく、このフォルダーに置きます。それらのフォルダーと同じディスク、同じマウントにある必要があります。<a href="storage.html#folder-state">ストレージの場所</a>を参照</td></tr>
         </tbody></table></div>
         <p>オン、オフの設定は <code>true</code>、<code>false</code>（<code>1</code>/<code>0</code>、<code>yes</code>/<code>no</code>、<code>on</code>/<code>off</code> も、大文字小文字を問わず）を受け付けます。<code>compose.yaml</code> では引用符（<code>"true"</code>）で囲み、YAML に別の型へ変換させないようにします。</p>
         <h2 id="docker-run">docker run の場合</h2>

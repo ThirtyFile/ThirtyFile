@@ -286,6 +286,16 @@
           <li>複数の削除、移動、復元が失敗したら、既に変更したものを戻し半完了を防ぎます。同ディスクへの移動途中で停止なら 1 日後の確認で元名へ戻し、別ディスクへのコピー途中なら原本は元にあり、未完コピーを削除します。名前変更、内部移動、ごみ箱への出し入れ、旧版保存は隠し <code>.thirtyfile-journal</code> に先に記録し、次の確認で共有、権限、履歴ごと戻します。Windows、exFAT など識別 ID のないディスクも同じです。旧名が既に取られた場合は移動先で保持します。保存で新内容が配置済みならそれを残し、旧内容を以前の版にします。</li>
           <li>元のフォルダーがサーバー上で削除または名前変更されても、ごみ箱の項目は残ります。復元するとスペースの最上位フォルダーに戻ります。</li>
         </ul>
+        <h3 id="folder-state">ThirtyFile 自身のファイルをフォルダーの外に置く</h3>
+        <p>既定では、フォルダースペースはごみ箱、以前のバージョン、進行中の変更の記録、マーカーファイル（<code>.thirtyfile-trash</code>、<code>.thirtyfile-versions</code>、<code>.thirtyfile-journal</code>、<code>.thirtyfile-space</code>）を、そのフォルダーの中に置きます。フォルダーを Git のチェックアウトのように他のプログラムと共有していると、これらが邪魔になります。<code>THIRTYFILE_FOLDER_STATE</code> にフォルダーを指定すると、管理者が選んだフォルダーを表示するスペースは、これらを <code>&lt;そのフォルダー&gt;/&lt;スペース ID&gt;/</code> に置くようになり、スペースのフォルダーにはあなたのファイルだけが残ります。ストレージ場所自身のフォルダーの中にあるスペースは対象外です。</p>
+        <ul>
+          <li><strong>同じディスク、同じマウント。</strong>ごみ箱とバージョンはファイルの名前変更で動きますが、名前変更はファイルシステムをまたげず、同じディスクの別々のマウントの間でもできません。このフォルダーは、スペースのフォルダーと同じローカルのファイルシステム、同じマウントにある必要があります。ThirtyFile は両者の間で小さなファイルの名前を変えて確かめます。確認に通らなかったスペースは使われず、どちらにも書き込まれません。理由はログと「変更の確認」に表示されます。オブジェクトストレージ、SFTP、WebDAV、フォルダーに見えるだけのマウント（FUSE でマウントした S3 バケットなど）は使えません。Docker では共通の親フォルダーをマウントし（例：<code>-v /home/me/projects:/projects</code>）、チェックアウトを <code>/projects/app</code> に置き、<code>THIRTYFILE_FOLDER_STATE=/projects/.thirtyfile-state</code> を設定します。フォルダーはあらかじめ存在し、どのスペースのフォルダーの外にある必要があります。</li>
+          <li><strong>有効にするとき。</strong>最初の起動で、スペースがすでにフォルダー内に持っているものが新しい場所へ移されます。未完了の変更があるスペースは移されません。一度この設定なしで起動して復旧させてから、もう一度設定してください。</li>
+          <li><strong>フォルダーの見分け方。</strong>マーカーがフォルダーの中になくなるため、ThirtyFile は、フォルダーを選んだときに記録した識別情報（デバイスと inode）で、入れ替えられた別のディスクと区別します。識別情報のない環境（一部の Windows や exFAT のディスク）では、この確認は弱くなります。</li>
+          <li><strong>フォルダーに残るもの。</strong><code>.thirtyfile-upload-…</code>、<code>.thirtyfile-copy-…</code>、<code>.thirtyfile-move-…</code> という名前の一時ファイルは、転送中に現れます。最終的な場所の隣に置く必要があるためです。転送が終われば消えます。</li>
+          <li><strong>制限。</strong>このようなスペースは、まだ別の場所へ移動できません。元に戻すには、ThirtyFile を止め、新しい場所のそのスペースのフォルダーにある <code>space</code>、<code>journal</code>、<code>versions</code>、<code>trash</code> を、スペース自身のフォルダーに <code>.thirtyfile-space</code>、<code>.thirtyfile-journal</code>、<code>.thirtyfile-versions</code>、<code>.thirtyfile-trash</code> として戻し、設定を削除します。新しいフォルダーはデータフォルダーと一緒にバックアップしてください。ごみ箱とバージョンがそこにあります。</li>
+        </ul>
+
         <h2 id="check">保存場所の内容を確認する</h2>
         <p>各場所の <strong>…</strong> には、管理者だけが使う 3 操作があります。</p>
         <h3 id="test-steps">段階ごとのテスト</h3>
