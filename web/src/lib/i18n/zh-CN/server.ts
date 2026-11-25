@@ -1218,4 +1218,12 @@ export default {
   "The directory gave no stable id for this account. Ask your administrator to check the attribute for it.": "目录没有给这个账号稳定标识符。请联系管理员检查存放它的属性。",
   "This directory account has no account here yet. Ask your administrator.": "这个目录账号在这里还没有账号。请联系管理员。",
   "An account with this name already exists here and doesn't belong to the directory. Ask your administrator.": "这里已有同名的账号，而且它不属于目录。请联系管理员。",
+  "Give every folder in THIRTYFILE_FILES a name, as in Workspace=/workspace: \"{entry}\" has none":
+    "THIRTYFILE_FILES 里的每个文件夹都要有名称，例如 Workspace=/workspace：“{entry}”没有名称",
+  "The folder named \"{name}\" in THIRTYFILE_FILES has no path":
+    "THIRTYFILE_FILES 里名为“{name}”的文件夹没有路径",
+  "THIRTYFILE_FILES names \"{name}\" twice":
+    "THIRTYFILE_FILES 把“{name}”用了两次",
+  "THIRTYFILE_FILES: {first} and {second} are the same folder or one is inside the other. Each name needs a folder of its own.":
+    "THIRTYFILE_FILES：{first} 和 {second} 是同一个文件夹，或其中一个在另一个里面。每个名称都需要自己的文件夹。",
 } satisfies Record<string, string>;

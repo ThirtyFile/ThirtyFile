@@ -94,7 +94,7 @@
         <p>單人模式適合只有你能連到的地方：沙盒、虛擬機器，或在自己電腦上執行的容器。開啟網頁，檔案就在眼前。它預設關閉，必須明確開啟，而且不影響一般伺服器。</p>
         <ul>
           <li><strong>不用登入。</strong>連到網頁的人都是同一個人。沒有帳號、密碼或兩步驟驗證碼。</li>
-          <li><strong>一個資料夾。</strong>檔案就是你選的資料夾（<code>THIRTYFILE_FILES</code>）裡的一般檔案。可以瀏覽、上傳、下載、建立、編輯、重新命名、移動與刪除，預覽、搜尋、標籤、資源回收筒與編輯器都和平常一樣。在資料夾外面做的變更也會顯示出來。</li>
+          <li><strong>一個資料夾。</strong>檔案就是你選的資料夾（<code>THIRTYFILE_FILES</code>）裡的一般檔案，也可以是幾個有名稱的資料夾（<a href="#several">見下方</a>）。可以瀏覽、上傳、下載、建立、編輯、重新命名、移動與刪除，預覽、搜尋、標籤、資源回收筒與編輯器都和平常一樣。在資料夾外面做的變更也會顯示出來。</li>
           <li><strong>多人才需要的功能都沒有。</strong>使用者與群組、權限、分享連結、訪客、控制台、通知、WebDAV、S3 儲存貯體與 FTP 接收資料夾不只是隱藏，而是直接關閉：伺服器不會回應它們。SFTP 也保持關閉。</li>
           <li><strong>只動那個資料夾。</strong>伺服器只在該資料夾內讀寫。資料夾內指向外面的連結會被略過，和所有資料夾空間一樣。</li>
         </ul>
@@ -122,6 +122,11 @@
         </div>
         <p><code>/data</code> 資料夾保存索引、縮圖與設定。它不能位在檔案資料夾裡面，而且只屬於這個模式：在單人模式建立的資料夾無法啟動一般伺服器，反過來也一樣。之後改選別的資料夾，就會改顯示那個資料夾；舊的資料夾保持原樣。</p>
 
+        <h3 id="several">多個資料夾</h3>
+        <p>想在同一個視窗處理不只一個資料夾，就替每個資料夾取一個名稱。每個資料夾會成為一個以該名稱命名的空間，列在「所有空間」底下，導覽與檔案操作都和平常一樣。名稱由你決定，不必和磁碟上的資料夾名稱相同。</p>
+        <pre><code>-e THIRTYFILE_FILES=Workspace=/workspace,Home=/home/sandbox</code></pre>
+        <p>每個資料夾都要像上面的 <code>/files</code> 一樣掛載進容器。項目之間用逗號分隔，每個資料夾都要有名稱。資料夾不能位在另一個資料夾裡面，資料資料夾也必須在所有資料夾之外。之後從清單拿掉的資料夾，在磁碟上維持原樣，再次取名後會重新顯示。只寫一個沒有名稱的路徑，行為和以前相同，顯示為「My files」。</p>
+
         <h2 id="reach">從你的電腦連線</h2>
         <p>在容器內，伺服器監聽所有位址，而 Docker 只會轉送你發布的連接埠。使用 <code>-p 127.0.0.1:8080:8080</code> 時，在執行 Docker 的電腦上開啟 <code>http://localhost:8080</code>。不用 Docker 時，伺服器預設只監聽 <code>127.0.0.1:8080</code>（可用 <code>THIRTYFILE_ADDR</code> 更改）。</p>
         <p>當沙盒是另一台機器或虛擬機器時，從你的電腦轉送連接埠，網頁到達時仍然是 <code>localhost</code>：</p>
@@ -146,7 +151,7 @@
             <thead><tr><th>變數</th><th>預設值</th><th>作用</th></tr></thead>
             <tbody>
               <tr><td><code>THIRTYFILE_SINGLE_USER</code></td><td><code>false</code></td><td>開啟單人模式</td></tr>
-              <tr><td><code>THIRTYFILE_FILES</code></td><td></td><td>要管理的資料夾的完整路徑。此模式必填，且不能包含資料資料夾或位在其中</td></tr>
+              <tr><td><code>THIRTYFILE_FILES</code></td><td></td><td>要管理的資料夾的完整路徑，或用 <code>名稱=/路徑,名稱=/路徑</code> 指定多個（見下方）。此模式必填，且都不能包含資料資料夾、位在其中，或互相包含</td></tr>
               <tr><td><code>THIRTYFILE_ADDR</code></td><td><code>127.0.0.1:8080</code></td><td>伺服器監聽的位址（一般伺服器是 <code>0.0.0.0:8080</code>；Docker 映像檔自己會設定）</td></tr>
               <tr><td><code>THIRTYFILE_ALLOWED_HOSTS</code></td><td></td><td>除了 <code>localhost</code> 之外，網頁可以使用的名稱，以逗號分隔</td></tr>
             </tbody>
