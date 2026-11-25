@@ -116,6 +116,7 @@
               <tr><td><code>THIRTYFILE_FTP_KEY</code></td><td></td><td>Private key of that certificate, a mounted PEM file that user 1000 can read</td></tr>
               <tr><td><code>THIRTYFILE_DATA</code></td><td><code>/data</code></td><td>Folder for the database, thumbnails and uploads in progress. Set by the image; mount a folder there rather than changing it. The server program on its own uses <code>./data</code></td></tr>
               <tr><td><code>THIRTYFILE_STORAGE</code></td><td><code>/storage</code></td><td>Folder of the built-in storage location. Set by the image, like <code>THIRTYFILE_DATA</code>. The server program on its own uses <code>blobs</code> in the data folder</td></tr>
+              <tr><td><code>THIRTYFILE_FOLDER_STATE</code></td><td></td><td>Keeps the trash, versions, journal and marker of the folder spaces that show a chosen folder in this folder instead of inside theirs. It must be on the same disk and mount as those folders, see <a href="storage.html#folder-state">Storage locations</a></td></tr>
             </tbody>
           </table>
         </div>

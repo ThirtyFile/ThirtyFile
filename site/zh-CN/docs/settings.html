@@ -116,6 +116,7 @@
             <tr><td><code>THIRTYFILE_FTP_KEY</code></td><td></td><td>该证书的私钥，挂载的 PEM 文件需让用户 1000 可读取</td></tr>
             <tr><td><code>THIRTYFILE_DATA</code></td><td><code>/data</code></td><td>数据库、缩略图和进行中上传的目录。由镜像设置，请在该处挂载文件夹，不要修改变量。独立服务器程序使用 <code>./data</code></td></tr>
             <tr><td><code>THIRTYFILE_STORAGE</code></td><td><code>/storage</code></td><td>内置存储位置的文件夹，与 <code>THIRTYFILE_DATA</code> 一样由镜像设置。独立服务器程序使用数据目录内的 <code>blobs</code></td></tr>
+            <tr><td><code>THIRTYFILE_FOLDER_STATE</code></td><td></td><td>把显示所选文件夹的文件夹空间的回收站、旧版本、日志和标记文件，放在这个文件夹，而不是它们自己里面。必须和那些文件夹在同一块磁盘、同一个挂载上，见<a href="storage.html#folder-state">存储位置</a></td></tr>
           </tbody>
         </table></div>
         <p>开关设置接受 <code>true</code> 和 <code>false</code>（也接受 <code>1</code>/<code>0</code>、<code>yes</code>/<code>no</code> 和 <code>on</code>/<code>off</code>，不区分大小写）。在 <code>compose.yaml</code> 中加引号（<code>"true"</code>），否则 YAML 会将其解析为其他类型。</p>

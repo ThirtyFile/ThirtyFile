@@ -573,6 +573,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_space_with_its_own_files_elsewhere_keeps_its_folder_clean() {
+        let env = testutil::env().await;
+        let space = env.folder_space("Shared").await;
+        let admin = env.admin().await;
+        let (dir, drive) = (&space.dir, &space.drive);
+        let st = || State(env.st.clone());
+        let base = std::env::temp_dir().join(format!("thirtyfile-state-base-{}", crate::util::new_id()));
+        std::fs::create_dir_all(&base).unwrap();
+        // The setting is turned on for a space that already has its marker in its folder
+        assert!(dir.join(crate::folders::MARKER).is_file());
+        let identity = crate::beneath::Pinned::root(dir).ok().and_then(|r| crate::folders::folder_identity(&r));
+        crate::folders::state::attach_in(&base, drive, dir, false, identity).unwrap();
+        let own = base.join(drive);
+        let names = || std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect::<std::collections::BTreeSet<_>>();
+        assert!(names().is_empty() && own.join("space").is_file());
+        write_old(&dir.join("a.txt"), b"one");
+        crate::folders::scan(&env.st, drive).await.unwrap();
+        let (a, _) = env.node_at(drive, "a.txt").await.unwrap();
+
+        // Deleted: it goes to the trash in the other place, and the folder holds nothing of ThirtyFile's
+        let _ = crate::nodes::trash(st(), admin.clone(), req(json!({ "ids": [a] }))).await.unwrap();
+        assert!(names().is_empty(), "{:?}", names());
+        let in_trash = trash_folder(&node(&env, &a).await).unwrap();
+        let kept = own.join("trash").join(in_trash.rel.trim_start_matches(".thirtyfile-trash/"));
+        assert!(kept.is_dir(), "{}", kept.display());
+        let r = crate::folders::scan(&env.st, drive).await.unwrap();
+        assert_eq!((r.added, r.removed), (0, 0), "the trash isn't indexed: {r:?}");
+        // Restored
+        let _ = crate::nodes::restore(st(), admin.clone(), req(json!({ "ids": [a] }))).await.unwrap();
+        assert!(dir.join("a.txt").is_file() && names().len() == 1);
+        // A new content keeps the earlier one as a version, in the other place
+        let (_, pre_size) = env.node_at(drive, "a.txt").await.unwrap();
+        assert_eq!(pre_size, 3);
+        let _ = crate::files::save_content(
+            State(env.st.clone()),
+            admin.clone(),
+            UrlPath(a.clone()),
+            HeaderMap::new(),
+            axum::body::Bytes::from_static(b"second content"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(std::fs::read(dir.join("a.txt")).unwrap(), b"second content");
+        assert_eq!(names().len(), 1, "{:?}", names());
+        assert!(std::fs::read_dir(own.join("versions")).unwrap().next().is_some());
+        // Deleted for good
+        let _ = crate::nodes::trash(st(), admin.clone(), req(json!({ "ids": [a] }))).await.unwrap();
+        let _ = crate::nodes::delete_forever(st(), admin.clone(), req(json!({ "ids": [a] }))).await.unwrap();
+        assert!(names().is_empty(), "{:?}", names());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
     async fn changes_from_the_web_are_made_in_the_folder() {
         let env = testutil::env().await;
         let space = env.folder_space("Shared").await;

@@ -49,6 +49,11 @@ pub struct Settings {
     /// Mounted PEM private key for explicit FTPS
     #[arg(long, env = "THIRTYFILE_FTP_KEY")]
     pub ftp_key: Option<PathBuf>,
+    /// Keep what folder spaces that show a chosen folder keep of their own (trash, versions, the journal and the marker)
+    /// in this folder instead of inside theirs, so those folders hold only their files. A full path of a folder on the
+    /// same file system and mount as the spaces' folders (the guide "Storage locations")
+    #[arg(long, env = "THIRTYFILE_FOLDER_STATE")]
+    pub folder_state: Option<PathBuf>,
     /// Data directory (database, files, thumbnails)
     #[arg(long, env = "THIRTYFILE_DATA", default_value = "./data")]
     pub data: PathBuf,
@@ -197,7 +202,9 @@ pub async fn start(cfg: Settings, storage: PathBuf, db: sqlx::SqlitePool) -> Res
     crate::storage::prepare_builtin(&storage, recorded)?;
     // New spaces of the built-in location get their folders in the storage folder
     let space_folders = std::path::absolute(&storage)?;
+    crate::folders::state::configure(cfg.folder_state.as_deref())?;
     let single_user = accounts(&cfg, &db, &storage, &space_folders, &addr).await?;
+    crate::folders::state::attach_all(&db).await?;
     let secret = crate::settings::load_secret(&db).await?;
     let system = crate::settings::load_system_settings(&db).await?;
     // Settings that are probably wrong together: said once at startup
