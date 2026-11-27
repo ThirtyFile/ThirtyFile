@@ -127,6 +127,12 @@
         <pre><code>-e THIRTYFILE_FILES=Workspace=/workspace,Home=/home/sandbox</code></pre>
         <p>每个文件夹都要像上面的 <code>/files</code> 一样挂载进容器。条目之间用逗号分隔，每个文件夹都要有名称。文件夹不能位于另一个文件夹里面，数据文件夹也必须在所有文件夹之外。之后从列表拿掉的文件夹，在磁盘上保持原样，再次取名后会重新显示。只写一个没有名称的路径，行为和以前相同，显示为“My files”。</p>
 
+        <h3 id="read-only">只读文件夹</h3>
+        <p>ThirtyFile 无法在其中创建新文件的文件夹（例如用 <code>:ro</code> 挂载的）会显示为只读空间：可以打开和下载其中的文件，内容不会有任何变动，因此没有回收站，也没有旧版本。因为位于另一块磁盘或另一个挂载而无法使用 <code>THIRTYFILE_FOLDER_STATE</code> 的文件夹（见<a href="storage.html#folder-state">存储位置</a>），也以同样方式显示。ThirtyFile 启动时检查每个文件夹，并在日志中写明某个文件夹为什么是只读的。更改权限或挂载后请重新启动。</p>
+        <pre><code>-v /mnt/assets:/assets:ro \
+  -e THIRTYFILE_FILES=Workspace=/workspace,Assets=/assets</code></pre>
+        <p>符号链接不会被跟随。要打开链接指向的内容，请把那个文件夹另外列为一个文件夹，如上面的 <code>Assets</code>。</p>
+
         <h2 id="reach">从你的电脑访问</h2>
         <p>在容器内，服务器监听所有地址，而 Docker 只会转发你发布的端口。使用 <code>-p 127.0.0.1:8080:8080</code> 时，在运行 Docker 的电脑上打开 <code>http://localhost:8080</code>。不用 Docker 时，服务器默认只监听 <code>127.0.0.1:8080</code>（可用 <code>THIRTYFILE_ADDR</code> 更改）。</p>
         <p>当沙盒是另一台机器或虚拟机时，从你的电脑转发端口，网页到达时仍然是 <code>localhost</code>：</p>

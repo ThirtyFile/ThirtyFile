@@ -150,20 +150,25 @@ pub(super) fn put_back(renamed: Vec<Renamed>) {
 /// Locks the folder spaces holding these items (ids, or aliases such as `root`), always in the same order
 pub async fn lock(st: &AppState, user: &User, ids: &[&str]) -> AppResult<SpaceLocks> {
     let ids: Vec<&str> = ids.iter().filter_map(|id| tree::resolve_alias(user, id).ok()).collect();
-    let drives: Vec<(String,)> = sqlx::query_as(
-        "SELECT DISTINCT n.drive_id FROM nodes n JOIN drives d ON d.id = n.drive_id
+    let drives: Vec<(String, bool)> = sqlx::query_as(
+        "SELECT DISTINCT n.drive_id, d.read_only FROM nodes n JOIN drives d ON d.id = n.drive_id
          WHERE d.mode = 'folder' AND n.id IN (SELECT value FROM json_each(?)) ORDER BY n.drive_id",
     )
     .bind(serde_json::to_string(&ids).unwrap())
     .fetch_all(&st.db)
     .await?;
     let mut held = Vec::with_capacity(drives.len());
-    for (d,) in drives {
+    let mut changed = Vec::with_capacity(drives.len());
+    for (d, read_only) in drives {
         let guard = lock_space(st, &d).await;
+        if !read_only {
+            changed.push(d.clone());
+        }
         held.push((d, guard));
     }
-    // Their folders answer, before the change takes the write lock
-    for (d, _) in &held {
+    // Their folders answer, before the change takes the write lock. A read-only space is never changed: its folder isn't
+    // looked at, so the change is refused for what it is, also where the folder couldn't be given its marker
+    for d in &changed {
         ready(st, d).await?;
     }
     Ok(SpaceLocks {

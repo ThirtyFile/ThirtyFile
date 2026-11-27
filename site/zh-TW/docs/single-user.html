@@ -127,6 +127,12 @@
         <pre><code>-e THIRTYFILE_FILES=Workspace=/workspace,Home=/home/sandbox</code></pre>
         <p>每個資料夾都要像上面的 <code>/files</code> 一樣掛載進容器。項目之間用逗號分隔，每個資料夾都要有名稱。資料夾不能位在另一個資料夾裡面，資料資料夾也必須在所有資料夾之外。之後從清單拿掉的資料夾，在磁碟上維持原樣，再次取名後會重新顯示。只寫一個沒有名稱的路徑，行為和以前相同，顯示為「My files」。</p>
 
+        <h3 id="read-only">唯讀資料夾</h3>
+        <p>ThirtyFile 無法在其中建立新檔案的資料夾（例如用 <code>:ro</code> 掛載的）會顯示為唯讀空間：可以開啟和下載其中的檔案，內容不會有任何變動，因此沒有資源回收筒，也沒有舊版本。因為位在另一顆磁碟或另一個掛載而無法使用 <code>THIRTYFILE_FOLDER_STATE</code> 的資料夾（見<a href="storage.html#folder-state">儲存位置</a>），也以同樣方式顯示。ThirtyFile 啟動時檢查每個資料夾，並在記錄中寫明某個資料夾為什麼是唯讀。變更權限或掛載後請重新啟動。</p>
+        <pre><code>-v /mnt/assets:/assets:ro \
+  -e THIRTYFILE_FILES=Workspace=/workspace,Assets=/assets</code></pre>
+        <p>符號連結不會被跟隨。要開啟連結指向的內容，請把那個資料夾另外列為一個資料夾，如上面的 <code>Assets</code>。</p>
+
         <h2 id="reach">從你的電腦連線</h2>
         <p>在容器內，伺服器監聽所有位址，而 Docker 只會轉送你發布的連接埠。使用 <code>-p 127.0.0.1:8080:8080</code> 時，在執行 Docker 的電腦上開啟 <code>http://localhost:8080</code>。不用 Docker 時，伺服器預設只監聽 <code>127.0.0.1:8080</code>（可用 <code>THIRTYFILE_ADDR</code> 更改）。</p>
         <p>當沙盒是另一台機器或虛擬機器時，從你的電腦轉送連接埠，網頁到達時仍然是 <code>localhost</code>：</p>

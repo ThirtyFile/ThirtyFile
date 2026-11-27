@@ -129,6 +129,15 @@ pub async fn check_location_folder(st: &AppState, id: Option<&str>, kind: &str, 
 /// `location`: the storage location whose folder holds `source` (space_folders.rs), None for a folder an administrator
 /// chose, which is on no location.
 pub async fn set_up(conn: &mut SqliteConnection, drive_id: &str, root_id: &str, source: &str, location: Option<&str>) -> AppResult<()> {
+    match set_up_anyway(conn, drive_id, root_id, source, location).await? {
+        Some(why) => Err(AppError::bad_request(why)),
+        None => Ok(()),
+    }
+}
+
+/// `set_up`, also for a server that is starting: a space whose own files can't be kept where the server is set to keep
+/// them is made all the same (and isn't used until that is put right), so it doesn't stop the others. Returns why.
+pub async fn set_up_anyway(conn: &mut SqliteConnection, drive_id: &str, root_id: &str, source: &str, location: Option<&str>) -> AppResult<Option<String>> {
     sqlx::query("UPDATE drives SET mode = 'folder', source_path = ?, location_id = ? WHERE id = ?")
         .bind(source)
         .bind(location)
@@ -139,16 +148,17 @@ pub async fn set_up(conn: &mut SqliteConnection, drive_id: &str, root_id: &str, 
     // The space's own files go elsewhere when the server is set to keep them there (state.rs)
     let (read_only,): (bool,) = sqlx::query_as("SELECT read_only FROM drives WHERE id = ?").bind(drive_id).fetch_one(&mut *conn).await?;
     let identity = crate::beneath::Pinned::root(Path::new(source)).ok().and_then(|r| super::folder_identity(&r));
-    if location.is_none() {
-        super::state::attach(drive_id, Path::new(source), read_only, identity).map_err(AppError::bad_request)?;
-    }
+    let unused = match location {
+        None => super::state::attach(drive_id, Path::new(source), read_only, identity).err(),
+        Some(_) => None,
+    };
     // Before anything is written there (a folder that can't take it, read-only say, gets it from a scan if ever)
     if let Err(e) = mark_space(Path::new(source), drive_id) {
         tracing::debug!("Couldn't write the marker file in {source}: {e}");
     }
     // And its identity, which tells it apart from another folder put in its place where the marker can't
     super::record_root(conn, drive_id, identity).await?;
-    Ok(())
+    Ok(unused)
 }
 
 #[cfg(test)]

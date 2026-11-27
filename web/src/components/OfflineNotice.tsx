@@ -1,6 +1,7 @@
 import { CloudOffIcon, LockIcon, RefreshCwIcon, TruckIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { t, tServer } from "@/lib/i18n";
+import { useMe } from "@/lib/session";
 
 /** Notice above the file list when the space's storage service is offline */
 export function OfflineBanner({ reason }: { reason: string }) {
@@ -16,12 +17,15 @@ export function OfflineBanner({ reason }: { reason: string }) {
   );
 }
 
-/** A read-only space: browse, download and share only */
+/** A read-only space: browse, download and share only (in single-user mode there is nobody to share with) */
 export function ReadOnlyBanner() {
+  const me = useMe();
   return (
     <div className="flex shrink-0 items-start gap-2 border-b bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
       <LockIcon className="mt-px size-4 shrink-0" />
-      <div className="min-w-0">{t("This space is read-only. You can open, download and share its files.")}</div>
+      <div className="min-w-0">
+        {me.single_user ? t("This space is read-only. You can open and download its files.") : t("This space is read-only. You can open, download and share its files.")}
+      </div>
     </div>
   );
 }
