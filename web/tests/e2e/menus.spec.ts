@@ -145,12 +145,17 @@ test("an item's menu has a row of icon buttons with names and tooltips, disabled
   await expect(page.getByRole("textbox", { name: "New name" })).toHaveValue("notes.txt");
   await page.keyboard.press("Escape");
 
-  // Two items: Rename and Share work on one item only
+  // Two items: Share works on one item only; Rename renames them together
   await row(page, "notes.txt").click();
   await row(page, "big.txt").click({ modifiers: ["Control"] });
   await row(page, "big.txt").click({ button: "right" });
-  await expect(menu(page).getByRole("menuitem", { name: "Rename", exact: true })).toHaveAttribute("aria-disabled", "true");
   await expect(menu(page).getByRole("menuitem", { name: "Share", exact: true })).toHaveAttribute("aria-disabled", "true");
+  await choose(page, "menuitem", "Rename");
+  const several = page.getByRole("dialog", { name: "Rename 2 items" });
+  await expect(several).toBeVisible();
+  await several.getByRole("button", { name: "Cancel" }).click();
+  await expect(several).toBeHidden();
+  await row(page, "big.txt").click({ button: "right" });
   await expect(menu(page).getByRole("menuitem", { name: "Copy", exact: true })).not.toHaveAttribute("aria-disabled", "true");
   await choose(page, "menuitem", "Copy");
   await expect(page.getByText("2 items copied", { exact: true })).toBeVisible();
