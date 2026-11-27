@@ -1989,3 +1989,47 @@ export interface ArchiveListing {
   /** Entries left out for their unsafe paths */
   hidden: number;
 }
+
+// ───────────── File webhooks (Control panel › File webhooks) ─────────────
+
+export interface FileWebhookDelivery {
+  id: number;
+  event: string;
+  created_at: number;
+  attempts: number;
+  done_at: number | null;
+  failed: boolean;
+  error: string | null;
+}
+
+export interface FileWebhook {
+  id: string;
+  url: string;
+  events: string[];
+  /** Only these spaces; empty: every space but personal ones */
+  drives: string[];
+  allow_private: boolean;
+  enabled: boolean;
+  /** Messages waiting to be sent */
+  pending: number;
+  /** The latest messages, newest first */
+  recent: FileWebhookDelivery[];
+}
+
+export interface FileWebhooksInfo {
+  webhooks: FileWebhook[];
+  /** The events that can be chosen */
+  events: string[];
+  /** The spaces that can be chosen */
+  spaces: { id: string; name: string; kind: string }[];
+}
+
+/** What is saved of a webhook; `secret` left out keeps the one saved */
+export interface FileWebhookChange {
+  url: string;
+  secret?: string;
+  events: string[];
+  drives: string[];
+  allow_private: boolean;
+  enabled: boolean;
+}

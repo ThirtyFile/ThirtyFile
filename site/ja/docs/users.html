@@ -87,6 +87,7 @@
             <li><a href="#retention">保持期間とリーガルホールド</a></li>
             <li><a href="#email">通知メール</a></li>
             <li><a href="#alerts">管理者アラート</a></li>
+            <li><a href="#webhooks">ファイル Webhook</a></li>
             <li><a href="#privacy">管理者が見られるもの</a></li>
             <li><a href="#password">パスワードを忘れた場合</a></li>
             <li><a href="#guests">ゲストアカウント</a></li>
@@ -172,6 +173,49 @@
         </ul>
         <p>それぞれ個別にオフにできます。各問題は開始時と解消時に 1 回ずつ通知され、出たり消えたりする問題はクールダウン（初期値 30 分）が過ぎてから再通知されます。メッセージには保存場所、アドレス、アカウントの名前と数字だけが含まれ、ファイルやフォルダーの名前は含まれません。メールは<strong>コントロールパネル › メール</strong>のサーバーを使い、各管理者の言語で書かれます。</p>
         <p><strong>Webhook</strong> には JSON 本文（<code>event</code>、<code>state</code>（<code>firing</code> か <code>resolved</code>）、<code>kind</code>、<code>key</code>、<code>title</code>、<code>params</code>、<code>site</code>、<code>at</code>）が、受信側で確認できる署名付きで届きます。ヘッダー <code>X-ThirtyFile-Timestamp</code> と <code>X-ThirtyFile-Signature: sha256=…</code> で、設定した共有シークレットによるタイムスタンプ・ピリオド・本文の HMAC-SHA256 です。古いタイムスタンプのメッセージは拒否してください。インターネット上の webhook は https が必須で、プライベートネットワークやこのコンピューター上の webhook には<strong>プライベートネットワーク上の webhook を許可</strong>が必要です。届かなかったメッセージは 1 分後、5 分後、30 分後、2 時間後、6 時間後に再送し、その後は断念します。結果はページで確認できます。<strong>テストを送る</strong>で、メールと webhook をすぐに試せます。</p>
+
+        <h2 id="webhooks">ファイル Webhook</h2>
+        <p>ファイルの変更を他のシステムに通知できます。アップロードの処理、チャットへの投稿、独自の記録などに使え、繰り返し問い合わせる必要がありません。<strong>コントロールパネル › ファイル Webhook</strong> で追加します。アドレス、共有シークレット（<strong>生成</strong>で作成。保存前にコピーしてください）、送るイベント、対象（個人スペース以外のすべて、または一部のスペース）を指定します。webhook は一時停止や削除ができ、<strong>webhook にテストを送る</strong>ですぐ試せます。最近のメッセージの結果もページに表示されます。シングルユーザーモードに webhook はありません。</p>
+        <ul>
+          <li><strong>対象外：</strong>個人スペースと制限付きフォルダー内のすべて。移動やコピーの一方がそこにある場合も送りません。<a href="storage.html#folder-spaces">サーバー上のフォルダー</a>をサーバーのディスクで直接変更した内容も送りません。</li>
+          <li><strong>メッセージの内容：</strong>名前と ID のみで、ファイルの内容、共有リンクのアドレス、パスワードは含みません。受信側は選んだスペースのファイル名を知ることになるため、知られてよい宛先にだけ送ってください。</li>
+          <li><strong>配信：</strong>メッセージは変更と同時にキューに入るため、失敗した変更は送られず、再起動でも失われません。受信側が遅い、または接続できなくても操作は遅くなりません。送れないメッセージは 1 分、5 分、30 分、2 時間、6 時間後に再試行し、その後または 1 日を過ぎると中止します。再試行を待つ間は後のメッセージも待ちます。同じメッセージが複数回届くことや順序が入れ替わることがあるため、<code>id</code> で重複を除いてください。</li>
+        </ul>
+        <p>各メッセージは <code>POST</code> で送る JSON です。<code>2xx</code> のステータスを返すと受信とみなします。</p>
+<pre><code>{
+  "id": "5f0c8f6f0a2c4a0e9c1d2b3a4f5e6d7c",
+  "event": "rename",
+  "at": 1790000000,
+  "site": "ThirtyFile",
+  "user": { "id": 2, "name": "amy" },
+  "space": { "id": "9a1b…", "name": "Marketing" },
+  "item": { "id": "c3d4…", "name": "plan-final.docx", "kind": "file", "parent_id": "e5f6…" },
+  "previous_name": "plan.docx"
+}</code></pre>
+        <div class="table-scroll"><table>
+          <thead><tr><th>フィールド</th><th>内容</th></tr></thead>
+          <tbody>
+              <tr><td><code>id</code></td><td>イベントの一意な ID</td></tr>
+              <tr><td><code>event</code></td><td>起きたこと：<code>upload</code>, <code>create_folder</code>, <code>edit</code>, <code>rename</code>, <code>move</code>, <code>copy</code>, <code>compress</code>, <code>extract</code>, <code>trash</code>, <code>restore</code>, <code>delete</code>, <code>share_create</code>, <code>share_update</code>, <code>share_delete</code>, <code>test</code></td></tr>
+              <tr><td><code>at</code></td><td>日時（1970 年からの秒数、UTC）</td></tr>
+              <tr><td><code>site</code></td><td>サイト名</td></tr>
+              <tr><td><code>user</code></td><td>操作した人（<code>id</code>、<code>name</code>）。保持期間を過ぎたごみ箱の削除など ThirtyFile 自身の操作は <code>null</code>。共有リンクからのアップロードはリンクの作成者になります</td></tr>
+              <tr><td><code>space</code></td><td>起きたスペース（<code>id</code>、<code>name</code>）</td></tr>
+              <tr><td><code>item</code></td><td>ファイルまたはフォルダー（<code>id</code>、<code>name</code>、<code>kind</code>、<code>parent_id</code>）。変更後の状態です。コピーではコピー元の項目です。フォルダーの変更はフォルダーにつき 1 件で、中の項目ごとには送りません</td></tr>
+              <tr><td><code>previous_name</code></td><td>名前を変更したときのみ：変更前の名前</td></tr>
+              <tr><td><code>to</code></td><td>移動とコピーのみ：移動先フォルダー（<code>folder_id</code>、<code>name</code>、<code>space</code>）</td></tr>
+          </tbody>
+        </table></div>
+        <p>ヘッダー <code>X-ThirtyFile-Timestamp</code> と <code>X-ThirtyFile-Signature: sha256=…</code> が各メッセージの署名です。タイムスタンプ、ピリオド、本文を共有シークレットで HMAC-SHA256 した値です。受信したバイト列で検証し、古いタイムスタンプは拒否してください。Python の例：</p>
+<pre><code>import hashlib, hmac, time
+
+def genuine(secret: str, headers, body: bytes) -> bool:
+    timestamp = headers["X-ThirtyFile-Timestamp"]
+    signed = timestamp.encode() + b"." + body
+    expected = "sha256=" + hmac.new(secret.encode(), signed, hashlib.sha256).hexdigest()
+    fresh = abs(time.time() - int(timestamp)) &lt; 300
+    return fresh and hmac.compare_digest(expected, headers["X-ThirtyFile-Signature"])</code></pre>
+        <p>インターネット上の webhook は https が必要です。プライベートネットワークやこのコンピューター上のものは<strong>プライベートネットワークやこのコンピューター上の webhook を許可</strong>をオンにします。リダイレクトには従いません。</p>
 
         <h2 id="privacy">管理者が見られるもの</h2>
         <p>管理者は会社と全チームのスペース、ごみ箱を管理できます。個人用スペースは開けず内容も見られず、容量だけ見られます。ただし <a href="#delete">アカウントの削除</a> や <a href="#personal">「マイファイル」の削除</a> では、開けるスペースへ移せます。<a href="storage.html#per-space">別の保存場所へ移す</a> こともでき、コピーできないファイルは名前を伏せて表示します。</p>

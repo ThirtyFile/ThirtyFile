@@ -1235,4 +1235,11 @@ export default {
     "THIRTYFILE_FILES 把“{name}”用了两次",
   "THIRTYFILE_FILES: {first} and {second} are the same folder or one is inside the other. Each name needs a folder of its own.":
     "THIRTYFILE_FILES：{first} 和 {second} 是同一个文件夹，或其中一个在另一个里面。每个名称都需要自己的文件夹。",
+  // file_hooks/
+  "Unknown event": "未知的事件",
+  "Choose at least one event": "请至少选择一个事件",
+  "A chosen space no longer exists": "所选空间已不存在",
+  "At most {n} webhooks": "最多 {n} 个 webhook",
+  "Webhook not found": "找不到该 webhook",
+  "not sent within a day": "一天内未能发出",
 } satisfies Record<string, string>;

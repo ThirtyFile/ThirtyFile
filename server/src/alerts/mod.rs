@@ -15,7 +15,7 @@
 mod conditions;
 mod queue;
 mod text;
-mod webhook;
+pub(crate) mod webhook;
 
 #[cfg(test)]
 mod tests;
@@ -40,7 +40,7 @@ const SECRET: &str = "admin_alerts_secret";
 /// What the secret is sealed with (`secrets::seal`)
 const SEAL: &str = "settings:admin_alerts";
 /// The shortest shared secret for signing
-const MIN_SECRET: usize = 16;
+pub(crate) const MIN_SECRET: usize = 16;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(default)]
@@ -196,10 +196,16 @@ fn check(c: &Config) -> AppResult<()> {
     }
     let url = c.webhook_url.trim();
     if !url.is_empty() {
-        let parsed = reqwest::Url::parse(url).map_err(|_| AppError::bad_request("Enter the webhook address as a full URL, such as https://example.com/hook"))?;
-        if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() || !parsed.username().is_empty() || parsed.password().is_some() {
-            return Err(AppError::bad_request("The webhook address must be http or https, without a user name or password in it"));
-        }
+        check_address(url)?;
+    }
+    Ok(())
+}
+
+/// Refuses what can't be a webhook's address, here and for file webhooks
+pub(crate) fn check_address(url: &str) -> AppResult<()> {
+    let parsed = reqwest::Url::parse(url).map_err(|_| AppError::bad_request("Enter the webhook address as a full URL, such as https://example.com/hook"))?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() || !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(AppError::bad_request("The webhook address must be http or https, without a user name or password in it"));
     }
     Ok(())
 }

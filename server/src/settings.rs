@@ -114,6 +114,13 @@ pub async fn reseal_secrets(db: &SqlitePool, new_key: &[u8; 32]) -> Result<usize
             n += 1;
         }
     }
+    let hooks: Vec<(String, String)> = sqlx::query_as("SELECT id, secret FROM file_webhooks").fetch_all(&mut *tx).await?;
+    for (id, value) in hooks {
+        if let Some(sealed) = fix(&crate::file_hooks::seal_context(&id), &value)? {
+            sqlx::query("UPDATE file_webhooks SET secret=? WHERE id=?").bind(sealed).bind(id).execute(&mut *tx).await?;
+            n += 1;
+        }
+    }
     tx.commit().await?;
     Ok(n)
 }

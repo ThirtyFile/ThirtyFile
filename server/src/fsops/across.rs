@@ -623,7 +623,7 @@ pub(super) async fn commit_move(st: &AppState, user: &User, dest: &Node, nodes: 
     }
     tree::touch(&mut tx, &dest.id).await?;
     let to = tree::place_name(&mut tx, dest).await?;
-    logs::record_activity(&mut tx, user, Some(top), "move", &format!("→ {to}")).await?;
+    logs::record_activity_into(&mut tx, user, Some(top), Some(&dest.id), "move", &format!("→ {to}")).await?;
     tx.commit().await?;
     Ok((extras, remove))
 }
@@ -738,7 +738,7 @@ pub(super) async fn commit_copy(st: &AppState, user: &User, dest: &Node, nodes: 
     tree::adjust_usage(&mut tx, dest.drive(), bytes).await?;
     tree::touch(&mut tx, &dest.id).await?;
     let to = tree::place_name(&mut tx, dest).await?;
-    logs::record_activity(&mut tx, user, Some(top), "copy", &format!("→ {to}")).await?;
+    logs::record_activity_into(&mut tx, user, Some(top), Some(&dest.id), "copy", &format!("→ {to}")).await?;
     tx.commit().await?;
     Ok(extras)
 }

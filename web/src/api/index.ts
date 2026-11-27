@@ -21,6 +21,7 @@ import { sftpApi } from "@/api/sftp";
 import { passkeysApi } from "@/api/passkeys";
 import { holdsApi } from "@/api/holds";
 import { directoryApi } from "@/api/directory";
+import { fileWebhooksApi } from "@/api/fileWebhooks";
 
 export * from "@/api/types";
 export { SORT_KEYS } from "@/api/files";
@@ -50,4 +51,5 @@ export const api = {
   ...passkeysApi,
   ...holdsApi,
   ...directoryApi,
+  ...fileWebhooksApi,
 };

@@ -87,6 +87,7 @@
             <li><a href="#retention">Retention and legal holds</a></li>
             <li><a href="#email">Notification emails</a></li>
             <li><a href="#alerts">Administrator alerts</a></li>
+            <li><a href="#webhooks">File webhooks</a></li>
             <li><a href="#privacy">What administrators can see</a></li>
             <li><a href="#password">Forgotten passwords</a></li>
             <li><a href="#guests">Guest accounts</a></li>
@@ -179,6 +180,49 @@
         </ul>
         <p>Each can be turned off. A problem is told once when it starts and once when it is over, and one that keeps coming and going waits for a cooldown (30 minutes at first) before it is told again. Messages hold names of locations, addresses, accounts and numbers, never the name of a file or folder. Emails use the email server of <strong>Control panel › Email</strong> and are written in each administrator's language.</p>
         <p>A <strong>webhook</strong> gets a JSON body (<code>event</code>, <code>state</code> as <code>firing</code> or <code>resolved</code>, <code>kind</code>, <code>key</code>, <code>title</code>, <code>params</code>, <code>site</code>, <code>at</code>), signed so the receiver can check it: the headers <code>X-ThirtyFile-Timestamp</code> and <code>X-ThirtyFile-Signature: sha256=…</code>, the HMAC-SHA256 of the timestamp, a full stop and the body, with the shared secret you set. Refuse messages with an old timestamp. Webhooks on the internet must use https; one on the private network or on this computer needs <strong>Allow a webhook on the private network</strong>. A message that can't be delivered is tried again after 1 minute, 5 minutes, 30 minutes, 2 hours and 6 hours, then given up on, and the page shows how each went. <strong>Send a test</strong> tries the email and the webhook at once.</p>
+
+        <h2 id="webhooks">File webhooks</h2>
+        <p>Other systems can be told when files change, to process an upload, post to a chat or keep a record of their own, instead of asking again and again. Under <strong>Control panel › File webhooks</strong>, add a webhook: its address, a shared secret (<strong>Generate</strong> makes one; copy it before saving), the events to send, and either every space but personal ones or only some. A webhook can be paused or removed, <strong>Send a test to the webhook</strong> tries it at once, and the page shows how the latest messages went. Single-user mode has no webhooks.</p>
+        <ul>
+          <li><strong>Left out:</strong> everything in personal spaces and in restricted folders, also a move or copy that only goes into or out of one. Changes made directly on the server's disk in <a href="storage.html#folder-spaces">folders on the server</a> send nothing either.</li>
+          <li><strong>What messages hold:</strong> names and ids, never file contents, the addresses of share links or passwords. Whoever receives them learns file names from every space chosen, so send them only where that is fine.</li>
+          <li><strong>Delivery:</strong> a message is queued with the change itself, so a change that fails sends nothing and a restart loses nothing; a slow or unreachable receiver doesn't slow anything down. A message that can't be delivered is tried again after 1 minute, 5 minutes, 30 minutes, 2 hours and 6 hours, and given up on after that or after a day. While one waits, the ones after it wait too. A message may arrive more than once, and not always in order: use its <code>id</code> to ignore repeats.</li>
+        </ul>
+        <p>Each message is a JSON body sent with <code>POST</code>. Answer with any <code>2xx</code> status to accept it.</p>
+<pre><code>{
+  "id": "5f0c8f6f0a2c4a0e9c1d2b3a4f5e6d7c",
+  "event": "rename",
+  "at": 1790000000,
+  "site": "ThirtyFile",
+  "user": { "id": 2, "name": "amy" },
+  "space": { "id": "9a1b…", "name": "Marketing" },
+  "item": { "id": "c3d4…", "name": "plan-final.docx", "kind": "file", "parent_id": "e5f6…" },
+  "previous_name": "plan.docx"
+}</code></pre>
+        <div class="table-scroll"><table>
+          <thead><tr><th>Field</th><th>What it holds</th></tr></thead>
+          <tbody>
+              <tr><td><code>id</code></td><td>A unique id of the event</td></tr>
+              <tr><td><code>event</code></td><td>What happened: <code>upload</code>, <code>create_folder</code>, <code>edit</code>, <code>rename</code>, <code>move</code>, <code>copy</code>, <code>compress</code>, <code>extract</code>, <code>trash</code>, <code>restore</code>, <code>delete</code>, <code>share_create</code>, <code>share_update</code>, <code>share_delete</code>, <code>test</code></td></tr>
+              <tr><td><code>at</code></td><td>When, in seconds since 1970 (UTC)</td></tr>
+              <tr><td><code>site</code></td><td>The site's name</td></tr>
+              <tr><td><code>user</code></td><td>Who did it (<code>id</code>, <code>name</code>); <code>null</code> for what ThirtyFile does by itself, such as emptying the trash after its retention time. An upload through a share link names the link's creator</td></tr>
+              <tr><td><code>space</code></td><td>The space it happened in (<code>id</code>, <code>name</code>)</td></tr>
+              <tr><td><code>item</code></td><td>The file or folder (<code>id</code>, <code>name</code>, <code>kind</code>, <code>parent_id</code>), as it is after the change. For a copy, the item that was copied. A change to a folder is one message for the folder, not one for each item in it</td></tr>
+              <tr><td><code>previous_name</code></td><td>Only after a change of name: the name before</td></tr>
+              <tr><td><code>to</code></td><td>Only for a move or copy: the folder it went to (<code>folder_id</code>, <code>name</code>, <code>space</code>)</td></tr>
+          </tbody>
+        </table></div>
+        <p>The headers <code>X-ThirtyFile-Timestamp</code> and <code>X-ThirtyFile-Signature: sha256=…</code> sign each message: the HMAC-SHA256 of the timestamp, a full stop and the body, with the shared secret. Check it on the bytes received, and refuse messages with an old timestamp. In Python:</p>
+<pre><code>import hashlib, hmac, time
+
+def genuine(secret: str, headers, body: bytes) -> bool:
+    timestamp = headers["X-ThirtyFile-Timestamp"]
+    signed = timestamp.encode() + b"." + body
+    expected = "sha256=" + hmac.new(secret.encode(), signed, hashlib.sha256).hexdigest()
+    fresh = abs(time.time() - int(timestamp)) &lt; 300
+    return fresh and hmac.compare_digest(expected, headers["X-ThirtyFile-Signature"])</code></pre>
+        <p>Webhooks on the internet must use https; one on the private network or on this computer needs <strong>Allow a webhook on the private network or on this computer</strong>. Redirects aren't followed.</p>
 
         <h2 id="privacy">What administrators can see</h2>
         <p>Administrators manage every team space and the company space, including their trash. They cannot open personal spaces or see what is in them, only their size, but when they <a href="#delete">delete an account</a> or <a href="#personal">remove its "My files"</a> they can move its files to a space they can open. They can also <a href="storage.html#per-space">move a "My files" to another storage location</a>: the move lists files it couldn't copy without their names.</p>

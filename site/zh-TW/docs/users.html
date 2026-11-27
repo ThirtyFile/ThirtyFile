@@ -88,6 +88,7 @@
             <li><a href="#retention">保留與法律保全</a></li>
             <li><a href="#email">通知電子郵件</a></li>
             <li><a href="#alerts">管理員警示</a></li>
+            <li><a href="#webhooks">檔案 Webhook</a></li>
             <li><a href="#privacy">管理員能看到什麼</a></li>
             <li><a href="#password">忘記密碼</a></li>
             <li><a href="#guests">訪客帳號</a></li>
@@ -174,6 +175,49 @@
         </ul>
         <p>每一項都可以關閉。每個問題在開始時通知一次，結束時再通知一次；時好時壞的問題會等冷卻時間（預設 30 分鐘）過後才再通知。訊息只包含儲存位置、位址、帳號的名稱與數字，絕不包含檔案或資料夾的名稱。郵件使用<strong>控制台 › 電子郵件</strong>的伺服器，並以各管理員的語言撰寫。</p>
         <p><strong>Webhook</strong> 會收到 JSON 內容（<code>event</code>、<code>state</code>（<code>firing</code> 或 <code>resolved</code>）、<code>kind</code>、<code>key</code>、<code>title</code>、<code>params</code>、<code>site</code>、<code>at</code>），並附上簽章供接收端驗證：標頭 <code>X-ThirtyFile-Timestamp</code> 與 <code>X-ThirtyFile-Signature: sha256=…</code>，內容是以你設定的共用密鑰，對「時間戳記、句點、內容」計算的 HMAC-SHA256。請拒絕時間戳記過舊的訊息。網際網路上的 webhook 必須使用 https；位於私人網路或這台電腦上的 webhook 需要勾選<strong>允許 webhook 位於私人網路</strong>。無法送達的訊息會在 1 分鐘、5 分鐘、30 分鐘、2 小時、6 小時後重試，之後放棄，頁面會顯示每則訊息的結果。按<strong>傳送測試</strong>可立即測試郵件與 webhook。</p>
+
+        <h2 id="webhooks">檔案 Webhook</h2>
+        <p>檔案變更時可以通知其他系統，例如處理上傳的檔案、發訊息到聊天室或另外記錄，不必反覆查詢。在<strong>控制台 › 檔案 Webhook</strong> 新增：網址、共用密鑰（按<strong>產生</strong>建立，儲存前先複製）、要傳送的事件，以及個人空間以外的所有空間或只有部分空間。webhook 可以暫停或移除，<strong>傳送測試到 webhook</strong> 可立即測試，頁面顯示最近訊息的傳送結果。單人模式沒有 webhook。</p>
+        <ul>
+          <li><strong>不包含：</strong>個人空間與受限資料夾裡的一切，只要搬移或複製的一端在其中也不傳送。直接在伺服器磁碟上對<a href="storage.html#folder-spaces">伺服器上的資料夾</a>所做的變更同樣不傳送。</li>
+          <li><strong>訊息內容：</strong>名稱與識別碼，絕不含檔案內容、分享連結網址或密碼。接收者會得知所選空間中的檔案名稱，請只傳送到可以知道這些的地方。</li>
+          <li><strong>傳送方式：</strong>訊息和變更本身一起排入佇列，失敗的變更不會傳送，重新啟動也不會遺失；接收端緩慢或連不上不會拖慢任何操作。無法送達的訊息會在 1 分鐘、5 分鐘、30 分鐘、2 小時與 6 小時後重試，之後或超過一天即放棄。某則等待重試時，後面的訊息也一起等。訊息可能重複到達，也不保證順序：請用 <code>id</code> 忽略重複。</li>
+        </ul>
+        <p>每則訊息是以 <code>POST</code> 傳送的 JSON。回應任何 <code>2xx</code> 狀態表示收到。</p>
+<pre><code>{
+  "id": "5f0c8f6f0a2c4a0e9c1d2b3a4f5e6d7c",
+  "event": "rename",
+  "at": 1790000000,
+  "site": "ThirtyFile",
+  "user": { "id": 2, "name": "amy" },
+  "space": { "id": "9a1b…", "name": "Marketing" },
+  "item": { "id": "c3d4…", "name": "plan-final.docx", "kind": "file", "parent_id": "e5f6…" },
+  "previous_name": "plan.docx"
+}</code></pre>
+        <div class="table-scroll"><table>
+          <thead><tr><th>欄位</th><th>內容</th></tr></thead>
+          <tbody>
+              <tr><td><code>id</code></td><td>事件的唯一識別碼</td></tr>
+              <tr><td><code>event</code></td><td>發生的事：<code>upload</code>, <code>create_folder</code>, <code>edit</code>, <code>rename</code>, <code>move</code>, <code>copy</code>, <code>compress</code>, <code>extract</code>, <code>trash</code>, <code>restore</code>, <code>delete</code>, <code>share_create</code>, <code>share_update</code>, <code>share_delete</code>, <code>test</code></td></tr>
+              <tr><td><code>at</code></td><td>時間，1970 年起的秒數（UTC）</td></tr>
+              <tr><td><code>site</code></td><td>網站名稱</td></tr>
+              <tr><td><code>user</code></td><td>操作者（<code>id</code>、<code>name</code>）；ThirtyFile 自行執行的操作（例如保留期滿清空回收筒）為 <code>null</code>。透過分享連結的上傳記為連結建立者</td></tr>
+              <tr><td><code>space</code></td><td>發生的空間（<code>id</code>、<code>name</code>）</td></tr>
+              <tr><td><code>item</code></td><td>檔案或資料夾（<code>id</code>、<code>name</code>、<code>kind</code>、<code>parent_id</code>），為變更後的狀態。複製時是被複製的項目。資料夾的變更只傳一則，不會為裡面每個項目各傳一則</td></tr>
+              <tr><td><code>previous_name</code></td><td>僅名稱變更時：變更前的名稱</td></tr>
+              <tr><td><code>to</code></td><td>僅搬移或複製時：目的資料夾（<code>folder_id</code>、<code>name</code>、<code>space</code>）</td></tr>
+          </tbody>
+        </table></div>
+        <p>標頭 <code>X-ThirtyFile-Timestamp</code> 與 <code>X-ThirtyFile-Signature: sha256=…</code> 為每則訊息簽章：以共用密鑰計算「時間戳記、句點、本文」的 HMAC-SHA256。請用收到的原始位元組驗證，並拒絕時間戳記過舊的訊息。Python 範例：</p>
+<pre><code>import hashlib, hmac, time
+
+def genuine(secret: str, headers, body: bytes) -> bool:
+    timestamp = headers["X-ThirtyFile-Timestamp"]
+    signed = timestamp.encode() + b"." + body
+    expected = "sha256=" + hmac.new(secret.encode(), signed, hashlib.sha256).hexdigest()
+    fresh = abs(time.time() - int(timestamp)) &lt; 300
+    return fresh and hmac.compare_digest(expected, headers["X-ThirtyFile-Signature"])</code></pre>
+        <p>網際網路上的 webhook 必須使用 https；位於私人網路或這台電腦上的需開啟<strong>允許 webhook 位於私人網路或這台電腦上</strong>。不跟隨重新導向。</p>
 
         <h2 id="privacy">管理員能看到什麼</h2>
         <p>管理員管理所有團隊和公司空間，包括資源回收筒。不能打開個人空間或檢視內容，只能看到用量；但<a href="#delete">刪除帳號</a>或<a href="#personal">移除「我的檔案」</a>時，可將檔案移到有權開啟的空間。也可<a href="storage.html#per-space">將「我的檔案」搬移到其他儲存位置</a>：搬移失敗清單不顯示檔案名稱。</p>
