@@ -193,13 +193,18 @@ fn opens_as_page(mime: &str) -> bool {
     m == "text/html" || m == "text/xml" || m == "application/xml" || (m.ends_with("+xml") && m != "image/svg+xml")
 }
 
-pub async fn serve_blob(st: &AppState, headers: &HeaderMap, b: Blob<'_>, download: bool) -> AppResult<Response> {
-    // A page loading a stored file as a script, style sheet or worker (never how this app uses them)
+/// Refuses a page loading a stored file as a script, style sheet or worker (never how this app uses them)
+pub fn refuse_as_code(headers: &HeaderMap) -> AppResult<()> {
     if let Some(dest) = headers.get("sec-fetch-dest").and_then(|v| v.to_str().ok())
         && matches!(dest, "script" | "style" | "worker" | "sharedworker" | "serviceworker" | "audioworklet" | "paintworklet")
     {
         return Err(AppError::forbidden("Files can't be loaded as scripts or styles"));
     }
+    Ok(())
+}
+
+pub async fn serve_blob(st: &AppState, headers: &HeaderMap, b: Blob<'_>, download: bool) -> AppResult<Response> {
+    refuse_as_code(headers)?;
     let (size, tag) = b.source.describe(b.size).await?;
     let etag = format!("\"{tag}\"");
     if headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) == Some(etag.as_str()) {

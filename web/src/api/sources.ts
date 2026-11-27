@@ -14,6 +14,8 @@ export interface FileSource {
    * with a short-lived link (a URL holding hundreds of ids is too long for many reverse proxies)
    */
   downloadLink(ids: string[], signal?: AbortSignal): Promise<string>;
+  /** ZIP files can be looked into (signed in; not through share links) */
+  browsesArchives?: boolean;
 }
 
 /** Download link for items at `base` (`/download` of the signed-in API or of a share) */
@@ -28,6 +30,7 @@ export const privateSource: FileSource = {
   thumbUrl: (n) => enc`/api/files/${n.id}/thumbnail?v=${n.updated_at}`,
   saveThumb: async (n, image) => void (await fetchOk(enc`/api/files/${n.id}/thumbnail`, { method: "PUT", body: image, headers: { "Content-Type": image.type } })),
   downloadLink: (ids, signal) => downloadLink("/download", ids, signal),
+  browsesArchives: true,
 };
 
 /** Where visitors of a share link that accepts files upload them */

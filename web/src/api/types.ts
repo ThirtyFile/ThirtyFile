@@ -1967,6 +1967,29 @@ export interface NameConflict {
 }
 export type SortOrder = "asc" | "desc";
 
+/** A file or folder in a ZIP file */
+export interface ArchiveEntry {
+  /** Its number in the archive, to download it by */
+  index: number;
+  /** Its path inside the archive ("/" between folders) */
+  path: string;
+  dir: boolean;
+  /** Size once extracted */
+  size: number;
+  /** The clock time the archive gives it (it says no time zone), as seconds since 1970 */
+  modified: number | null;
+  /** Why its content can't be had: a password, a compression that isn't supported, or too large */
+  locked: "password" | "method" | "size" | null;
+}
+
+export interface ArchiveListing {
+  /** The content listed: downloading and extracting entries name it */
+  version: string;
+  entries: ArchiveEntry[];
+  /** Entries left out for their unsafe paths */
+  hidden: number;
+}
+
 // ───────────── File webhooks (Control panel › File webhooks) ─────────────
 
 export interface FileWebhookDelivery {

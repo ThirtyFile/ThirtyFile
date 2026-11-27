@@ -126,6 +126,83 @@ pub async fn rename(conn: &mut SqliteConnection, locks: &SpaceLocks, node: &Node
     Ok(())
 }
 
+/// Names items step aside to while items are renamed together (`rename_together`); never indexed
+pub const RENAME_PREFIX: &str = ".thirtyfile-rename-";
+
+/// An item of a folder space renamed together with others: the item as it was, its folder, and its new name
+pub struct Renaming {
+    pub node: Node,
+    pub folder: Node,
+    pub name: String,
+}
+
+/// Renames several items of folder spaces, none of them inside another, each in its folder: on disk, then in the index
+/// (the caller records their new names). An item whose name another one is to have steps aside first, so names can be
+/// swapped or passed along. Each rename is written into the space's journal first, as in `rename`.
+pub async fn rename_together(conn: &mut SqliteConnection, locks: &SpaceLocks, items: &[Renaming]) -> AppResult<()> {
+    for item in items {
+        check_name(&item.name)?;
+    }
+    // Names are compared regardless of letter case, as some disks hold them
+    let key = |folder: &Node, name: &str| (folder.id.clone(), name.to_lowercase());
+    let mut wanted: HashMap<(String, String), usize> = HashMap::new();
+    for item in items {
+        *wanted.entry(key(&item.folder, &item.name)).or_default() += 1;
+    }
+    let batch = new_id();
+    let mut seq = 0;
+    // Where each item is now, below its space's folder
+    let mut at: Vec<String> = items.iter().map(|i| rel_of(&i.node).to_string()).collect();
+    for (i, item) in items.iter().enumerate() {
+        let current = key(&item.folder, &item.node.name);
+        // (its own new name doesn't count: changing only the letter case is one rename)
+        let own = usize::from(key(&item.folder, &item.name) == current);
+        if wanted.get(&current).copied().unwrap_or(0) <= own {
+            continue;
+        }
+        let aside = child_rel(rel_of(&item.folder), &format!("{RENAME_PREFIX}{}", new_id()));
+        step(locks, &item.node, &batch, seq, &at[i], &aside).await?;
+        seq += 1;
+        // All of it before another item takes the name: what was left would move along with that one
+        changes::repath_all(conn, item.node.drive(), &at[i], &aside).await?;
+        at[i] = aside;
+    }
+    for (i, item) in items.iter().enumerate() {
+        let to = child_rel(rel_of(&item.folder), &item.name);
+        step(locks, &item.node, &batch, seq, &at[i], &to).await?;
+        seq += 1;
+        locks.later(changes::repath(conn, &item.node.id, item.node.drive(), &at[i], &to).await?);
+    }
+    Ok(())
+}
+
+/// One rename of `rename_together`, written into the space's journal first
+async fn step(locks: &SpaceLocks, node: &Node, batch: &str, seq: u32, from: &str, to: &str) -> AppResult<()> {
+    let intent = Intent::Step { batch: batch.into(), seq, node: node.id.clone(), home: rel_of(node).into(), from: from.into(), to: to.into() };
+    let (n, from, to) = (node.clone(), from.to_string(), to.to_string());
+    let (to, from, entry) = on_disk(node.drive(), disk_wait(), move || {
+        let root = space_root(&n)?;
+        let (from, to) = (root.join(&from).map_err(gone_or_disk_error)?, root.join(&to).map_err(gone_or_disk_error)?);
+        let entry = write(&root, &intent).map_err(disk_error)?;
+        match rename_new(from.as_path(), to.as_path()) {
+            Ok(()) => Ok((to, from, entry)),
+            Err(e) => {
+                entry.remove();
+                Err(disk_error(e))
+            }
+        }
+    })
+    .await?;
+    locks.note_journaled(to, from, None, Some(entry));
+    #[cfg(test)]
+    if testing::stops(node.drive(), testing::Stop::Renamed(seq)) {
+        // As if ThirtyFile stopped here: nothing is put back
+        locks.commit_started();
+        return Err(testing::stopped());
+    }
+    Ok(())
+}
+
 /// Moves an item to the space's trash folder, where it can be restored from. The move is written into the space's
 /// journal first (journal.rs), so should the change not be committed, the item is put back.
 pub async fn trash(conn: &mut SqliteConnection, locks: &SpaceLocks, node: &Node, trash_id: &str) -> AppResult<()> {

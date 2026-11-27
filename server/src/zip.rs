@@ -334,6 +334,8 @@ pub struct ReadEntry {
     pub csize: u64,
     /// Size once extracted, as the archive states it
     pub size: u64,
+    /// The clock time the archive gives it, which says no time zone, as seconds since 1970; None when it gives none
+    pub modified: Option<i64>,
     header_offset: u64,
 }
 
@@ -342,6 +344,19 @@ impl ReadEntry {
     pub fn supported(&self) -> bool {
         !self.encrypted && matches!(self.method, STORE | DEFLATE)
     }
+
+    /// Whether its content is compressed with deflate (else it is stored as it is)
+    pub fn deflated(&self) -> bool {
+        self.method == DEFLATE
+    }
+}
+
+/// A DOS date and time as seconds since 1970 of that clock time (`dos_datetime` the other way round)
+fn from_dos(time: u16, date: u16) -> Option<i64> {
+    let (year, month, day) = (1980 + i64::from(date >> 9), i64::from(date >> 5 & 15), i64::from(date & 31));
+    let (hour, minute, second) = (i64::from(time >> 11), i64::from(time >> 5 & 63), i64::from(time & 31) * 2);
+    let real = (1..=12).contains(&month) && day >= 1 && hour < 24 && minute < 60 && second < 60;
+    real.then(|| crate::util::days_from_civil(year, month, day) * 86400 + hour * 3600 + minute * 60 + second)
 }
 
 fn bad(msg: &str) -> std::io::Error {
@@ -473,11 +488,23 @@ pub fn read_entries<R: Read + Seek>(r: &mut R, max_entries: u64, max_directory: 
             crc: u32_at(h, 16),
             csize,
             size,
+            modified: from_dos(u16_at(h, 12), u16_at(h, 14)),
             header_offset,
         });
         i += 46 + nlen + elen + clen;
     }
     Ok(out)
+}
+
+/// Where an entry's content (`csize` bytes) starts in the archive: after its own header
+pub fn data_start<R: Read + Seek>(r: &mut R, e: &ReadEntry) -> std::io::Result<u64> {
+    let mut h = [0u8; 30];
+    r.seek(SeekFrom::Start(e.header_offset))?;
+    r.read_exact(&mut h)?;
+    if u32_at(&h, 0) != 0x0403_4b50 {
+        return Err(bad("This isn't a ZIP file, or it is damaged"));
+    }
+    (e.header_offset.checked_add(30 + u64::from(u16_at(&h, 26)) + u64::from(u16_at(&h, 28)))).ok_or_else(|| bad("This isn't a ZIP file, or it is damaged"))
 }
 
 /// The extracted content of an entry (stored or deflated; see `ReadEntry::supported`). Reads at most what the entry
@@ -486,14 +513,8 @@ pub fn open_entry<'a, R: Read + Seek>(r: &'a mut R, e: &ReadEntry) -> std::io::R
     if !e.supported() {
         return Err(bad("unsupported entry"));
     }
-    let mut h = [0u8; 30];
-    r.seek(SeekFrom::Start(e.header_offset))?;
-    r.read_exact(&mut h)?;
-    if u32_at(&h, 0) != 0x0403_4b50 {
-        return Err(bad("This isn't a ZIP file, or it is damaged"));
-    }
-    let skip = u16_at(&h, 26) as i64 + u16_at(&h, 28) as i64;
-    r.seek(SeekFrom::Current(skip))?;
+    let start = data_start(r, e)?;
+    r.seek(SeekFrom::Start(start))?;
     let data = r.take(e.csize);
     Ok(match e.method {
         DEFLATE => Box::new(flate2::read::DeflateDecoder::new(data)),

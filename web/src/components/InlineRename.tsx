@@ -3,9 +3,7 @@ import { toast } from "sonner";
 import { cn, errorMessage } from "@/lib/utils";
 import { t, tServer } from "@/lib/i18n";
 import { reportShown } from "@/lib/errorReport";
-
-/** Characters a name can't have (as on Windows; the server refuses them too) */
-const FORBIDDEN = [...'\\/:*?"<>|'];
+import { FORBIDDEN } from "@/lib/batchRename";
 
 /**
  * Inline rename (like Windows File Explorer): the name turns into an input with only the base name selected.
