@@ -58,6 +58,10 @@ async fn the_figures_of_a_space_add_up() {
     let copy3 = env.stored_file(&admin, &b, "copy-3.bin", &BIG).await;
     let trashed = env.stored_file(&admin, &a, "deleted.txt", &[9u8; 4000]).await;
     let t = crate::util::now();
+    // The files were made in this second or the one before: their times are set, so the newest is known. It is the
+    // photo's, in the deeper folder
+    set(&env, "UPDATE nodes SET updated_at = ?1 WHERE kind = 'file'", &[&(t - 100).to_string()]).await;
+    set(&env, "UPDATE nodes SET updated_at = ?1 WHERE id = ?2", &[&t.to_string(), &photo]).await;
     set(&env, "UPDATE nodes SET trashed_at = ?1 WHERE id = ?2", &[&t.to_string(), &trashed]).await;
     set(&env, "UPDATE nodes SET updated_at = ?1 WHERE id = ?2", &[&(t - 2 * 365 * 86400).to_string(), &report]).await;
     // Two earlier versions, one older than a year
