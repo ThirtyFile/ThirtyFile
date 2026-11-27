@@ -12,6 +12,8 @@
 //! that, an item renamed or moved could only be told from one removed and another added by its identity on disk: on
 //! Windows and exFAT, which don't give one, it would lose its id, and with it its links, access and versions.
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use super::*;
@@ -30,6 +32,10 @@ pub enum Intent {
     Trash { node: String, from: String, to: String },
     /// The item `node` at `from` renamed, or moved to another folder of the space (out of the trash too), to `to`
     Move { node: String, from: String, to: String },
+    /// One rename, the `seq`th, of several items renamed together (`batch`): `node`, which the index has at `home`
+    /// until the change is committed, renamed from `from` to `to` in its folder. An item may take two: aside to a name
+    /// scans ignore (`.thirtyfile-rename-…`) while another one takes its name, then to its own new name.
+    Step { batch: String, seq: u32, node: String, home: String, from: String, to: String },
 }
 
 /// What an entry of the journal holds at most (an entry is a few hundred bytes)
@@ -51,8 +57,23 @@ impl Intent {
             Intent::Version { from, to, .. } => inside(from, None) && inside(to, Some(crate::versions::VERSIONS_DIR)),
             Intent::Trash { from, to, .. } => inside(from, None) && inside(to, Some(super::TRASH_DIR)),
             Intent::Move { from, to, .. } => (inside(from, None) || inside(from, Some(super::TRASH_DIR))) && inside(to, None),
+            Intent::Step { home, from, to, .. } => {
+                // In one folder, under a name items have or one a change steps aside to
+                let folder = |path: &str| path.rsplit_once('/').map_or("", |(up, _)| up).to_string();
+                let step = |path: &str| match path.rsplit_once('/') {
+                    _ if inside(path, None) => true,
+                    Some((up, name)) => inside(up, None) && is_staged(name),
+                    None => is_staged(path),
+                };
+                inside(home, None) && step(from) && step(to) && folder(from) == folder(home) && folder(to) == folder(home)
+            }
         }
     }
+}
+
+/// Whether `name` is one an item steps aside to while items are renamed together
+fn is_staged(name: &str) -> bool {
+    name.strip_prefix(super::RENAME_PREFIX).is_some_and(crate::util::is_new_id)
 }
 
 /// An entry in a space's journal
@@ -160,9 +181,12 @@ pub async fn recover(st: &AppState, drive: &str, root: &Pinned) -> AppResult<()>
     })
     .await
     .map_err(AppError::internal)?;
+    // The renames of items renamed together are undone together, the last one first
+    let (steps, entries): (Vec<_>, Vec<_>) = entries.into_iter().partition(|(_, i)| matches!(i, Some(Intent::Step { .. })));
+    recover_steps(st, drive, root, steps).await?;
     for (entry, intent) in entries {
         let done = match intent {
-            None => Ok(()),
+            None | Some(Intent::Step { .. }) => Ok(()),
             Some(Intent::Trash { node, from, to }) => recover_trash(st, drive, root, &node, &from, &to).await?,
             Some(Intent::Move { node, from, to }) => recover_move(st, drive, root, &node, &from, &to).await?,
             Some(Intent::Version { node, version, from, to }) => recover_version(st, drive, root, &node, &version, &from, &to).await?,
@@ -258,6 +282,13 @@ async fn recover_move(st: &AppState, drive: &str, root: &Pinned, node: &str, fro
         tracing::warn!("An item was being taken out of the trash when ThirtyFile stopped, and couldn't go back: the check of the folder finds it");
         return Ok(Ok(()));
     }
+    follow(st, drive, node, from, to).await?;
+    Ok(Ok(()))
+}
+
+/// Records in the index that the item `node`, which it has at `from`, is at `to`: where a change that didn't finish
+/// left it, with no way back. It keeps its id.
+async fn follow(st: &AppState, drive: &str, node: &str, from: &str, to: &str) -> AppResult<()> {
     let (up, name) = to.rsplit_once('/').unwrap_or(("", to));
     let parent: Option<(String,)> = if up.is_empty() {
         sqlx::query_as("SELECT root_id FROM drives WHERE id = ?").bind(drive).fetch_optional(&st.db).await?
@@ -270,7 +301,7 @@ async fn recover_move(st: &AppState, drive: &str, root: &Pinned, node: &str, fro
     };
     let Some((parent,)) = parent else {
         tracing::warn!("An item was being moved when ThirtyFile stopped, into a folder that is gone: the check of the folder finds it");
-        return Ok(Ok(()));
+        return Ok(());
     };
     let recorded = {
         let _w = st.write_lock.lock().await;
@@ -291,11 +322,112 @@ async fn recover_move(st: &AppState, drive: &str, root: &Pinned, node: &str, fro
     if let Err(e) = recorded {
         // Another item has that name in the index: the check of the folder sorts it out
         tracing::warn!("Couldn't record an item moved when ThirtyFile stopped: {}", e.message);
-        return Ok(Ok(()));
+        return Ok(());
     }
     changes::repath_now(st, drive, from, to).await?;
     tracing::warn!("Kept {name:?} where it was renamed or moved to when ThirtyFile stopped");
-    Ok(Ok(()))
+    Ok(())
+}
+
+/// One of the renames of items renamed together, as the journal has it
+struct Step {
+    entry: Entry,
+    batch: String,
+    seq: u32,
+    node: String,
+    home: String,
+    from: String,
+    to: String,
+}
+
+/// Items renamed together by a change that didn't finish: those the index still has where they were are renamed back,
+/// the last rename first, which leaves each name free for the one undone next
+async fn recover_steps(st: &AppState, drive: &str, root: &Pinned, entries: Vec<(Entry, Option<Intent>)>) -> AppResult<()> {
+    let mut steps: Vec<Step> = entries
+        .into_iter()
+        .filter_map(|(entry, intent)| match intent? {
+            Intent::Step { batch, seq, node, home, from, to } => Some(Step { entry, batch, seq, node, home, from, to }),
+            _ => None,
+        })
+        .collect();
+    if steps.is_empty() {
+        return Ok(());
+    }
+    steps.sort_by(|a, b| a.batch.cmp(&b.batch).then(b.seq.cmp(&a.seq)));
+    // Committed (the index has the item elsewhere since), or gone: only the entry is left
+    let (mut undo, mut done) = (Vec::new(), Vec::new());
+    for step in steps {
+        let at: Option<(Option<String>,)> = sqlx::query_as("SELECT fs_path FROM nodes WHERE id = ? AND drive_id = ? AND trashed_at IS NULL")
+            .bind(&step.node)
+            .bind(drive)
+            .fetch_optional(&st.db)
+            .await?;
+        if at.and_then(|(p,)| p).as_deref() == Some(step.home.as_str()) {
+            undo.push(step);
+        } else {
+            done.push(step.entry);
+        }
+    }
+    let r = root.clone();
+    let (undone, stays) = tokio::task::spawn_blocking(move || match rename_back(&r, &undo) {
+        Ok(stays) => (undo.into_iter().map(|s| s.entry).collect(), stays),
+        // Their entries stay, for the next check
+        Err(e) => {
+            tracing::warn!("Couldn't finish what a change left in a folder space: {e}");
+            (Vec::new(), HashMap::new())
+        }
+    })
+    .await
+    .map_err(AppError::internal)?;
+    for (node, (home, at)) in stays {
+        follow(st, drive, &node, &home, &at).await?;
+    }
+    done.extend(undone);
+    tokio::task::spawn_blocking(move || done.into_iter().for_each(Entry::remove)).await.map_err(AppError::internal)?;
+    Ok(())
+}
+
+/// Renames back what `steps` (the last first) renamed. Returns the items that couldn't go back, as their names were
+/// taken meanwhile, each with where the index has it and where it is. A blocking disk step.
+fn rename_back(root: &Pinned, steps: &[Step]) -> io::Result<HashMap<String, (String, String)>> {
+    let mut stays: HashMap<String, (String, String)> = HashMap::new();
+    for step in steps {
+        // What is at an earlier name of one that stays is another item
+        if stays.contains_key(&step.node) {
+            continue;
+        }
+        let back = root.join(&step.to).and_then(|item| {
+            // Not renamed: the change stopped before it did
+            if std::fs::symlink_metadata(item.as_path()).is_err() {
+                return Ok(());
+            }
+            rename_new(item.as_path(), root.join(&step.from)?.as_path())?;
+            tracing::warn!("Renamed {:?} back: items were being renamed when ThirtyFile stopped", step.from);
+            Ok(())
+        });
+        match back {
+            Ok(()) => {}
+            Err(e) if matches!(e.kind(), io::ErrorKind::AlreadyExists | io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) => {
+                stays.insert(step.node.clone(), (step.home.clone(), step.to.clone()));
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    // One left under a name scans ignore would never show: it gets a free name where it was
+    for (home, at) in stays.values_mut() {
+        let (up, name) = at.rsplit_once('/').unwrap_or(("", at.as_str()));
+        if !is_staged(name) {
+            continue;
+        }
+        let item = root.join(at)?;
+        let is_dir = std::fs::symlink_metadata(item.as_path())?.is_dir();
+        let dir = if up.is_empty() { root.clone() } else { root.join(up)?.dir()? };
+        let wanted = home.rsplit_once('/').map_or(home.as_str(), |(_, n)| n);
+        let free =
+            put_back_into(&item, &dir, wanted, is_dir).unwrap_or_else(|| Err(io::Error::new(io::ErrorKind::AlreadyExists, "too many items with the same name")))?;
+        *at = super::child_rel(up, &free);
+    }
+    Ok(stays)
 }
 
 /// The file `node` at `from` kept as its version `version` at `to`, before new content was to take its name

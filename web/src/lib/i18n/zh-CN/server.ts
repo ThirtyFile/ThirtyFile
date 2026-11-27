@@ -179,6 +179,8 @@ export default {
   "\"{name}\" already exists": "“{name}”已存在",
   "The root folder of a space can't be renamed": "无法重命名空间根目录",
   "Select 1 to 1000 items": "请选择 1 到 1000 个项目",
+  "An item is listed more than once": "列表中有重复的项目",
+  "Rename a folder or the items in it, not both at once": "请分开重命名文件夹和其中的项目",
   "Select a destination folder": "请选择目标文件夹",
   "This can't be done on the root folder of a space": "无法对空间根目录执行此操作",
   "Can't move \"{name}\" into its own subfolder": "无法把“{name}”移到它自己的子文件夹中",

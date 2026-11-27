@@ -97,6 +97,85 @@ pub async fn rename(State(st): State<AppState>, user: User, Path(id): Path<Strin
     Ok(Json(node))
 }
 
+#[derive(Deserialize)]
+pub struct RenameManyReq {
+    pub(super) items: Vec<RenameItem>,
+}
+
+#[derive(Deserialize)]
+pub struct RenameItem {
+    pub(super) id: String,
+    pub(super) name: String,
+}
+
+/// Renames several items at once, each in its folder: all of them, or none when one can't be. Names can be swapped or
+/// passed along among them. Returns the items renamed.
+pub async fn rename_many(State(st): State<AppState>, user: User, Json(req): Json<RenameManyReq>) -> AppResult<Json<Vec<Node>>> {
+    if req.items.is_empty() || req.items.len() > MAX_BATCH {
+        return Err(AppError::bad_request("Select 1 to 1000 items"));
+    }
+    let mut seen = HashSet::new();
+    let mut wanted = Vec::with_capacity(req.items.len());
+    for item in &req.items {
+        if !seen.insert(item.id.as_str()) {
+            return Err(AppError::bad_request("An item is listed more than once"));
+        }
+        wanted.push((item.id.as_str(), validate_name(&item.name)?));
+    }
+    let locks = fsops::lock_seen(&st, &user, &wanted.iter().map(|(id, _)| *id).collect::<Vec<_>>()).await?;
+    let _w = st.write_lock.lock().await;
+    let mut tx = crate::db::begin_write(&st.db).await?;
+    let user = crate::auth::current_user(&mut tx, &user).await?;
+    let mut changed = Vec::with_capacity(wanted.len());
+    for (id, name) in wanted {
+        let node = tree::node_for(&mut tx, &user, id, Need::Write).await?;
+        locks.check(&node)?;
+        if node.parent_id.is_none() {
+            return Err(AppError::bad_request("The root folder of a space can't be renamed"));
+        }
+        if name != node.name {
+            changed.push((node, name));
+        }
+    }
+    let ids: Vec<String> = changed.iter().map(|(n, _)| n.id.clone()).collect();
+    if outermost(&mut tx, &ids).await?.len() != ids.len() {
+        return Err(AppError::bad_request("Rename a folder or the items in it, not both at once"));
+    }
+    // First every item under a name none can have, then each under its new one: a name is then taken only when an item
+    // that keeps it, or another new name, has it
+    for (node, _) in &changed {
+        sqlx::query("UPDATE nodes SET name = ? WHERE id = ?").bind(format!("{}{}", fsops::RENAME_PREFIX, node.id)).bind(&node.id).execute(&mut *tx).await?;
+    }
+    let mut on_disk = Vec::new();
+    for (node, name) in &changed {
+        let parent = node.parent_id.as_deref().unwrap_or_default();
+        if tree::name_taken(&mut tx, parent, name).await? {
+            return Err(AppError::conflict(format!("\"{name}\" already exists")));
+        }
+        let mime = if node.is_folder() { String::new() } else { crate::util::guess_mime(name) };
+        // As for one item (`rename`): the time only moves forward
+        sqlx::query("UPDATE nodes SET name = ?, mime = ?, updated_at = MAX(?, updated_at + 1) WHERE id = ?")
+            .bind(name)
+            .bind(mime)
+            .bind(now())
+            .bind(&node.id)
+            .execute(&mut *tx)
+            .await?;
+        if node.in_folder_space() {
+            let folder = tree::get_node(&mut tx, parent).await?.ok_or_else(|| AppError::not_found("Folder not found"))?;
+            on_disk.push(fsops::Renaming { node: node.clone(), folder, name: name.clone() });
+        }
+    }
+    fsops::rename_together(&mut tx, &locks, &on_disk).await?;
+    let mut renamed = Vec::with_capacity(changed.len());
+    for (node, name) in &changed {
+        logs::record_activity(&mut tx, &user, Some(node), "rename", &format!("→ {name}")).await?;
+        renamed.extend(tree::get_node(&mut tx, &node.id).await?);
+    }
+    locks.commit(tx).await?;
+    Ok(Json(renamed))
+}
+
 #[derive(Deserialize, Default)]
 pub struct BatchReq {
     pub(super) ids: Vec<String>,
@@ -628,5 +707,7 @@ pub async fn conflicts(State(st): State<AppState>, user: User, Json(req): Json<C
     Ok(Json(out))
 }
 
+#[cfg(test)]
+mod rename_many_tests;
 #[cfg(test)]
 mod trash_batch_tests;

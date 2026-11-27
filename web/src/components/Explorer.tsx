@@ -139,7 +139,7 @@ export function Explorer(p: ExplorerProps) {
     sort: p.sort,
     onSort: p.onSort,
     groupBy: s.groupBy,
-    groupReversed: s.groupBy === "date" ? p.sort?.key === "updated" && p.sort.order === "asc" : s.groupBy === "type" && p.sort?.key === "type" && p.sort.order === "desc",
+    groupReversed: s.groupReversed,
     showLocation: p.showLocation,
     showOwner: p.showOwner,
     extraColumn: p.extraColumn,

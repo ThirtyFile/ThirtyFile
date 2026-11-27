@@ -41,6 +41,8 @@ export const filesApi = {
   findPath: (path: string, aliases: Record<string, string>) => post<FoundPath>("/nodes/find", { path, aliases }),
   createFolder: (parent_id: string, name: string) => post<Node>("/folders", { parent_id, name }),
   rename: (id: string, name: string) => request<Node>("PATCH", enc`/nodes/${id}`, { name }),
+  /** Renames several items at once, each in its folder: all of them or none. Names can be swapped among them */
+  renameMany: (items: { id: string; name: string }[]) => post<Node[]>("/nodes/rename", { items }),
   /** `resolutions`: what to do with each item (by id) whose name the destination already has */
   /** Moving or copying to or from a folder on the server can take a while: follow the task (`waitForJob`) */
   move: (ids: string[], dest_id: string, resolutions?: Record<string, Resolution>) => post<Job>("/nodes/move", { ids, dest_id, resolutions }),

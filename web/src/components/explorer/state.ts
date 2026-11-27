@@ -297,6 +297,8 @@ export function useExplorerState(p: ExplorerProps) {
     setView,
     groupBy,
     setGroupBy,
+    /** The groups show in the other order, as the list is sorted */
+    groupReversed: groupBy === "date" ? p.sort?.key === "updated" && p.sort.order === "asc" : groupBy === "type" && p.sort?.key === "type" && p.sort.order === "desc",
     selected,
     setSelected,
     anchor,

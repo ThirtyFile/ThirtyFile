@@ -6,6 +6,7 @@ export type Item = Node & Partial<Pick<Located, "location">>;
 
 export type DialogState =
   | { t: "rename"; node: Pick<Node, "id" | "name"> }
+  | { t: "batch-rename"; picked: Picked }
   | { t: "move" | "copy"; picked: Picked }
   | { t: "trash"; picked: Picked }
   | { t: "share"; node: Node }

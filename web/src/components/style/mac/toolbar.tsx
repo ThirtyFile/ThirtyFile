@@ -261,7 +261,7 @@ function ActionsMenu({ p, s, a, newItems }: { p: ExplorerProps; s: ExplorerState
         <DropdownMenuItem disabled={none} onClick={() => setDetailsOpen(true)}>
           <InfoIcon /> {t("Get info")} <Kbd>{k.details[0]}</Kbd>
         </DropdownMenuItem>
-        <DropdownMenuItem disabled={!single || !caps.write} onClick={() => single && setDialog({ t: "rename", node: single })}>
+        <DropdownMenuItem disabled={none || !caps.write} onClick={a.rename}>
           <PencilIcon /> {t("Rename")} <Kbd>{k.rename[0]}</Kbd>
         </DropdownMenuItem>
         {commands.download}

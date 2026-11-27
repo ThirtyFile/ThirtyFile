@@ -59,8 +59,11 @@ export interface FileChange {
 }
 
 /** A rename, from the server's answer: the row changes at once, and its folder is put in order again */
-export function renamed(node: Node): FileChange {
-  return { updated: [{ id: node.id, name: node.name, mime: node.mime, updated_at: node.updated_at }], folders: [node.parent_id] };
+export function renamed(...nodes: Node[]): FileChange {
+  return {
+    updated: nodes.map((n) => ({ id: n.id, name: n.name, mime: n.mime, updated_at: n.updated_at })),
+    folders: [...new Set(nodes.map((n) => n.parent_id))],
+  };
 }
 
 /** New content saved or restored, from the server's answer (whether it is a favorite isn't in it: that stays as it was) */
