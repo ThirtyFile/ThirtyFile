@@ -24,4 +24,13 @@ export default {
   "Deleting the user…": "正在刪除使用者…",
   "Removing \"My files\"…": "正在移除「我的檔案」…",
   "Working…": "處理中…",
+  // components/ZipViewer.tsx
+  "Folders in the ZIP file": "ZIP 檔案裡的資料夾",
+  "Extract selected": "解壓縮選取的項目",
+  "Couldn't open the ZIP file": "無法開啟 ZIP 檔案",
+  "This ZIP file is empty": "這個 ZIP 檔案是空的",
+  "{n} item with an unsafe path isn't shown|{n} items with unsafe paths aren't shown": "有 {n} 個路徑不安全的項目未顯示",
+  "Protected with a password": "有密碼保護",
+  "Compressed in a way that isn't supported": "使用了不支援的壓縮方式",
+  "Too large to take out": "太大，無法取出",
 } satisfies Record<string, string>;

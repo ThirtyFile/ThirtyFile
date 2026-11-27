@@ -24,4 +24,13 @@ export default {
   "Deleting the user…": "ユーザーを削除しています…",
   "Removing \"My files\"…": "「マイファイル」を削除しています…",
   "Working…": "処理しています…",
+  // components/ZipViewer.tsx
+  "Folders in the ZIP file": "ZIP ファイル内のフォルダー",
+  "Extract selected": "選択した項目を展開",
+  "Couldn't open the ZIP file": "ZIP ファイルを開けませんでした",
+  "This ZIP file is empty": "この ZIP ファイルは空です",
+  "{n} item with an unsafe path isn't shown|{n} items with unsafe paths aren't shown": "パスが安全でない {n} 個の項目は表示されません",
+  "Protected with a password": "パスワードで保護されています",
+  "Compressed in a way that isn't supported": "対応していない方式で圧縮されています",
+  "Too large to take out": "大きすぎて取り出せません",
 } satisfies Record<string, string>;

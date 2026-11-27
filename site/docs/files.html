@@ -182,8 +182,9 @@
         <ul>
           <li><strong>Compress</strong>: select items, right-click and choose <strong>Compress to ZIP file</strong>. A compressed ZIP file appears next to them, named after the item (or, for several items, after their folder). It counts against the space's storage like any other file. Before compressing, ThirtyFile checks that the selected items, at their full size, fit in the space and in the free space of its data folder, where the ZIP file is put together.</li>
           <li><strong>Extract</strong>: right-click a ZIP file and choose <strong>Extract all</strong>. Its contents go into a new folder next to it, named after the ZIP file. Names that are taken get a number, as elsewhere.</li>
+          <li><strong>Look inside</strong>: open a ZIP file to see its folders and files, with their sizes and dates, without extracting it. The arrow button beside a file downloads that file alone. To take only part of it, tick files or folders and choose <strong>Extract selected</strong>; they go into a new folder next to the ZIP file. Files protected with a password, compressed with another method, or too large to extract are marked and can't be opened, and entries whose paths lead outside the archive aren't shown. A list of more than 20,000 entries isn't shown. Names that are neither UTF-8 nor marked as such may look garbled, as when extracting. Share links don't offer this: visitors download the ZIP file.</li>
         </ul>
-        <p>Both run on the server: a message at the bottom shows how far they got, and you can keep working meanwhile. Both are recorded in the activity log.</p>
+        <p>Compressing and extracting run on the server: a message at the bottom shows how far they got, and you can keep working meanwhile. Both are recorded in the activity log.</p>
         <p>To keep one file from filling the server, a ZIP file isn't extracted when:</p>
         <ul>
           <li>its contents are larger than the space has room for, or larger than 16 GB;</li>

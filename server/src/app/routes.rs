@@ -139,6 +139,8 @@ fn file_api() -> Router<AppState> {
         .route("/download/{link}", get(downloads::download_by_link))
         .route("/archive/compress", post(archive::compress))
         .route("/archive/extract", post(archive::extract))
+        .route("/archive/{id}/entries", get(archive::entries))
+        .route("/archive/{id}/entries/{index}", get(archive::entry))
         .route("/pdf/pages", post(crate::pdf::api::pages))
         .route("/pdf/split", post(crate::pdf::api::split))
         .route("/pdf/combine", post(crate::pdf::api::combine_files))

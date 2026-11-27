@@ -1129,6 +1129,13 @@ export default {
   "This ZIP file holds more than {size} once extracted, more than can be extracted here": "この ZIP ファイルは展開すると {size} を超え、ここで展開できる上限を超えています",
   "This ZIP file would grow far more than ordinary files do when extracted, so it isn't extracted": "この ZIP ファイルは展開すると通常のファイルよりはるかに大きくなるため、展開しません",
   "This ZIP file is damaged and can't be extracted": "この ZIP ファイルは破損しているため、展開できません",
+  "Only ZIP files can be opened this way": "この方法で開けるのは ZIP ファイルだけです",
+  "The ZIP file has changed. Open it again.": "ZIP ファイルが変更されました。もう一度開いてください。",
+  "This ZIP file is damaged and can't be opened": "この ZIP ファイルは破損しているため開けません",
+  "This ZIP file holds more than {n} items, more than can be shown": "この ZIP ファイルには {n} 個を超える項目があり、表示できる数を超えています",
+  "This file is protected with a password, which isn't supported": "このファイルはパスワードで保護されています。対応していません",
+  "This file is compressed in a way that isn't supported": "このファイルは対応していない方式で圧縮されています",
+  "The selected items aren't in this ZIP file": "選択した項目はこの ZIP ファイルにありません",
   "This ZIP file holds more than {n} items, more than can be extracted at once": "この ZIP ファイルには {n} 個を超える項目が含まれており、一度に展開できる数を超えています",
   "A path in this ZIP file goes more than {n} folders deep, more than can be extracted": "この ZIP ファイルには {n} 階層を超えるフォルダーのパスが含まれているため、展開できません",
   // Notifications and the email server (notify.rs, mail.rs)

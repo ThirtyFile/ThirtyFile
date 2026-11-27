@@ -3,6 +3,7 @@ import type { Resolution } from "@/lib/conflicts";
 import { request, get, post, enc, qs, toParams, responseError, send } from "@/api/client";
 import { driveName, localizeLocated } from "@/api/names";
 import type {
+  ArchiveListing,
   Node,
   Job,
   SearchFilter,
@@ -72,8 +73,12 @@ export const filesApi = {
   setFavorite: (ids: string[], favorite: boolean) => post("/nodes/favorite", { ids, favorite }),
   /** Packs items into a new ZIP file in `parentId`, on the server */
   compress: (ids: string[], parentId: string) => post<Job>("/archive/compress", { ids, parent_id: parentId, tz: new Date().getTimezoneOffset() }),
-  /** Extracts a ZIP file into a new folder next to it, on the server */
-  extract: (id: string) => post<Job>("/archive/extract", { id }),
+  /** Extracts a ZIP file, or some of it, into a new folder next to it, on the server */
+  extract: (id: string, only?: { paths: string[]; version: string }) => post<Job>("/archive/extract", { id, ...only }),
+  /** What a ZIP file holds, without extracting it */
+  archiveEntries: (id: string, signal?: AbortSignal) => get<ArchiveListing>(enc`/archive/${id}/entries`, signal),
+  /** Downloads one file out of a ZIP file (`index` and `version` from `archiveEntries`) */
+  archiveEntryUrl: (id: string, index: number, version: string) => enc`/api/archive/${id}/entries/${index}?v=${version}`,
   /** A new PDF of chosen pages of one (`pages`: counting from 0, turned by `rotate` degrees; or `ranges` like "1-3, 5"): a new file, or a new version of the file. A task */
   pdfPages: (body: { id: string; pages?: { page: number; rotate: number }[]; ranges?: string; save: "new" | "version"; name?: string; base_version?: number }) =>
     post<Job>("/pdf/pages", body),

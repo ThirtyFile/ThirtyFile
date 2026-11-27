@@ -3,7 +3,7 @@ import { ArrowLeftIcon, DownloadIcon, FileTextIcon, Loader2Icon } from "lucide-r
 import type { FileSource, Node } from "@/api";
 import { triggerDownload } from "@/downloads";
 import { Button } from "@/components/ui/button";
-import { FileIcon, MAX_TEXT_BYTES, categoryOf, isBrowserMedia, isTextLike, mayOpenAsText } from "@/components/FileIcon";
+import { FileIcon, MAX_TEXT_BYTES, categoryOf, isBrowserMedia, isTextLike, isZip, mayOpenAsText } from "@/components/FileIcon";
 import { hasDraft } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
 import { reportShown } from "@/lib/errorReport";
@@ -14,6 +14,7 @@ const TextEditor = lazy(() => import("@/components/TextEditor"));
 const OfficeViewer = lazy(() => import("@/components/OfficeViewer"));
 const MarkdownPreview = lazy(() => import("@/components/MarkdownPreview"));
 const PdfViewer = lazy(() => import("@/components/pdf/PdfViewer"));
+const ZipViewer = lazy(() => import("@/components/ZipViewer"));
 
 /** Office files that can be previewed (.docx / .xlsx / .pptx; legacy formats need downloading) */
 export function isOfficePreviewable(n: Node) {
@@ -65,6 +66,15 @@ export function FileViewer(props: {
       <Suspense fallback={<Loader2Icon className={cn("size-6 animate-spin", embedded ? "text-muted-foreground" : "text-white/70")} />}>
         <TextEditor key={node.id} node={node} source={props.source} editable={props.editable} embedded={embedded} onSaved={props.onSaved} onDirtyChange={props.onDirtyChange} />
       </Suspense>
+    );
+  if (isZip(node) && props.source.browsesArchives)
+    return (
+      // The list's own right-click menu rather than the page's
+      <div className="size-full min-h-0 self-stretch" onContextMenu={(e) => e.stopPropagation()}>
+        <Suspense fallback={<Loader2Icon className="m-auto size-6 animate-spin text-muted-foreground" />}>
+          <ZipViewer key={node.id} node={node} />
+        </Suspense>
+      </div>
     );
   return <OtherFile key={node.id} {...props} />;
 }
