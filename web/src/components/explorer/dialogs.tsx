@@ -1,4 +1,4 @@
-/** File explorer dialogs: move / copy, delete, share and access (creating and renaming are edited inline in the list) */
+/** File explorer dialogs: move / copy, delete, share and access (creating and renaming one item are edited inline in the list) */
 import { lazy, Suspense } from "react";
 import { AccessDialog } from "@/components/AccessDialog";
 import { ConfirmDialog } from "@/components/dialogs";
@@ -10,6 +10,7 @@ import { t } from "@/lib/i18n";
 import { homeFolder } from "@/lib/home";
 import { useMe } from "@/lib/session";
 import { trashHint } from "@/lib/utils";
+import { BatchRenameDialog } from "./BatchRenameDialog";
 import type { ExplorerProps } from "../Explorer";
 import type { ExplorerState } from "./state";
 import type { ExplorerActions } from "./actions";
@@ -38,6 +39,9 @@ export function ExplorerDialogs({ p, s, a }: { p: ExplorerProps; s: ExplorerStat
             else await transfer("copy", dialog.picked, dest, () => t("Copied"), t("Couldn't copy"));
           }}
         />
+      )}
+      {dialog?.t === "batch-rename" && (
+        <BatchRenameDialog count={dialog.picked.count} load={(signal) => a.selectedInOrder(dialog.picked, signal)} onRename={a.renameMany} onClose={() => setDialog(null)} />
       )}
       {dialog?.t === "trash" && (
         <ConfirmDialog

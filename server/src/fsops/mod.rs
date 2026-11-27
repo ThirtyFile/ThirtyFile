@@ -392,6 +392,8 @@ pub(crate) mod testing {
         /// Renaming or moving within a space (out of the trash too): the item has its new place, the change isn't
         /// committed
         Moved,
+        /// Renaming several items together: the rename of this number (from 0) is made, the change isn't committed
+        Renamed(u32),
         /// Moving or copying to a folder space: the content is in place under its name, the index hasn't followed
         Placed,
     }

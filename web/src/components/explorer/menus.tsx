@@ -247,7 +247,7 @@ export function explorerMenus(p: ExplorerProps, s: ExplorerState, a: ExplorerAct
       <InfoIcon /> {t("Properties")} <Kbd>{k.details[0]}</Kbd>
     </DropdownMenuItem>
   );
-  const rename = () => single && setDialog({ t: "rename", node: single });
+  const { rename } = a;
   const remove = () => setDialog({ t: "trash", picked: s.picked });
 
   // Items for empty space

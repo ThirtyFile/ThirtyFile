@@ -158,6 +158,12 @@ pub async fn repath(conn: &mut SqliteConnection, node_id: &str, drive_id: &str, 
     Ok(Some(Unfinished { id: c.id, frontier: None }))
 }
 
+/// `repath` of all of it in this transaction, for a path another item takes next
+pub async fn repath_all(conn: &mut SqliteConnection, drive_id: &str, old: &str, new: &str) -> AppResult<()> {
+    while old != new && !repath_batch(conn, drive_id, old, new, batch()).await?.1 {}
+    Ok(())
+}
+
 /// Marks everything in `node_id` (not in the trash already) as in the trash with it; the item itself is marked by the
 /// caller
 pub async fn trash(conn: &mut SqliteConnection, node_id: &str, trash_id: &str, at: i64) -> AppResult<Option<Unfinished>> {

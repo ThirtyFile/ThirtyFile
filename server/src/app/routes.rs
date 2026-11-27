@@ -103,6 +103,7 @@ fn file_api() -> Router<AppState> {
         .route("/nodes/{id}/children", get(nodes::children))
         .route("/nodes/{id}/position", get(nodes::position))
         .route("/nodes/{id}/select", post(nodes::select))
+        .route("/nodes/rename", post(nodes::rename_many))
         .route("/nodes/move", post(nodes::move_nodes))
         .route("/nodes/copy", post(nodes::copy_nodes))
         .route("/nodes/conflicts", post(nodes::conflicts))

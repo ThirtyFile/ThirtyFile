@@ -3,12 +3,15 @@ import { focusIsFree } from "@/lib/focus";
 import { useEffect, type DragEvent } from "react";
 import { toast } from "sonner";
 import { api, privateSource, type KeptItem, type Node } from "@/api";
+import { typeLabel } from "@/components/FileIcon";
 import { keys } from "@/api/queryKeys";
 import { triggerDownload } from "@/downloads";
 import { setClipboard } from "@/lib/clipboard";
+import { groupItems } from "@/lib/listView";
+import { WINDOW } from "@/lib/windows";
 import { t } from "@/lib/i18n";
 import { type FileChange, invalidateFiles, refreshFiles, renamed, rowsOf } from "@/lib/queries";
-import { eachBatch, idsOf, type Picked } from "@/lib/span";
+import { eachBatch, idsOf, type Picked, SELECT_BATCH, smartOf } from "@/lib/span";
 import { transferItems } from "@/lib/transfer";
 import { type Origins, originsOf, toastWithUndo, undoLast } from "@/lib/undo";
 import { confirm } from "@/lib/confirm";
@@ -174,6 +177,65 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
         undoneText: t("Renamed back"),
         label: t("Undo rename"),
       });
+  };
+
+  /** Rename (F2, menus): one item in place, several together in a dialog */
+  const rename = () => {
+    if (!caps.write) return;
+    if (single) setDialog({ t: "rename", node: single });
+    else if (s.count > SELECT_BATCH) toast.error(t("Rename at most {n} items at once", { n: SELECT_BATCH }));
+    else if (s.count > 1) setDialog({ t: "batch-rename", picked: s.picked });
+  };
+
+  /** The items selected, in the order the list shows them; what a large folder hasn't loaded of them is asked for */
+  const selectedInOrder = async (picked: Picked, signal: AbortSignal): Promise<Item[]> => {
+    // Grouped, the list shows them group by group (components/FileList)
+    const grouping = { dateOf: (x: Item) => x.updated_at, typeOf: typeLabel, now: new Date(), reversed: s.groupReversed };
+    const groups = s.groupBy !== "none" && !picked.span ? groupItems<Item>(p.items, s.groupBy, grouping) : null;
+    const rows: readonly (Item | undefined)[] = groups ? groups.flatMap((g) => g.items) : s.shown;
+    const at = new Map<string, number>();
+    rows.forEach((n, i) => n && at.set(n.id, i));
+    const found = new Map<string, Item>(selectedNodes.map((n) => [n.id, n]));
+    const span = picked.span;
+    const ids = span ? await idsOf(picked, SELECT_BATCH) : picked.ids;
+    signal.throwIfAborted();
+    if (span) {
+      const smart = smartOf(span.folder);
+      let offset = span.from?.index ?? 0;
+      let missing = ids.filter((id) => !found.has(id)).length;
+      while (missing > 0) {
+        const page =
+          smart !== null ? await api.smartItemsAt(smart, span.sort, span.order, offset, WINDOW, signal) : await api.childrenAt(span.folder, span.sort, span.order, offset, WINDOW, signal);
+        page.items.forEach((n, i) => {
+          if (!at.has(n.id)) at.set(n.id, offset + i);
+          if (!found.has(n.id) && ids.includes(n.id)) {
+            found.set(n.id, n);
+            missing--;
+          }
+        });
+        offset += page.items.length;
+        if (!page.items.length || offset >= page.total) break;
+      }
+      if (missing > 0) throw new Error(t("The selected items have changed. Select them again."));
+    }
+    return ids.flatMap((id) => found.get(id) ?? []).sort((x, y) => (at.get(x.id) ?? Infinity) - (at.get(y.id) ?? Infinity));
+  };
+
+  /** Renames several items together (the dialog's new names); Undo gives them their names back */
+  const renameMany = async (items: Item[], changes: { id: string; name: string }[]) => {
+    const apply = async (list: { id: string; name: string }[]) => {
+      const nodes = await api.renameMany(list);
+      nodes.forEach((n) => s.newItems.rename(n.id, n.name));
+      void changed(renamed(...nodes));
+    };
+    const names = new Map(items.map((n) => [n.id, n.name]));
+    await apply(changes);
+    setDialog(null);
+    toastWithUndo(t("Renamed {n} item|Renamed {n} items", { n: changes.length }), {
+      undo: () => apply(changes.map((c) => ({ id: c.id, name: names.get(c.id)! }))),
+      undoneText: t("Renamed back"),
+      label: t("Undo rename"),
+    });
   };
 
   /** Renaming ended (a new name, or Esc): a new item made meanwhile takes its id */
@@ -410,9 +472,9 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
       } else if (pressed(e, k.newFolder) && canCreate) {
         e.preventDefault();
         void createNew("folder");
-      } else if (pressed(e, k.rename) && single && caps.write) {
+      } else if (pressed(e, k.rename) && s.count && caps.write) {
         e.preventDefault();
-        setDialog({ t: "rename", node: single });
+        rename();
       } else if (pressed(e, k.open) && single) {
         e.preventDefault();
         open(single, true);
@@ -492,6 +554,9 @@ export function useExplorerActions(p: ExplorerProps, s: ExplorerState) {
     createNew,
     renameItem,
     renameDone,
+    rename,
+    selectedInOrder,
+    renameMany,
   };
 }
 

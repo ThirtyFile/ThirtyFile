@@ -49,7 +49,7 @@ import { t } from "@/lib/i18n";
 export function windowsToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerActions, newItems: React.ReactNode) {
   const { caps, canCreate, single, view, setView, groupBy, setGroupBy, setSelected, setDialog, showCheckboxes, setShowCheckboxes, detailsOpen, setDetailsOpen } = s;
   const commands = toolbarCommands(p, s, a);
-  const { cut, copy, canPaste, paste } = a;
+  const { cut, copy, canPaste, paste, rename } = a;
   const none = s.count === 0;
   const k = s.kit.keys;
   const icon = "size-9 px-0 [&_svg]:size-[18px]";
@@ -85,8 +85,8 @@ export function windowsToolbar(p: ExplorerProps, s: ExplorerState, a: ExplorerAc
         label={t("Rename")}
         title={`${t("Rename")} (${shortcut(k.rename[0])})`}
         className={cn(icon, phoneHidden)}
-        disabled={!single || !caps.write}
-        onClick={() => single && setDialog({ t: "rename", node: single })}
+        disabled={none || !caps.write}
+        onClick={rename}
       />
       {!s.me.single_user && (
         <>

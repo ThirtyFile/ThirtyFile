@@ -179,6 +179,8 @@ export default {
   "\"{name}\" already exists": "「{name}」は既に存在します",
   "The root folder of a space can't be renamed": "スペースのルートフォルダーの名前は変更できません",
   "Select 1 to 1000 items": "1～1000 個の項目を選択してください",
+  "An item is listed more than once": "同じ項目が複数回指定されています",
+  "Rename a folder or the items in it, not both at once": "フォルダーとその中の項目は、別々に名前を変更してください",
   "Select a destination folder": "宛先フォルダーを選択してください",
   "This can't be done on the root folder of a space": "スペースのルートフォルダーではこの操作を実行できません",
   "Can't move \"{name}\" into its own subfolder": "「{name}」をそれ自身のサブフォルダーに移動することはできません",

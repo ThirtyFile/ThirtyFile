@@ -16,7 +16,7 @@ import { openQuickLook } from "./quickLook";
 
 export function macMenu(m: MenuEntries): ReactNode {
   const { p, s, a } = m;
-  const { caps, single, canCreate } = s;
+  const { caps, canCreate } = s;
   const k = s.kit.keys;
   const getInfo = (key: string) => (
     <DropdownMenuItem key={key} onClick={() => s.setDetailsOpen(true)}>
@@ -42,7 +42,7 @@ export function macMenu(m: MenuEntries): ReactNode {
       ],
       [
         getInfo("info"),
-        caps.write && single && (
+        caps.write && (
           <DropdownMenuItem key="rename" onClick={m.rename}>
             <PencilIcon /> {t("Rename")} <Kbd>{k.rename[0]}</Kbd>
           </DropdownMenuItem>

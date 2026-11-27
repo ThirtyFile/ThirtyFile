@@ -179,6 +179,8 @@ export default {
   "\"{name}\" already exists": "「{name}」已存在",
   "The root folder of a space can't be renamed": "無法重新命名空間根目錄",
   "Select 1 to 1000 items": "請選擇 1 到 1000 個項目",
+  "An item is listed more than once": "清單中有重複的項目",
+  "Rename a folder or the items in it, not both at once": "請分開重新命名資料夾和它裡面的項目",
   "Select a destination folder": "請選擇目標資料夾",
   "This can't be done on the root folder of a space": "無法操作空間根目錄",
   "Can't move \"{name}\" into its own subfolder": "無法把「{name}」移到它自己的子資料夾中",
