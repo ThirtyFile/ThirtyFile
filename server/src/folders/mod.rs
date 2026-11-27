@@ -28,7 +28,7 @@ use crate::{
 
 mod source;
 pub mod state;
-pub use source::{check_location_folder, check_new_source, check_source, check_source_in, set_up};
+pub use source::{check_location_folder, check_new_source, check_source, check_source_in, set_up, set_up_anyway};
 
 /// Files changed more recently than this are still being written, maybe: they are indexed by a later scan
 const SETTLE_SECONDS: i64 = 10;
@@ -144,6 +144,20 @@ pub(crate) fn mark_space(source: &Path, drive_id: &str) -> std::io::Result<()> {
         _ => {}
     }
     crate::beneath::write_new(&marker, drive_id.as_bytes())
+}
+
+/// Gives a space that was read-only and may be changed again its marker, which it may never have had (its folder
+/// couldn't be written to) and without which nothing is changed: when the folder is still the one the space showed
+pub(crate) async fn mark_opened_up(conn: &mut SqliteConnection, drive_id: &str, source: &Path) -> AppResult<()> {
+    let (dev, ino): (Option<i64>, Option<i64>) = sqlx::query_as("SELECT source_dev, source_ino FROM drives WHERE id = ?").bind(drive_id).fetch_one(conn).await?;
+    let Ok(root) = crate::beneath::Pinned::root(source) else { return Ok(()) };
+    if folder_identity(&root) == dev.zip(ino)
+        && space_marker(&root).is_ok_and(|id| id.is_none())
+        && let Err(e) = root.join(MARKER).and_then(|m| crate::beneath::write_new(&m, drive_id.as_bytes()))
+    {
+        tracing::warn!("Couldn't write the marker file in {}: {e}", source.display());
+    }
+    Ok(())
 }
 
 /// One item found in the folder

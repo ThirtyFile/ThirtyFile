@@ -329,6 +329,7 @@ export default {
   "Folder spaces show folders on the server. Changes made there (for example over SMB) appear when someone opens the folder, and all folders are checked this often. 0 = only when someone opens a folder or clicks \"Check for changes\".": "フォルダースペースには、サーバー上のフォルダーが表示されます。サーバー側で行われた変更（SMB 経由など）は、誰かがフォルダーを開いたときに反映されます。また、この間隔ですべてのフォルダーが確認されます。0 = 誰かがフォルダーを開くか「変更を確認」をクリックしたときだけ確認します。",
   "Checked the folder": "フォルダーを確認",
   "This space is read-only. You can open, download and share its files.": "このスペースは読み取り専用です。ファイルを開いたり、ダウンロードや共有をしたりできます。",
+  "This space is read-only. You can open and download its files.": "このスペースは読み取り専用です。ファイルを開いたり、ダウンロードしたりできます。",
   "This space is being moved to another storage location.": "このスペースは別の保存場所に移動中です。",
   "It is read-only until the move finishes: you can open, download and share its files, but not change them.": "移動が完了するまでは読み取り専用です。ファイルを開いたり、ダウンロードや共有をしたりはできますが、変更はできません。",
   "\"{name}\" is read-only now": "「{name}」は読み取り専用になりました",

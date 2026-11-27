@@ -250,8 +250,9 @@ pub async fn create(State(st): State<AppState>, user: User, Json(req): Json<Crea
     // the location is on this server (space_folders.rs); S3, SFTP and FTP keep the content store
     let folder_space = match &source {
         Some(source) => {
-            crate::folders::set_up(&mut tx, &drive_id, &root_id, source, None).await?;
+            // Before the folder is set up, which asks less of one that is only read
             sqlx::query("UPDATE drives SET read_only = ? WHERE id = ?").bind(req.read_only).bind(&drive_id).execute(&mut *tx).await?;
+            crate::folders::set_up(&mut tx, &drive_id, &root_id, source, None).await?;
             true
         }
         None => crate::space_folders::make_folder_space(&mut tx, st.space_folders.as_deref(), &drive_id).await?.is_some(),
@@ -360,6 +361,10 @@ pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<Strin
         // A folder space moved into the content store stays read-only until it is opened up again
         if read_only && !drive.is_folder() {
             return Err(AppError::bad_request("Only spaces that show a folder on the server can be read-only"));
+        }
+        // A space to be changed again must be able to keep its own files where the server is set to keep them
+        if !read_only && drive.read_only {
+            crate::folders::state::allow_changes(&mut tx, &drive.id).await?;
         }
         sqlx::query("UPDATE drives SET read_only = ? WHERE id = ?").bind(read_only).bind(&drive.id).execute(&mut *tx).await?;
     }

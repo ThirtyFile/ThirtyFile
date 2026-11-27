@@ -4,7 +4,8 @@
 //!
 //! - nobody signs in: every request is the one local user, who has one space showing the folder of
 //!   `THIRTYFILE_FILES` (a folder space, folders/) as "My files". The user is an ordinary user (not an administrator)
-//!   who may not share, with no password and no other way in
+//!   who may not share, with no password and no other way in. A folder that can't be changed (a read-only mount, say)
+//!   is shown as a read-only space
 //! - the server listens on the loopback address unless `THIRTYFILE_ADDR` says otherwise (`app::startup`)
 //! - what needs more than one person is off on the server, not only hidden: accounts, groups, permissions, sharing,
 //!   the Control panel, WebDAV, S3, SFTP, FTP and monitoring. `allows` is the list of what is left, and `guard` answers
@@ -126,6 +127,17 @@ pub async fn prepare(db: &SqlitePool, data_dir: &Path, storage_dir: &Path, files
             "This data folder already has accounts. Single-user mode needs a new data folder (THIRTYFILE_DATA); use another one for it.",
         ));
     }
+    // A folder that can't be changed (a read-only mount, say) is shown read-only rather than not at all
+    let roots: Vec<Root> = roots
+        .into_iter()
+        .map(|(name, path)| {
+            let why = crate::folders::state::why_read_only(Path::new(&path));
+            if let Some(why) = &why {
+                tracing::warn!("The folder {path} is shown read-only: {why}");
+            }
+            Root { name, path, read_only: why.is_some() }
+        })
+        .collect();
     let mut tx = begin_write(db).await?;
     let user_id = match existing {
         Some((id,)) => id,
@@ -155,23 +167,59 @@ pub async fn prepare(db: &SqlitePool, data_dir: &Path, storage_dir: &Path, files
     };
     match roots.as_slice() {
         // One folder, shown as "My files"
-        [(None, root)] => show_as_my_files(&mut tx, user_id, root).await?,
+        [root] if root.name.is_none() => show_as_my_files(&mut tx, user_id, root).await?,
         _ => show_by_name(&mut tx, user_id, &roots).await?,
     }
     tx.commit().await?;
     Ok(user_id)
 }
 
+/// A folder to show
+struct Root {
+    /// None: the only folder, shown as "My files"
+    name: Option<String>,
+    path: String,
+    /// It can't be changed (`folders::state::why_read_only`)
+    read_only: bool,
+}
+
+/// Records whether the space can be changed, which is looked at again at every start
+async fn set_read_only(tx: &mut sqlx::SqliteConnection, drive: &str, read_only: bool) -> AppResult<()> {
+    sqlx::query("UPDATE drives SET read_only = ? WHERE id = ?").bind(read_only).bind(drive).execute(tx).await?;
+    Ok(())
+}
+
+/// Records whether a space already showing the folder can be changed now
+async fn keep(tx: &mut sqlx::SqliteConnection, drive: &str, root: &Root) -> AppResult<()> {
+    let (was,): (bool,) = sqlx::query_as("SELECT read_only FROM drives WHERE id = ?").bind(drive).fetch_one(&mut *tx).await?;
+    set_read_only(tx, drive, root.read_only).await?;
+    if was && !root.read_only {
+        crate::folders::mark_opened_up(tx, drive, Path::new(&root.path)).await?;
+    }
+    Ok(())
+}
+
+/// Makes the space show the folder. A space whose own files can't be kept where the server is set to keep them is made
+/// all the same, so the other folders are shown: `folders::state::attach_all` says why when the server starts
+async fn show(tx: &mut sqlx::SqliteConnection, drive: &str, root_id: &str, root: &Root) -> AppResult<()> {
+    // Before the folder is set up, which asks less of one that is only read
+    set_read_only(tx, drive, root.read_only).await?;
+    crate::folders::set_up_anyway(tx, drive, root_id, &root.path, None).await?;
+    Ok(())
+}
+
 /// "My files" shows `root`; the spaces a list of names made are put away
-async fn show_as_my_files(tx: &mut sqlx::SqliteConnection, user_id: i64, root: &str) -> AppResult<()> {
+async fn show_as_my_files(tx: &mut sqlx::SqliteConnection, user_id: i64, root: &Root) -> AppResult<()> {
     let space: Option<(String, String, Option<String>)> =
         sqlx::query_as("SELECT id, root_id, source_path FROM drives WHERE kind = 'personal' AND owner_id = ?").bind(user_id).fetch_optional(&mut *tx).await?;
     let (drive, root_id) = match space {
         Some((drive, root_id, shown)) => {
             // The folder chosen now: a space that showed another one shows this one
-            if shown.as_deref() != Some(root) {
-                crate::folders::set_up(tx, &drive, &root_id, root, None).await?;
+            if shown.as_deref() != Some(root.path.as_str()) {
+                show(tx, &drive, &root_id, root).await?;
                 sqlx::query("UPDATE drives SET last_scan_at = NULL, scan_report = NULL WHERE id = ?").bind(&drive).execute(&mut *tx).await?;
+            } else {
+                keep(tx, &drive, root).await?;
             }
             (drive, root_id)
         }
@@ -179,7 +227,7 @@ async fn show_as_my_files(tx: &mut sqlx::SqliteConnection, user_id: i64, root: &
             let location = crate::locations::default_location(tx).await?;
             let (drive, root_id) = create_drive(tx, crate::personal::NAME, "personal", user_id, 0, &location).await?;
             add_grant(tx, &root_id, "user", user_id, "owner", Some(user_id), None).await?;
-            crate::folders::set_up(tx, &drive, &root_id, root, None).await?;
+            show(tx, &drive, &root_id, root).await?;
             (drive, root_id)
         }
     };
@@ -191,25 +239,26 @@ async fn show_as_my_files(tx: &mut sqlx::SqliteConnection, user_id: i64, root: &
 
 /// Each folder is a space of its own with its name, and there is no "My files": a space of an earlier start that isn't
 /// named now is put away (not deleted), and comes back when it is named again
-async fn show_by_name(tx: &mut sqlx::SqliteConnection, user_id: i64, roots: &[(Option<String>, String)]) -> AppResult<()> {
+async fn show_by_name(tx: &mut sqlx::SqliteConnection, user_id: i64, roots: &[Root]) -> AppResult<()> {
     sqlx::query("UPDATE drives SET disabled = 1 WHERE owner_id = ? AND kind IN ('personal', 'team')").bind(user_id).execute(&mut *tx).await?;
     sqlx::query("UPDATE users SET root_id = NULL WHERE id = ?").bind(user_id).execute(&mut *tx).await?;
-    for (name, root) in roots {
-        let name = name.as_deref().unwrap_or_default();
+    for root in roots {
+        let name = root.name.as_deref().unwrap_or_default();
         let space: Option<(String,)> = sqlx::query_as("SELECT id FROM drives WHERE kind = 'team' AND owner_id = ? AND source_path = ?")
             .bind(user_id)
-            .bind(root)
+            .bind(&root.path)
             .fetch_optional(&mut *tx)
             .await?;
         match space {
             Some((drive,)) => {
                 sqlx::query("UPDATE drives SET name = ?, disabled = 0 WHERE id = ?").bind(name).bind(&drive).execute(&mut *tx).await?;
+                keep(tx, &drive, root).await?;
             }
             None => {
                 let location = crate::locations::default_location(tx).await?;
                 let (drive, root_id) = create_drive(tx, name, "team", user_id, 0, &location).await?;
                 add_grant(tx, &root_id, "user", user_id, "owner", Some(user_id), None).await?;
-                crate::folders::set_up(tx, &drive, &root_id, root, None).await?;
+                show(tx, &drive, &root_id, root).await?;
             }
         }
     }
@@ -420,6 +469,67 @@ mod tests {
             assert!(err.message.contains("inside the other"), "{spec}: {}", err.message);
         }
         let _ = std::fs::remove_dir_all(&work);
+    }
+
+    /// Takes away, and gives back, the right to make anything in a folder
+    fn writable(folder: &Path, yes: bool) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = if yes { 0o755 } else { 0o555 };
+            std::fs::set_permissions(folder, std::fs::Permissions::from_mode(mode)).unwrap();
+        }
+        #[cfg(windows)]
+        {
+            let me = format!("{}\\{}", std::env::var("USERDOMAIN").unwrap(), std::env::var("USERNAME").unwrap());
+            let args = if yes { ["/remove:d".to_string(), me] } else { ["/deny".to_string(), format!("{me}:(WD,AD)")] };
+            assert!(std::process::Command::new("icacls").arg(folder).args(args).output().unwrap().status.success());
+        }
+    }
+
+    async fn is_read_only(db: &SqlitePool, name: &str) -> bool {
+        let (read_only,): (bool,) = sqlx::query_as("SELECT read_only FROM drives WHERE name = ? AND disabled = 0").bind(name).fetch_one(db).await.unwrap();
+        read_only
+    }
+
+    #[tokio::test]
+    async fn a_folder_that_cant_be_written_to_is_shown_read_only() {
+        let (work, assets) = (files_folder(), files_folder());
+        writable(&assets, false);
+        // The administrator of a Linux system writes anywhere: nothing to try then
+        if std::fs::write(assets.join("probe"), b"").is_ok() {
+            writable(&assets, true);
+            return;
+        }
+        let spec = format!("Work={},Assets={}", work.display(), assets.display());
+        let env = crate::testutil::single_user_env(Path::new(&spec)).await;
+        let app = crate::app::routes::router(env.st.clone());
+        assert!(!is_read_only(&env.st.db, "Work").await);
+        assert!(is_read_only(&env.st.db, "Assets").await);
+        // Its files are listed and opened
+        let (drive, root): (String, String) = sqlx::query_as("SELECT id, root_id FROM drives WHERE name = 'Assets'").fetch_one(&env.st.db).await.unwrap();
+        let report = crate::folders::scan(&env.st, &drive).await.unwrap();
+        assert_eq!(report.error, None);
+        let (status, list) = call(&app, Method::GET, &format!("/api/nodes/{root}/children"), &[], None).await;
+        assert_eq!(status, StatusCode::OK, "{list}");
+        let items = list["items"].as_array().or(list.as_array()).unwrap();
+        let top = items.iter().find(|n| n["name"] == "top.txt").unwrap_or_else(|| panic!("{list}"))["id"].as_str().unwrap().to_string();
+        let (status, _) = call(&app, Method::GET, &format!("/api/files/{top}/content"), &[], None).await;
+        assert_eq!(status, StatusCode::OK);
+        // Nothing is changed there
+        let made = serde_json::json!({ "parent_id": root, "name": "Made" });
+        let (status, made) = call(&app, Method::POST, "/api/folders", &[("origin", "http://localhost:8080")], Some(made)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{made}");
+        // Once it can be written to, the next start opens it up
+        writable(&assets, true);
+        prepare(&env.st.db, &env.dir, &env.dir.join("blobs"), &spec).await.unwrap();
+        assert!(!is_read_only(&env.st.db, "Assets").await);
+        let made = serde_json::json!({ "parent_id": root, "name": "Made" });
+        let (status, made) = call(&app, Method::POST, "/api/folders", &[("origin", "http://localhost:8080")], Some(made)).await;
+        assert_eq!(status, StatusCode::OK, "{made}");
+        assert!(assets.join("Made").is_dir());
+        let _ = std::fs::remove_dir_all(&work);
+        let _ = std::fs::remove_dir_all(&assets);
     }
 
     use axum::{

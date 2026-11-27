@@ -73,6 +73,13 @@ pub fn overlay_folder(root: &Path, overlay: Arc<Overlay>) {
     OVERLAYS.write().get_or_insert_with(Default::default).insert(trimmed(root), overlay);
 }
 
+/// The space folder `root` keeps its own files in itself again
+pub fn forget_overlay(root: &Path) {
+    if let Some(m) = OVERLAYS.write().as_mut() {
+        m.remove(&trimmed(root));
+    }
+}
+
 /// The overlay of the space folder `root`, when it has one
 pub fn overlay_of(root: &Path) -> Option<Arc<Overlay>> {
     OVERLAYS.read().as_ref().and_then(|m| m.get(&trimmed(root)).cloned())

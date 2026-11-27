@@ -329,6 +329,7 @@ export default {
   "Folder spaces show folders on the server. Changes made there (for example over SMB) appear when someone opens the folder, and all folders are checked this often. 0 = only when someone opens a folder or clicks \"Check for changes\".": "文件夹空间显示的是服务器上的文件夹。在那里做的更改（例如通过 SMB）会在有人打开文件夹时出现，并且每隔这段时间会检查全部文件夹。0 = 仅在有人打开文件夹或点击“检查更改”时检查。",
   "Checked the folder": "检查文件夹",
   "This space is read-only. You can open, download and share its files.": "这个空间是只读的，可以打开、下载和分享其中的文件。",
+  "This space is read-only. You can open and download its files.": "这个空间是只读的，可以打开和下载其中的文件。",
   "This space is being moved to another storage location.": "这个空间正在迁移到其他存储位置。",
   "It is read-only until the move finishes: you can open, download and share its files, but not change them.": "迁移完成前为只读：可以打开、下载和分享其中的文件，但不能更改。",
   "\"{name}\" is read-only now": "“{name}”现在是只读的",

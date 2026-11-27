@@ -12,6 +12,8 @@
 //! two mounts even when both are the same disk. That is checked by renaming a small file between the two. When it fails
 //! the space is not used (nothing is looked up, so nothing is written to either place) and the reason is shown.
 //! Only local file systems qualify: object storage, SFTP, WebDAV and mounts that only look like folders can't rename.
+//! A read-only space needs no rename: when it can't, nothing is moved and what its folder already holds of its own is
+//! looked up there. Single-user mode shows a folder that can't be changed as such a space (`why_read_only`).
 //!
 //! The marker no longer vouches for the folder by itself (it is in another place): it only tells that the folder of
 //! files is the one the space showed, together with the folder's identity (device and inode) recorded when it was chosen
@@ -82,6 +84,49 @@ fn probe(source: &Path, state: &Path) -> std::io::Result<()> {
     moved
 }
 
+/// Why changes can't be made in the folder `source`, when they can't: it can't be written to, or (with the setting
+/// on) trash and versions couldn't be renamed out of it
+pub fn why_read_only(source: &Path) -> Option<String> {
+    why_read_only_in(base().as_deref(), source)
+}
+
+/// `why_read_only` with the folder of the setting given
+pub(crate) fn why_read_only_in(base: Option<&Path>, source: &Path) -> Option<String> {
+    let test = source.join(format!(".thirtyfile-probe-{}", crate::util::new_id()));
+    match std::fs::File::create_new(&test) {
+        Ok(file) => drop(file),
+        Err(e) if matches!(e.kind(), std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem) => {
+            return Some(format!("it can't be written to ({e})"));
+        }
+        // Anything else (a full disk, say) doesn't make it read-only: a change that fails says why
+        Err(_) => return None,
+    }
+    let _ = std::fs::remove_file(&test);
+    let base = base?;
+    // One inside the other is a mistake in the settings, which `attach` reports
+    if overlap(base, source) {
+        return None;
+    }
+    probe(source, base).err().map(|e| {
+        format!("trash and versions can't be renamed into THIRTYFILE_FOLDER_STATE ({}), which has to be on the same file system and mount ({e})", base.display())
+    })
+}
+
+/// Whether one folder is the other or inside it
+fn overlap(a: &Path, b: &Path) -> bool {
+    let (a, b) = (real(a), real(b));
+    a.starts_with(&b) || b.starts_with(&a)
+}
+
+/// Whether the space's folder holds files of the space's own: its trash, versions or journal, or its marker
+fn holds_own(drive: &str, source: &Path) -> bool {
+    crate::beneath::MOVED_NAMES.iter().any(|(name, _)| {
+        let here = source.join(name);
+        std::fs::symlink_metadata(&here)
+            .is_ok_and(|m| m.is_dir() || (*name == super::MARKER && m.is_file() && std::fs::read_to_string(&here).is_ok_and(|id| id.trim() == drive)))
+    })
+}
+
 /// Moves what the space's folder holds of its own into the other place, once (for a space made before the setting was
 /// on). A journal with an entry in it is an unfinished change that only the folder's own way of recovering understands.
 fn migrate(drive: &str, source: &Path, state: &Path) -> Result<(), String> {
@@ -145,11 +190,17 @@ pub(crate) fn attach_in(base: &Path, drive: &str, source: &Path, read_only: bool
     if !source.is_dir() {
         return Ok(());
     }
-    let (folder, own) = (real(source), real(&state));
-    if own.starts_with(&folder) || folder.starts_with(&own) {
+    if overlap(source, &state) {
         return fail(format!("THIRTYFILE_FOLDER_STATE ({}) must be outside the folder of the space {} and not hold it", base.display(), source.display()));
     }
-    if !read_only && let Err(e) = probe(source, &state) {
+    if let Err(e) = probe(source, &state) {
+        if read_only {
+            // Nothing is changed in such a space, so nothing needs to move: what the folder already holds stays there
+            if holds_own(drive, source) {
+                crate::beneath::forget_overlay(source);
+            }
+            return Ok(());
+        }
         return fail(format!(
             "{} isn't on the same file system and mount as the space's folder {}: trash and versions need to rename files between them ({e}). Use a folder next to the files on the same disk, mounted as one (in Docker, mount their common parent folder).",
             state.display(),
@@ -158,6 +209,28 @@ pub(crate) fn attach_in(base: &Path, drive: &str, source: &Path, read_only: bool
     }
     if let Err(why) = migrate(drive, source, &state) {
         return fail(why);
+    }
+    Ok(())
+}
+
+/// Before a read-only space is opened up for changes: it is refused when its own files can't be kept where the server
+/// is set to keep them, and stays read-only
+pub async fn allow_changes(conn: &mut sqlx::SqliteConnection, drive: &str) -> crate::error::AppResult<()> {
+    if !enabled() {
+        return Ok(());
+    }
+    let row: Option<(String, Option<i64>, Option<i64>)> = sqlx::query_as(
+        "SELECT source_path, source_dev, source_ino FROM drives WHERE id = ? AND mode = 'folder' AND source_path IS NOT NULL AND location_id IS NULL",
+    )
+    .bind(drive)
+    .fetch_optional(conn)
+    .await?;
+    let Some((source, dev, ino)) = row else { return Ok(()) };
+    let (source, identity) = (Path::new(&source), dev.zip(ino));
+    if let Err(why) = attach(drive, source, false, identity) {
+        // Read-only as before
+        let _ = attach(drive, source, true, identity);
+        return Err(crate::error::AppError::bad_request(why));
     }
     Ok(())
 }
@@ -262,6 +335,62 @@ mod tests {
         let err = attach_in(&base, &new_id(), &files, false, None).unwrap_err();
         assert!(err.contains("must be outside"), "{err}");
         let _ = std::fs::remove_dir_all(&files);
+    }
+
+    #[test]
+    fn a_folder_that_takes_changes_isnt_read_only() {
+        let (files, base) = (dir("files"), dir("base"));
+        assert_eq!(why_read_only_in(None, &files), None);
+        assert_eq!(why_read_only_in(Some(&base), &files), None);
+        // Nothing is left behind in either
+        assert_eq!(std::fs::read_dir(&files).unwrap().count() + std::fs::read_dir(&base).unwrap().count(), 0);
+        // The other place can't be renamed into (here: it isn't there), as with another mount
+        let why = why_read_only_in(Some(&base.join("nothing")), &files).unwrap();
+        assert!(why.contains("same file system and mount"), "{why}");
+        assert_eq!(std::fs::read_dir(&files).unwrap().count(), 0);
+        let _ = std::fs::remove_dir_all(&files);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_read_only_space_that_cant_move_its_own_files_keeps_them_where_they_are() {
+        let (files, base) = (dir("files"), dir("base"));
+        let drive = new_id();
+        // The rename between the two fails: what stands where the space's other place would be takes no files
+        let state = base.join(&drive);
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::create_dir_all(files.join(".thirtyfile-trash/t1")).unwrap();
+        deny(&state, true);
+        if std::fs::write(state.join("probe"), b"").is_ok() {
+            deny(&state, false);
+            return;
+        }
+        assert!(attach_in(&base, &drive, &files, false, None).is_err());
+        assert!(attach_in(&base, &drive, &files, true, None).is_ok());
+        assert!(crate::beneath::overlay_of(&files).is_none() && files.join(".thirtyfile-trash/t1").is_dir());
+        // One holding nothing of its own keeps it elsewhere all the same, so the folder is left alone
+        std::fs::remove_dir_all(files.join(".thirtyfile-trash")).unwrap();
+        assert!(attach_in(&base, &drive, &files, true, None).is_ok());
+        assert!(crate::beneath::overlay_of(&files).is_some() && broken(&files).is_none());
+        deny(&state, false);
+        let _ = std::fs::remove_dir_all(&files);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Takes away, and gives back, the right to put anything in a folder
+    fn deny(folder: &Path, yes: bool) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = if yes { 0o555 } else { 0o755 };
+            std::fs::set_permissions(folder, std::fs::Permissions::from_mode(mode)).unwrap();
+        }
+        #[cfg(windows)]
+        {
+            let me = format!("{}\\{}", std::env::var("USERDOMAIN").unwrap(), std::env::var("USERNAME").unwrap());
+            let args = if yes { ["/deny".to_string(), format!("{me}:(WD,AD)")] } else { ["/remove:d".to_string(), me] };
+            assert!(std::process::Command::new("icacls").arg(folder).args(args).output().unwrap().status.success());
+        }
     }
 
     #[test]

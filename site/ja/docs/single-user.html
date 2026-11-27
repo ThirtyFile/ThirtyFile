@@ -127,6 +127,12 @@
         <pre><code>-e THIRTYFILE_FILES=Workspace=/workspace,Home=/home/sandbox</code></pre>
         <p>各フォルダーは、上の <code>/files</code> と同じようにコンテナーにマウントします。項目はカンマで区切り、すべてのフォルダーに名前を付けてください。フォルダーを別のフォルダーの中に置くことはできず、データフォルダーもすべてのフォルダーの外に置きます。後から一覧から外したフォルダーはディスク上にそのまま残り、再び名前を付ければ表示されます。名前なしのパスを 1 つだけ書く場合は従来どおりで、「My files」と表示されます。</p>
 
+        <h3 id="read-only">読み取り専用のフォルダー</h3>
+        <p>ThirtyFile が新しいファイルを作れないフォルダー（<code>:ro</code> でマウントしたものなど）は、読み取り専用のスペースとして表示されます。ファイルは開いたりダウンロードしたりでき、中身は何も変わらないため、ごみ箱や以前のバージョンはありません。別のディスクやマウントにあるために <code>THIRTYFILE_FOLDER_STATE</code> を使えないフォルダー（<a href="storage.html#folder-state">保存場所</a>を参照）も同じように表示されます。ThirtyFile は起動時に各フォルダーを調べ、読み取り専用にした理由をログに出力します。権限やマウントを変えた後は再起動してください。</p>
+        <pre><code>-v /mnt/assets:/assets:ro \
+  -e THIRTYFILE_FILES=Workspace=/workspace,Assets=/assets</code></pre>
+        <p>シンボリックリンクはたどりません。リンク先の内容を開くには、上の <code>Assets</code> のように、そのフォルダーを別のフォルダーとして指定してください。</p>
+
         <h2 id="reach">自分のコンピューターから開く</h2>
         <p>コンテナー内ではサーバーはすべてのアドレスで待ち受け、Docker は公開したポートだけを通します。<code>-p 127.0.0.1:8080:8080</code> を使うと、Docker を動かしているコンピューターで <code>http://localhost:8080</code> を開けます。Docker を使わない場合、サーバーは既定で <code>127.0.0.1:8080</code> だけで待ち受けます（<code>THIRTYFILE_ADDR</code> で変更できます）。</p>
         <p>サンドボックスが別のマシンや仮想マシンのときは、自分のコンピューターからポートを転送すると、ページは <code>localhost</code> として届きます。</p>

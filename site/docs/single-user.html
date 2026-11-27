@@ -126,6 +126,12 @@
         <pre><code>-e THIRTYFILE_FILES=Workspace=/workspace,Home=/home/sandbox</code></pre>
         <p>Mount each folder into the container the same way as <code>/files</code> above. Separate the entries with commas, and give every folder a name. No folder may be inside another, and the data folder must be outside all of them. A folder you take out of the list later is left as it is on disk and shown again if you name it again. A single path without a name works as before and is shown as "My files".</p>
 
+        <h3 id="read-only">Read-only folders</h3>
+        <p>A folder in which ThirtyFile can't make new files, such as one mounted with <code>:ro</code>, is shown as a read-only space: you can open and download its files, and nothing in it changes, so it has no trash or earlier versions. A folder that can't use <code>THIRTYFILE_FOLDER_STATE</code>, because it is on another disk or mount (see <a href="storage.html#folder-state">Storage locations</a>), is shown the same way. ThirtyFile looks at each folder when it starts and says in its log why one is read-only. Restart it after changing permissions or mounts.</p>
+        <pre><code>-v /mnt/assets:/assets:ro \
+  -e THIRTYFILE_FILES=Workspace=/workspace,Assets=/assets</code></pre>
+        <p>Symbolic links aren't followed. To reach what a link points to, list that folder as one of its own, as <code>Assets</code> above.</p>
+
         <h2 id="reach">Reaching it from your computer</h2>
         <p>Inside the container the server listens on all addresses, and Docker passes only what you publish. With <code>-p 127.0.0.1:8080:8080</code>, open <code>http://localhost:8080</code> on the computer that runs Docker. Without Docker, the server listens on <code>127.0.0.1:8080</code> by itself (change it with <code>THIRTYFILE_ADDR</code>).</p>
         <p>When the sandbox is another machine or a virtual machine, forward the port from your computer, so that the page still arrives as <code>localhost</code>:</p>
