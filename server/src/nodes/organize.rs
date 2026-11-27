@@ -115,7 +115,7 @@ pub async fn rename_many(State(st): State<AppState>, user: User, Json(req): Json
         return Err(AppError::bad_request("Select 1 to 1000 items"));
     }
     let mut seen = HashSet::new();
-    let mut wanted = Vec::with_capacity(req.items.len());
+    let mut wanted = Vec::new();
     for item in &req.items {
         if !seen.insert(item.id.as_str()) {
             return Err(AppError::bad_request("An item is listed more than once"));
@@ -126,7 +126,7 @@ pub async fn rename_many(State(st): State<AppState>, user: User, Json(req): Json
     let _w = st.write_lock.lock().await;
     let mut tx = crate::db::begin_write(&st.db).await?;
     let user = crate::auth::current_user(&mut tx, &user).await?;
-    let mut changed = Vec::with_capacity(wanted.len());
+    let mut changed = Vec::new();
     for (id, name) in wanted {
         let node = tree::node_for(&mut tx, &user, id, Need::Write).await?;
         locks.check(&node)?;
@@ -167,7 +167,7 @@ pub async fn rename_many(State(st): State<AppState>, user: User, Json(req): Json
         }
     }
     fsops::rename_together(&mut tx, &locks, &on_disk).await?;
-    let mut renamed = Vec::with_capacity(changed.len());
+    let mut renamed = Vec::new();
     for (node, name) in &changed {
         logs::record_activity(&mut tx, &user, Some(node), "rename", &format!("→ {name}")).await?;
         renamed.extend(tree::get_node(&mut tx, &node.id).await?);
