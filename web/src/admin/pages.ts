@@ -18,6 +18,7 @@ export const ADMIN_PAGES: Record<ControlPanelKey, () => Promise<ComponentType>> 
   moves: () => import("@/admin/storage/MovesPage").then((m) => m.MovesPage),
   backups: () => import("@/admin/storage/BackupsPage").then((m) => m.BackupsPage),
   alerts: () => import("@/admin/system/AlertsPage").then((m) => m.AlertsPage),
+  webhooks: () => import("@/admin/system/WebhooksPage").then((m) => m.WebhooksPage),
   monitoring: () => import("@/admin/system/MonitoringPage").then((m) => m.MonitoringPage),
   dashboard: () => import("@/admin/system/DashboardPage").then((m) => m.DashboardPage),
   replicas: () => import("@/admin/storage/ReplicasPage").then((m) => m.ReplicasPage),

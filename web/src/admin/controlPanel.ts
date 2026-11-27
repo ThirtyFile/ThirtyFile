@@ -22,6 +22,7 @@ import {
   UsersIcon,
   UsersRoundIcon,
   type LucideIcon,
+  WebhookIcon,
 } from "lucide-react";
 import { adminPath } from "@/admin/pages";
 import { t, tc } from "@/lib/i18n";
@@ -47,6 +48,7 @@ export type ControlPanelKey =
   | "email"
   | "dashboard"
   | "alerts"
+  | "webhooks"
   | "monitoring"
   | "activity"
   | "logs";
@@ -268,6 +270,16 @@ export const CONTROL_PANEL_ITEMS: ControlPanelItem[] = [
     tone: "bg-red-500/12 text-red-700 dark:text-red-300",
     category: "system",
     keywords: "警示 通知 警報 告警 webhook 郵件 磁碟 離線 登入失敗 憑證 alerts email webhook disk offline sign-in certificate monitoring", // i18n-ignore: bilingual search keywords
+  },
+  {
+    key: "webhooks",
+    to: adminPath("webhooks"),
+    title: t("File webhooks"),
+    desc: t("Tell other systems when files are uploaded, changed, moved, shared or deleted"),
+    icon: WebhookIcon,
+    tone: "bg-orange-500/12 text-orange-700 dark:text-orange-300",
+    category: "system",
+    keywords: "webhook 事件 通知 整合 串接 自動化 檔案變更 事件 集成 自动化 files events integration automation callback api n8n zapier", // i18n-ignore: bilingual search keywords
   },
   {
     key: "monitoring",

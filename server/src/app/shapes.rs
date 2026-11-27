@@ -139,6 +139,12 @@ async fn api_shapes_match_the_recorded_ones() {
     saved["recent"] = json!([{ "id": 1, "channel": "webhook", "recipient": null, "state": "firing", "kind": "offline", "params": { "location": "NAS" }, "created_at": 1, "attempts": 0, "done_at": null, "failed": false, "error": null }]);
     record("AlertsInfo", &saved);
 
+    // File webhooks: one with a message sent to it
+    let hook = json!({ "url": "https://hooks.example.com/files", "secret": "a shared secret of 24 chars", "events": ["upload"], "drives": [], "allow_private": false, "enabled": true });
+    let mut hooks = call(&app, &me, Method::POST, "/api/admin/file-webhooks", Some(hook)).await;
+    hooks["webhooks"][0]["recent"] = json!([{ "id": 1, "event": "upload", "created_at": 1, "attempts": 0, "done_at": null, "failed": false, "error": null }]);
+    record("FileWebhooksInfo", &hooks);
+
     // Search inside files: the settings and how far the reading has got
     let search = json!({ "enabled": true, "paused": false, "max_file_mb": 25, "max_total_mb": 500 });
     record("ContentSearchInfo", &call(&app, &me, Method::PUT, "/api/admin/content-search", Some(search)).await);

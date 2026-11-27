@@ -1226,4 +1226,11 @@ export default {
     "THIRTYFILE_FILES で「{name}」が 2 回使われています",
   "THIRTYFILE_FILES: {first} and {second} are the same folder or one is inside the other. Each name needs a folder of its own.":
     "THIRTYFILE_FILES: {first} と {second} は同じフォルダーか、一方がもう一方の中にあります。名前ごとに別のフォルダーが必要です。",
+  // file_hooks/
+  "Unknown event": "不明なイベントです",
+  "Choose at least one event": "イベントを 1 つ以上選んでください",
+  "A chosen space no longer exists": "選んだスペースはもう存在しません",
+  "At most {n} webhooks": "webhook は {n} 個までです",
+  "Webhook not found": "webhook が見つかりません",
+  "not sent within a day": "1 日以内に送信できませんでした",
 } satisfies Record<string, string>;

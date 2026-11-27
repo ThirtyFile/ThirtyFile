@@ -27,6 +27,7 @@ mod directory;
 mod downloads;
 mod drives;
 mod error;
+mod file_hooks;
 mod files;
 mod folders;
 mod fsops;

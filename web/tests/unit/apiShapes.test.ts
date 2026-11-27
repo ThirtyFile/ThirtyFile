@@ -6,6 +6,7 @@ import { expect, test } from "vite-plus/test";
 import type {
   AccessInfo,
   AlertsInfo,
+  FileWebhooksInfo,
   AppPassword,
   ContentSearchInfo,
   Activity,
@@ -56,6 +57,7 @@ function agrees<D extends { missing: never; unknown: never }>(): D | undefined {
 const checked: { [K in keyof Shapes]: unknown } = {
   AccessInfo: agrees<Drift<Shapes["AccessInfo"], AccessInfo>>(),
   AlertsInfo: agrees<Drift<Shapes["AlertsInfo"], AlertsInfo>>(),
+  FileWebhooksInfo: agrees<Drift<Shapes["FileWebhooksInfo"], FileWebhooksInfo>>(),
   ContentSearchInfo: agrees<Drift<Shapes["ContentSearchInfo"], ContentSearchInfo>>(),
   AppPassword: agrees<Drift<Shapes["AppPassword"], AppPassword>>(),
   Activity: agrees<Drift<Shapes["Activity"], Activity>>(),

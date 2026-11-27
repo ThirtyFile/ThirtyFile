@@ -631,6 +631,9 @@ pub async fn empty_trash(State(st): State<AppState>, user: User) -> AppResult<Js
         let (free, held) = tree::kept::split(&mut tx, ids).await?;
         let mut rows = Vec::new();
         for id in &free {
+            if let Some(node) = tree::get_node(&mut tx, id).await? {
+                crate::file_hooks::queue_deleted(&mut tx, Some(&user), &node).await?;
+            }
             rows.push(changes::purge(&mut tx, id).await?);
         }
         let total = rows.len();
@@ -661,6 +664,9 @@ pub async fn purge_expired_trash(st: &AppState, days: i64) -> AppResult<usize> {
         let (free, _) = tree::kept::split(&mut tx, old.into_iter().map(|(id,)| id).collect()).await?;
         let mut rows = Vec::new();
         for id in &free {
+            if let Some(node) = tree::get_node(&mut tx, id).await? {
+                crate::file_hooks::queue_deleted(&mut tx, None, &node).await?;
+            }
             rows.push(changes::purge(&mut tx, id).await?);
         }
         tx.commit().await?;

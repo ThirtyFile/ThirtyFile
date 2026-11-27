@@ -174,6 +174,42 @@
     "security": "",
     "username": ""
   },
+  "FileWebhooksInfo": {
+    "events": [
+      ""
+    ],
+    "spaces": [
+      {
+        "id": "",
+        "kind": "",
+        "name": ""
+      }
+    ],
+    "webhooks": [
+      {
+        "allow_private": false,
+        "drives": [],
+        "enabled": false,
+        "events": [
+          ""
+        ],
+        "id": "",
+        "pending": 0,
+        "recent": [
+          {
+            "attempts": 0,
+            "created_at": 0,
+            "done_at": null,
+            "error": null,
+            "event": "",
+            "failed": false,
+            "id": 0
+          }
+        ],
+        "url": ""
+      }
+    ]
+  },
   "FtpCreated": {
     "allow_list": false,
     "allow_read": false,

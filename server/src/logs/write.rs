@@ -302,12 +302,13 @@ pub async fn record_activity_into(
         serde_json::from_str(&crate::tree::saved_scopes(conn, node.map(|n| n.id())).await?).map_err(crate::error::AppError::internal)?;
     let parents: Vec<serde_json::Value> =
         serde_json::from_str(&crate::tree::saved_scopes(conn, node.and_then(|n| n.parent())).await?).map_err(crate::error::AppError::internal)?;
-    let into: Vec<serde_json::Value> = serde_json::from_str(&crate::tree::saved_scopes(conn, into).await?).map_err(crate::error::AppError::internal)?;
-    for scope in parents.into_iter().chain(into) {
+    let dest: Vec<serde_json::Value> = serde_json::from_str(&crate::tree::saved_scopes(conn, into).await?).map_err(crate::error::AppError::internal)?;
+    for scope in parents.into_iter().chain(dest) {
         if !scopes.contains(&scope) {
             scopes.push(scope);
         }
     }
+    let restricted = !scopes.is_empty();
     sqlx::query("INSERT INTO activity (at, user_id, username, drive_id, node_id, node_name, action, detail, restricted_scopes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
         .bind(now())
         .bind(user.id)
@@ -318,8 +319,12 @@ pub async fn record_activity_into(
         .bind(action)
         .bind(detail)
         .bind(serde_json::to_string(&scopes).map_err(crate::error::AppError::internal)?)
-        .execute(conn)
+        .execute(&mut *conn)
         .await?;
+    // Webhooks told of changes to files hear of it with the entry (file_hooks/)
+    if let Some(node) = node {
+        crate::file_hooks::queue(conn, Some(user), node, into, action, restricted).await?;
+    }
     Ok(())
 }
 

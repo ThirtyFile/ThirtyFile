@@ -1,4 +1,4 @@
-//! Sending an alert to a webhook: a JSON body signed with HMAC-SHA256 so the receiver can tell it came from here, to an
+//! Sending a message (an alert, or news of a change to a file) to a webhook: a JSON body signed with HMAC-SHA256 so the receiver can tell it came from here, to an
 //! address that isn't on the private network unless an administrator allowed that.
 
 use std::net::SocketAddr;
@@ -23,7 +23,7 @@ pub fn signature(secret: &str, timestamp: i64, body: &str) -> String {
 
 /// The address to send to: the URL checked, its host resolved, and the first address that may be connected to. Private
 /// and loopback addresses (and carrier-grade NAT, as for other connections) only when `allow_private`; plain `http`
-/// only to those, since nothing else should send an alert unencrypted.
+/// only to those, since nothing else should send a message unencrypted.
 pub async fn target(url: &str, allow_private: bool) -> Result<(reqwest::Url, Option<(String, SocketAddr)>), String> {
     let url = reqwest::Url::parse(url.trim()).map_err(|_| "the webhook address isn't a valid URL".to_string())?;
     if !matches!(url.scheme(), "http" | "https") || !url.username().is_empty() || url.password().is_some() {
@@ -39,8 +39,7 @@ pub async fn target(url: &str, allow_private: bool) -> Result<(reqwest::Url, Opt
         },
     };
     let allowed = |ip: &&std::net::IpAddr| allow_private || !is_private_ip(ip);
-    let ip =
-        *addrs.iter().find(allowed).ok_or_else(|| format!("{host} is on the private network (or loopback): allow that in the settings to send alerts there"))?;
+    let ip = *addrs.iter().find(allowed).ok_or_else(|| format!("{host} is on the private network (or loopback): allow that in the settings to send there"))?;
     if url.scheme() == "http" && !is_private_ip(&ip) {
         return Err("a webhook on the internet must be https".into());
     }
