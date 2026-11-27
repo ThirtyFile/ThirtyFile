@@ -1,4 +1,6 @@
 //! "Compress to ZIP" and "Extract all": background jobs on the server, which the page polls for their progress.
+//! Looking into a ZIP file, and taking single files out of it, is in `browse`; extracting a selection of it is the
+//! same job as "Extract all".
 //!
 //! Compressing packs the selected items (as a download would, but deflated) into a temporary file and stores it as a
 //! new file next to them, through the same staging and commit as an upload. Extracting copies the archive to a
@@ -19,6 +21,9 @@ use std::{
 };
 
 use crate::sync::Mutex;
+
+mod browse;
+pub use browse::{entries, entry};
 
 use axum::{Json, extract::State};
 use serde::Deserialize;
@@ -336,6 +341,10 @@ pub async fn store_new_file(
 #[derive(Deserialize)]
 pub struct ExtractReq {
     pub id: String,
+    /// Only these files and folders, by their paths in the list of the archive's entries; without them, everything
+    pub paths: Option<Vec<String>>,
+    /// With `paths`: the `version` of that list
+    pub version: Option<String>,
 }
 
 /// Whether a file is taken for a ZIP archive
@@ -354,8 +363,15 @@ pub async fn extract(State(st): State<AppState>, user: User, Json(req): Json<Ext
         let parent = tree::folder_for(&mut c, &user, &parent_id, Need::Add).await?;
         (zip, parent)
     };
+    if let Some(paths) = &req.paths {
+        if paths.is_empty() || paths.len() as u64 > MAX_EXTRACT_ENTRIES {
+            return Err(AppError::bad_request("Select items to extract"));
+        }
+        let (_, now) = Source::resolve(&st, &zip).await?.describe(zip.size as u64).await?;
+        browse::same_version(req.version.as_deref().unwrap_or_default(), &now)?;
+    }
     let job = jobs::start(&st, user.id, "extract", Limit::Archive)?;
-    jobs::spawn(&st, &job, run_extract(st.clone(), user, Tracker::of(&st, &job), zip, parent.id));
+    jobs::spawn(&st, &job, run_extract(st.clone(), user, Tracker::of(&st, &job), zip, parent.id, req.paths));
     Ok(Json(job))
 }
 
@@ -496,7 +512,7 @@ fn extract_entry(archive: &std::path::Path, entry: &ReadEntry, tmp: PathBuf, pro
     Ok(Extracted { tmp, hash: hex::encode(sha.finalize()), size })
 }
 
-async fn run_extract(st: AppState, user: User, progress: Tracker, zip: Node, parent_id: String) -> AppResult<Outcome> {
+async fn run_extract(st: AppState, user: User, progress: Tracker, zip: Node, parent_id: String, paths: Option<Vec<String>>) -> AppResult<Outcome> {
     // The archive is read in any order, so it is copied to a temporary file first (a folder space's file is read in place)
     let source = Source::resolve(&st, &zip).await?;
     // A folder space's file stays open meanwhile, so the path keeps leading to it
@@ -525,28 +541,42 @@ async fn run_extract(st: AppState, user: User, progress: Tracker, zip: Node, par
             (tmp, true)
         }
     };
-    let result = extract_into(&st, &user, &progress, &zip, &parent_id, &archive).await;
+    let result = extract_into(&st, &user, &progress, &zip, &parent_id, &archive, paths).await;
     if copied {
         let _ = tokio::fs::remove_file(&archive).await;
     }
     result.map(|(id, name)| Outcome::node(id, name))
 }
 
-async fn extract_into(st: &AppState, user: &User, progress: &Tracker, zip: &Node, parent_id: &str, archive: &std::path::Path) -> AppResult<(String, String)> {
+/// What extracting the archive at `path` (a file here) makes, and how much that holds; with `paths`, only those
+fn read_plan(path: &std::path::Path, paths: Option<&[String]>) -> AppResult<(Vec<Planned>, u64)> {
+    let mut file = std::io::BufReader::new(std::fs::File::open(path)?);
+    let size = file.get_ref().metadata()?.len();
+    let entries = crate::zip::read_entries(&mut file, MAX_EXTRACT_ENTRIES, MAX_DIRECTORY_BYTES).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::FileTooLarge {
+            AppError::bad_request(format!("This ZIP file holds more than {MAX_EXTRACT_ENTRIES} items, more than can be extracted at once"))
+        } else {
+            damaged()
+        }
+    })?;
+    let entries = match paths {
+        Some(paths) => browse::chosen(entries, paths)?,
+        None => entries,
+    };
+    plan_entries(entries, size)
+}
+
+async fn extract_into(
+    st: &AppState,
+    user: &User,
+    progress: &Tracker,
+    zip: &Node,
+    parent_id: &str,
+    archive: &std::path::Path,
+    paths: Option<Vec<String>>,
+) -> AppResult<(String, String)> {
     let path = archive.to_path_buf();
-    let (plan, total) = tokio::task::spawn_blocking(move || -> AppResult<_> {
-        let mut file = std::io::BufReader::new(std::fs::File::open(&path)?);
-        let size = file.get_ref().metadata()?.len();
-        let entries = crate::zip::read_entries(&mut file, MAX_EXTRACT_ENTRIES, MAX_DIRECTORY_BYTES).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::FileTooLarge {
-                AppError::bad_request(format!("This ZIP file holds more than {MAX_EXTRACT_ENTRIES} items, more than can be extracted at once"))
-            } else {
-                damaged()
-            }
-        })?;
-        plan_entries(entries, size)
-    })
-    .await??;
+    let (plan, total) = tokio::task::spawn_blocking(move || read_plan(&path, paths.as_deref())).await??;
     progress.set_total(total);
     let parent = tree::folder_for(&mut *st.db.acquire().await?, user, parent_id, Need::Add).await?;
     let drive = parent.drive().to_string();
@@ -719,7 +749,7 @@ mod tests {
     }
 
     async fn extract_now(env: &testutil::TestEnv, user: &User, id: &str) -> AppResult<Job> {
-        let Json(job) = extract(State(env.st.clone()), user.clone(), Json(ExtractReq { id: id.into() })).await?;
+        let Json(job) = extract(State(env.st.clone()), user.clone(), Json(ExtractReq { id: id.into(), paths: None, version: None })).await?;
         Ok(wait(env, &job.id).await)
     }
 

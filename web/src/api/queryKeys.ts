@@ -49,6 +49,8 @@ export const keys = {
   /** A folder's items page by page, in an order */
   childrenPages: (id: string | undefined, sort: SortKey, order: SortOrder) => ["children", id, sort, order],
   /** A folder's items a part at a time (lib/windows.ts adds where each part starts) */
+  /** What a ZIP file holds; `updated` is its time of change, so a newer content is listed again */
+  archive: (id: string, updated: number) => ["archive", id, updated],
   childrenAt: (id: string | undefined, sort: SortKey, order: SortOrder) => ["children", id, sort, order, "at"],
   /** The folders in a folder (the navigation pane and folder pickers) */
   folders: (id: string | null | undefined) => ["children", id, "folders"],

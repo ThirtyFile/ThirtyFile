@@ -1127,6 +1127,13 @@ export default {
   "This ZIP file holds more than {size} once extracted, more than can be extracted here": "此 ZIP 文件解压缩后超过 {size}，超出此处可解压缩的上限",
   "This ZIP file would grow far more than ordinary files do when extracted, so it isn't extracted": "此 ZIP 文件解压缩后会比普通文件膨胀得多，因此不予解压缩",
   "This ZIP file is damaged and can't be extracted": "此 ZIP 文件已损坏，无法解压缩",
+  "Only ZIP files can be opened this way": "只有 ZIP 文件可以这样打开",
+  "The ZIP file has changed. Open it again.": "ZIP 文件已更改，请重新打开。",
+  "This ZIP file is damaged and can't be opened": "这个 ZIP 文件已损坏，无法打开",
+  "This ZIP file holds more than {n} items, more than can be shown": "这个 ZIP 文件包含超过 {n} 个项目，超出可显示的数量",
+  "This file is protected with a password, which isn't supported": "这个文件受密码保护，目前不支持",
+  "This file is compressed in a way that isn't supported": "这个文件使用了不支持的压缩方式",
+  "The selected items aren't in this ZIP file": "所选项目不在这个 ZIP 文件中",
   "This ZIP file holds more than {n} items, more than can be extracted at once": "此 ZIP 文件包含超过 {n} 个项目，超出一次可解压缩的数量",
   "A path in this ZIP file goes more than {n} folders deep, more than can be extracted": "此 ZIP 文件中有路径超过 {n} 层文件夹，无法解压缩",
   // Notifications and the email server (notify.rs, mail.rs)
